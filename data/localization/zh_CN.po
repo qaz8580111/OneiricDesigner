@@ -1,0 +1,123 @@
+# 中文翻译文件
+msgid ""
+msgstr ""
+"Project-Id-Version: UnknowWorld\n"
+"Language: zh_CN\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# 主菜单
+msgid "MENU_TITLE"
+msgstr "未知世界"
+
+msgid "MENU_SUBTITLE"
+msgstr "随机生成类游戏"
+
+msgid "BUTTON_START_GAME"
+msgstr "开始游戏"
+
+msgid "BUTTON_SETTINGS"
+msgstr "设置"
+
+msgid "BUTTON_QUIT_GAME"
+msgstr "退出游戏"
+
+msgid "VERSION"
+msgstr "版本"
+
+# 设置菜单
+msgid "SETTINGS_TITLE"
+msgstr "设置"
+
+msgid "TAB_GAMEPLAY"
+msgstr "游戏性"
+
+msgid "TAB_AUDIO"
+msgstr "音频"
+
+msgid "TAB_VIDEO"
+msgstr "视频"
+
+msgid "TAB_LANGUAGE"
+msgstr "语言"
+
+msgid "GAMEPLAY_DIFFICULTY"
+msgstr "难度"
+
+msgid "GAMEPLAY_SHOW_FPS"
+msgstr "显示FPS计数器"
+
+msgid "AUDIO_MASTER_VOLUME"
+msgstr "主音量"
+
+msgid "AUDIO_MUSIC_VOLUME"
+msgstr "音乐音量"
+
+msgid "AUDIO_SFX_VOLUME"
+msgstr "音效音量"
+
+msgid "VIDEO_RESOLUTION"
+msgstr "分辨率"
+
+msgid "VIDEO_FULLSCREEN"
+msgstr "全屏"
+
+msgid "VIDEO_VSYNC"
+msgstr "垂直同步"
+
+msgid "BUTTON_BACK"
+msgstr "返回"
+
+msgid "BUTTON_RESET"
+msgstr "重置为默认"
+
+msgid "BUTTON_APPLY"
+msgstr "应用"
+
+# 难度选项
+msgid "DIFFICULTY_EASY"
+msgstr "简单"
+
+msgid "DIFFICULTY_NORMAL"
+msgstr "普通"
+
+msgid "DIFFICULTY_HARD"
+msgstr "困难"
+
+msgid "DIFFICULTY_EXPERT"
+msgstr "专家"
+
+# 暂停菜单
+msgid "PAUSED_TITLE"
+msgstr "暂停"
+
+msgid "BUTTON_RESUME"
+msgstr "继续游戏"
+
+msgid "BUTTON_QUIT_TO_MENU"
+msgstr "返回主菜单"
+
+# 游戏信息
+msgid "GAME_SEED"
+msgstr "种子"
+
+msgid "GAME_MODS"
+msgstr "模组"
+
+msgid "GAME_EVENTS"
+msgstr "事件"
+
+# 事件
+msgid "EVENT_TRIGGERED"
+msgstr "事件触发"
+
+msgid "EVENT_HEAL"
+msgstr "治疗"
+
+msgid "EVENT_DAMAGE"
+msgstr "伤害"
+
+msgid "EVENT_TREASURE"
+msgstr "发现宝藏"
+
+msgid "EVENT_TRAP"
+msgstr "触发陷阱"

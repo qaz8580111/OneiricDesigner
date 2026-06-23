@@ -1,0 +1,123 @@
+# English Translation File
+msgid ""
+msgstr ""
+"Project-Id-Version: UnknowWorld\n"
+"Language: en_US\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# Main Menu
+msgid "MENU_TITLE"
+msgstr "UnknowWorld"
+
+msgid "MENU_SUBTITLE"
+msgstr "Procedural Roguelike"
+
+msgid "BUTTON_START_GAME"
+msgstr "Start Game"
+
+msgid "BUTTON_SETTINGS"
+msgstr "Settings"
+
+msgid "BUTTON_QUIT_GAME"
+msgstr "Quit Game"
+
+msgid "VERSION"
+msgstr "Version"
+
+# Settings Menu
+msgid "SETTINGS_TITLE"
+msgstr "Settings"
+
+msgid "TAB_GAMEPLAY"
+msgstr "Gameplay"
+
+msgid "TAB_AUDIO"
+msgstr "Audio"
+
+msgid "TAB_VIDEO"
+msgstr "Video"
+
+msgid "TAB_LANGUAGE"
+msgstr "Language"
+
+msgid "GAMEPLAY_DIFFICULTY"
+msgstr "Difficulty"
+
+msgid "GAMEPLAY_SHOW_FPS"
+msgstr "Show FPS Counter"
+
+msgid "AUDIO_MASTER_VOLUME"
+msgstr "Master Volume"
+
+msgid "AUDIO_MUSIC_VOLUME"
+msgstr "Music Volume"
+
+msgid "AUDIO_SFX_VOLUME"
+msgstr "SFX Volume"
+
+msgid "VIDEO_RESOLUTION"
+msgstr "Resolution"
+
+msgid "VIDEO_FULLSCREEN"
+msgstr "Fullscreen"
+
+msgid "VIDEO_VSYNC"
+msgstr "V-Sync"
+
+msgid "BUTTON_BACK"
+msgstr "Back"
+
+msgid "BUTTON_RESET"
+msgstr "Reset to Default"
+
+msgid "BUTTON_APPLY"
+msgstr "Apply"
+
+# Difficulty Options
+msgid "DIFFICULTY_EASY"
+msgstr "Easy"
+
+msgid "DIFFICULTY_NORMAL"
+msgstr "Normal"
+
+msgid "DIFFICULTY_HARD"
+msgstr "Hard"
+
+msgid "DIFFICULTY_EXPERT"
+msgstr "Expert"
+
+# Pause Menu
+msgid "PAUSED_TITLE"
+msgstr "Paused"
+
+msgid "BUTTON_RESUME"
+msgstr "Resume Game"
+
+msgid "BUTTON_QUIT_TO_MENU"
+msgstr "Quit to Menu"
+
+# Game Info
+msgid "GAME_SEED"
+msgstr "Seed"
+
+msgid "GAME_MODS"
+msgstr "Mods"
+
+msgid "GAME_EVENTS"
+msgstr "Events"
+
+# Events
+msgid "EVENT_TRIGGERED"
+msgstr "Event Triggered"
+
+msgid "EVENT_HEAL"
+msgstr "Healing"
+
+msgid "EVENT_DAMAGE"
+msgstr "Damage"
+
+msgid "EVENT_TREASURE"
+msgstr "Treasure Found"
+
+msgid "EVENT_TRAP"
+msgstr "Trap Triggered"

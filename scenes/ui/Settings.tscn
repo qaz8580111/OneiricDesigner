@@ -1,0 +1,217 @@
+[gd_scene load_steps=2 format=3 uid="uid://bsettings"]
+
+[ext_resource type="Script" path="res://scripts/ui/Settings.gd" id="1_settings"]
+
+[node name="Settings" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_settings")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.1, 0.12, 0.2, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Title" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "Settings"
+horizontal_alignment = 1
+theme_type_variation = &"HeaderMedium"
+theme_override_font_sizes/font_size = 48
+
+[node name="TabContainer" type="TabContainer" parent="VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Gameplay" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
+layout_mode = 2
+
+[node name="GameplayTitle" type="Label" parent="VBoxContainer/TabContainer/Gameplay"]
+layout_mode = 2
+text = "Gameplay Settings"
+theme_type_variation = &"HeaderSmall"
+
+[node name="DifficultyHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
+layout_mode = 2
+
+[node name="DifficultyLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/DifficultyHBox"]
+layout_mode = 2
+text = "Difficulty:"
+
+[node name="DifficultyOption" type="OptionButton" parent="VBoxContainer/TabContainer/Gameplay/DifficultyHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="FPSHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
+layout_mode = 2
+
+[node name="FPSLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/FPSHBox"]
+layout_mode = 2
+text = "Show FPS Counter:"
+
+[node name="FPSCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Gameplay/FPSHBox"]
+layout_mode = 2
+
+[node name="Audio" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
+layout_mode = 2
+
+[node name="AudioTitle" type="Label" parent="VBoxContainer/TabContainer/Audio"]
+layout_mode = 2
+text = "Audio Settings"
+theme_type_variation = &"HeaderSmall"
+
+[node name="MasterHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
+layout_mode = 2
+
+[node name="MasterLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/MasterHBox"]
+layout_mode = 2
+text = "Master Volume:"
+
+[node name="MasterSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/MasterHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 100.0
+value = 80.0
+tick_count = 11
+ticks_on_borders = true
+
+[node name="MasterValue" type="Label" parent="VBoxContainer/TabContainer/Audio/MasterHBox"]
+layout_mode = 2
+text = "80"
+custom_minimum_size = Vector2(40, 0)
+
+[node name="MusicHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
+layout_mode = 2
+
+[node name="MusicLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/MusicHBox"]
+layout_mode = 2
+text = "Music Volume:"
+
+[node name="MusicSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/MusicHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 100.0
+value = 70.0
+tick_count = 11
+ticks_on_borders = true
+
+[node name="MusicValue" type="Label" parent="VBoxContainer/TabContainer/Audio/MusicHBox"]
+layout_mode = 2
+text = "70"
+custom_minimum_size = Vector2(40, 0)
+
+[node name="SFXHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
+layout_mode = 2
+
+[node name="SFXLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/SFXHBox"]
+layout_mode = 2
+text = "SFX Volume:"
+
+[node name="SFXSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/SFXHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 100.0
+value = 90.0
+tick_count = 11
+ticks_on_borders = true
+
+[node name="SFXValue" type="Label" parent="VBoxContainer/TabContainer/Audio/SFXHBox"]
+layout_mode = 2
+text = "90"
+custom_minimum_size = Vector2(40, 0)
+
+[node name="Video" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
+layout_mode = 2
+
+[node name="VideoTitle" type="Label" parent="VBoxContainer/TabContainer/Video"]
+layout_mode = 2
+text = "Video Settings"
+theme_type_variation = &"HeaderSmall"
+
+[node name="ResolutionHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
+layout_mode = 2
+
+[node name="ResolutionLabel" type="Label" parent="VBoxContainer/TabContainer/Video/ResolutionHBox"]
+layout_mode = 2
+text = "Resolution:"
+
+[node name="ResolutionOption" type="OptionButton" parent="VBoxContainer/TabContainer/Video/ResolutionHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="FullscreenHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
+layout_mode = 2
+
+[node name="FullscreenLabel" type="Label" parent="VBoxContainer/TabContainer/Video/FullscreenHBox"]
+layout_mode = 2
+text = "Fullscreen:"
+
+[node name="FullscreenCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Video/FullscreenHBox"]
+layout_mode = 2
+
+[node name="VSyncHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
+layout_mode = 2
+
+[node name="VSyncLabel" type="Label" parent="VBoxContainer/TabContainer/Video/VSyncHBox"]
+layout_mode = 2
+text = "V-Sync:"
+
+[node name="VSyncCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Video/VSyncHBox"]
+layout_mode = 2
+pressed = true
+
+[node name="Language" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
+layout_mode = 2
+
+[node name="LanguageTitle" type="Label" parent="VBoxContainer/TabContainer/Language"]
+layout_mode = 2
+text = "Language Settings"
+theme_type_variation = &"HeaderSmall"
+
+[node name="LanguageHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Language"]
+layout_mode = 2
+
+[node name="LanguageLabel" type="Label" parent="VBoxContainer/TabContainer/Language/LanguageHBox"]
+layout_mode = 2
+text = "Language:"
+
+[node name="LanguageOption" type="OptionButton" parent="VBoxContainer/TabContainer/Language/LanguageHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ButtonContainer" type="HBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="BackButton" type="Button" parent="VBoxContainer/ButtonContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Back"
+
+[node name="ResetButton" type="Button" parent="VBoxContainer/ButtonContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reset to Default"
+
+[node name="ApplyButton" type="Button" parent="VBoxContainer/ButtonContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Apply"
