@@ -11,8 +11,8 @@ signal quit_game()
 @onready var quit_button: Button = $VBoxContainer/QuitButton
 @onready var version_label: Label = $VBoxContainer/VersionLabel
 
-# 菜单导航器实例
-var _navigator: MenuNavigator = MenuNavigator.new()
+var MENU_NAVIGATOR_SCRIPT: Script = load("res://scripts/autoload/MenuController.gd")
+var _navigator: Node = null
 
 func _ready() -> void:
 	_update_text()
@@ -22,13 +22,17 @@ func _ready() -> void:
 	TranslationManager.language_changed.connect(_on_language_changed)
 
 	# 添加导航器为子节点
-	add_child(_navigator)
-	# 主菜单中B键无特殊操作（已在Main.gd的_process中处理ui_cancel）
-	await get_tree().process_frame
-	_navigator.activate(self)
+	if MENU_NAVIGATOR_SCRIPT != null:
+		_navigator = MENU_NAVIGATOR_SCRIPT.new()
+		add_child(_navigator)
+		await get_tree().process_frame
+		_navigator.activate(self)
+	else:
+		print("MenuNavigator script not found!")
 
 func _exit_tree() -> void:
-	_navigator.deactivate()
+	if _navigator != null:
+		_navigator.deactivate()
 
 func _update_text() -> void:
 	title_label.text = TranslationManager.t("MENU_TITLE")

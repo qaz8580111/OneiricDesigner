@@ -10,7 +10,8 @@ signal quit_to_menu()
 @onready var quit_button: Button = $VBoxContainer/QuitButton
 
 # 菜单导航器实例
-var _navigator: MenuNavigator = MenuNavigator.new()
+var MENU_NAVIGATOR_SCRIPT: Script = load("res://scripts/autoload/MenuController.gd")
+var _navigator: Node = null
 
 func _ready() -> void:
 	_update_text()
@@ -20,15 +21,18 @@ func _ready() -> void:
 	TranslationManager.language_changed.connect(_on_language_changed)
 
 	# 添加导航器为子节点
-	add_child(_navigator)
-	# B键返回 = 继续游戏
-	_navigator.cancel_pressed.connect(_on_resume_button_pressed)
-	# 延迟一帧激活导航（等待UI布局完成）
-	await get_tree().process_frame
-	_navigator.activate(self)
+	if MENU_NAVIGATOR_SCRIPT != null:
+		_navigator = MENU_NAVIGATOR_SCRIPT.new()
+		add_child(_navigator)
+		_navigator.cancel_pressed.connect(_on_resume_button_pressed)
+		await get_tree().process_frame
+		_navigator.activate(self)
+	else:
+		print("MenuNavigator script not found!")
 
 func _exit_tree() -> void:
-	_navigator.deactivate()
+	if _navigator != null:
+		_navigator.deactivate()
 
 func _update_text() -> void:
 	title_label.text = TranslationManager.t("PAUSED_TITLE")

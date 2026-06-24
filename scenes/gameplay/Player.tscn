@@ -13,3 +13,10 @@ modulate = Color(0, 0.5, 1, 1)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("CircleShape2D_1")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(0, 0)
+current = true
+smooth_enabled = true
+smooth_follow = true
+smooth_speed = 0.1

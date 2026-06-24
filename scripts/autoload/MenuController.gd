@@ -80,7 +80,7 @@ func _collect_focusable_controls(parent: Control) -> void:
 
 func _scan_children(node: Node) -> void:
 	for child in node.get_children():
-		if child is Button or child is OptionButton or child is TabContainer or child is CheckBox or child is HSlider:
+		if child is Button or child is OptionButton or child is CheckBox or child is HSlider:
 			if child.visible and not child.disabled:
 				focusable_controls.append(child as Control)
 		_scan_children(child)
@@ -214,9 +214,10 @@ func _process(delta: float) -> void:
 	if InputManager.current_device != "joypad":
 		return
 
-	# 使用 InputManager 内部已处理死区的摇杆数据
-	var joy_x: float = InputManager._cached_movement.x
-	var joy_y: float = InputManager._cached_movement.y
+	# 使用 InputManager 公共接口获取导航向量
+	var nav_vector: Vector2 = InputManager.get_navigation_vector()
+	var joy_x: float = nav_vector.x
+	var joy_y: float = nav_vector.y
 
 	var current_direction: Direction = -1
 

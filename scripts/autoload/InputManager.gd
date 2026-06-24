@@ -67,10 +67,14 @@ func _input(event: InputEvent) -> void:
 
 ## ==================== 公开接口 ====================
 
-## 获取移动向量（已处理死区+归一化）
+## 获取移动向量（已处理死区+归一化）- 游戏角色移动专用
 func get_movement() -> Vector2:
 	if not _is_context_active("GAMEPLAY"):
 		return Vector2.ZERO
+	return _cached_movement
+
+## 获取导航向量（已处理死区+归一化）- UI菜单导航专用
+func get_navigation_vector() -> Vector2:
 	return _cached_movement
 
 

@@ -19,7 +19,7 @@ enum LogLevel {
 const LOGS_DIR: String = "logs"
 const ENABLE_CONSOLE_PRINT: bool = true
 const MAX_LOG_FILE_SIZE_KB: int = 10240  # 10MB
-const LOG_TO_PROJECT_DIR: bool = true  # 输出日志到项目目录（而非 user://）
+const LOG_TO_PROJECT_DIR: bool = false  # 输出日志到 user:// 目录（避免 res:// 写入权限问题）
 
 ## 当前运行日志文件
 var _runtime_file: FileAccess = null
@@ -96,15 +96,8 @@ func _ensure_log_directories(date: String) -> bool:
 
 ## 创建目录（递归）
 func _make_directory(path: String) -> bool:
-	var dir = DirAccess.open(path.get_base_dir())
-	if dir == null:
-		return false
-	
-	var dir_name = path.get_file()
-	if not dir.dir_exists(dir_name):
-		if dir.make_dir(dir_name) != OK:
-			return false
-	return true
+	var absolute_path = ProjectSettings.globalize_path(path)
+	return DirAccess.make_dir_recursive_absolute(absolute_path) == OK
 
 ## 打开日志文件
 func _open_log_files(date: String) -> bool:

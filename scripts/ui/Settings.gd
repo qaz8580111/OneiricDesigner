@@ -40,7 +40,8 @@ var language_index: int = 0
 @onready var apply_button: Button
 
 # 菜单导航器实例
-var _navigator: MenuNavigator = MenuNavigator.new()
+var MENU_NAVIGATOR_SCRIPT: Script = load("res://scripts/autoload/MenuController.gd")
+var _navigator: Node = null
 
 var RESOLUTIONS: Array = ["1280x720", "1920x1080", "2560x1440", "3840x2160"]
 var DIFFICULTIES: Array = ["Easy", "Normal", "Hard", "Expert"]
@@ -54,14 +55,18 @@ func _ready() -> void:
 	_update_text()
 
 	# 添加导航器为子节点
-	add_child(_navigator)
-	# B键返回 = 返回上一级菜单
-	_navigator.cancel_pressed.connect(_on_back_button_pressed)
-	await get_tree().process_frame
-	_navigator.activate(self)
+	if MENU_NAVIGATOR_SCRIPT != null:
+		_navigator = MENU_NAVIGATOR_SCRIPT.new()
+		add_child(_navigator)
+		_navigator.cancel_pressed.connect(_on_back_button_pressed)
+		await get_tree().process_frame
+		_navigator.activate(self)
+	else:
+		print("MenuNavigator script not found!")
 
 func _exit_tree() -> void:
-	_navigator.deactivate()
+	if _navigator != null:
+		_navigator.deactivate()
 
 func _find_all_ui_elements() -> void:
 	title_label = $VBoxContainer/Title
