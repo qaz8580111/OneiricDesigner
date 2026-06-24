@@ -65,6 +65,11 @@ func _show_settings() -> void:
 	active_ui = SETTINGS_SCENE.instantiate()
 	active_ui.go_back.connect(_on_settings_back)
 	active_ui.settings_applied.connect(_on_settings_applied)
+
+	# 如果从暂停菜单打开设置，需要保持 ALWAYS 模式
+	if previous_screen == Screen.PAUSED:
+		active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+
 	ui_stack.add_child(active_ui)
 
 func _show_pause_menu() -> void:
@@ -74,8 +79,15 @@ func _show_pause_menu() -> void:
 	active_ui.resume_game.connect(_on_resume_game)
 	active_ui.open_settings.connect(_on_open_settings_from_pause)
 	active_ui.quit_to_menu.connect(_on_quit_to_menu)
+
+	# 暂停菜单必须在暂停状态下仍能处理输入
+	active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+
 	ui_stack.add_child(active_ui)
+	# 等待一帧确保菜单完全初始化后再暂停
+	await get_tree().process_frame
 	GameManager.pause_game()
+	print("Pause menu shown, game paused")
 
 func _start_game() -> void:
 	print("_start_game called")

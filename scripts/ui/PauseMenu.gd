@@ -1,5 +1,9 @@
 extends Control
 
+# 暂停菜单必须在暂停状态下仍能处理输入
+func _enter_tree() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+
 signal resume_game()
 signal open_settings()
 signal quit_to_menu()

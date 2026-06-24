@@ -1,5 +1,9 @@
 extends Control
 
+# 设置菜单可能在暂停状态下打开，需要 ALWAYS 模式
+func _enter_tree() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+
 signal go_back()
 signal settings_applied(settings: Dictionary)
 
