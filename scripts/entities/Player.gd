@@ -1,78 +1,89 @@
 extends CharacterBody2D
 
-signal health_changed(new_health: int, max_health: int)
-signal gold_changed(new_gold: int)
+@export var speed: float = 300.0
+@export var shoot_cooldown: float = 0.2
+@export var max_health: int = 100
 
-const SPEED: float = 300.0
+@onready var sprite: Sprite2D = $Sprite2D
+@onready var hitbox: Area2D = $Hitbox
 
 var health: int = 100
-var max_health: int = 100
-var gold: int = 0
+var level: int = 1
+var exp: int = 0
+var exp_to_next_level: int = 100
+
+var _shoot_timer: float = 0.0
+
+signal damaged(amount: int)
+signal killed()
+signal leveled_up(new_level: int)
+signal exp_gained(amount: int)
+signal shot(position: Vector2, direction: Vector2)
 
 func _ready() -> void:
-	EventSystem.event_triggered.connect(_on_event_triggered)
-	if Engine.has_singleton("Logger"):
-		var logger = Engine.get_singleton("Logger")
-		logger.debug_info("玩家角色初始化", "Player")
+	health = max_health
+	if hitbox:
+		hitbox.body_entered.connect(_on_hitbox_body_entered)
 
 func _physics_process(delta: float) -> void:
-	if not GameManager.is_playing():
-		return
-	
-	# 使用 InputManager 获取移动向量（已处理死区+归一化）
+	_move(delta)
+	_handle_shoot(delta)
+
+func _move(delta: float) -> void:
 	var input_dir: Vector2 = InputManager.get_movement()
 	
-	if input_dir.length() > 0.0:
-		velocity = input_dir * SPEED
-	else:
-		velocity = velocity.move_toward(Vector2.ZERO, SPEED * 4 * delta)
+	if input_dir != Vector2.ZERO:
+		input_dir = input_dir.normalized()
 	
+	velocity = input_dir * speed
 	move_and_slide()
 
-func _on_event_triggered(event_data: Dictionary) -> void:
-	if not event_data.has("effects"):
-		return
+func _handle_shoot(delta: float) -> void:
+	_shoot_timer -= delta
 	
-	var effects: Dictionary = event_data["effects"]
-	
-	if effects.has("heal"):
-		heal(effects["heal"])
-	
-	if effects.has("damage"):
-		take_damage(effects["damage"])
-	
-	if effects.has("gold"):
-		add_gold(effects["gold"])
+	if _shoot_timer <= 0.0 and InputManager.is_action_just_pressed_safe("game_shoot"):
+		_shoot()
+		_shoot_timer = shoot_cooldown
 
-func heal(amount: int) -> void:
-	health = clamp(health + amount, 0, max_health)
-	health_changed.emit(health, max_health)
-	if Engine.has_singleton("Logger"):
-		var logger = Engine.get_singleton("Logger")
-		logger.runtime_info("治疗: %d, 当前生命值: %d" % [amount, health], "Player")
-		logger.debug_info("治疗: %d, 当前生命值: %d" % [amount, health], "Player")
-	print("Healed: ", amount, ", Health: ", health)
+func _shoot() -> void:
+	var direction: Vector2 = Vector2.RIGHT
+	
+	var input_dir: Vector2 = InputManager.get_movement()
+	if input_dir != Vector2.ZERO:
+		direction = input_dir.normalized()
+	
+	shot.emit(position, direction)
 
 func take_damage(amount: int) -> void:
-	health = clamp(health - amount, 0, max_health)
-	health_changed.emit(health, max_health)
-	if Engine.has_singleton("Logger"):
-		var logger = Engine.get_singleton("Logger")
-		logger.runtime_info("受伤: %d, 当前生命值: %d" % [amount, health], "Player")
-		logger.debug_info("受伤: %d, 当前生命值: %d" % [amount, health], "Player")
-	print("Damaged: ", amount, ", Health: ", health)
+	health -= amount
+	damaged.emit(amount)
 	
 	if health <= 0:
-		GameManager.end_game()
+		health = 0
+		killed.emit()
 
-func add_gold(amount: int) -> void:
-	gold += amount
-	gold_changed.emit(gold)
-	if Engine.has_singleton("Logger"):
-		var logger = Engine.get_singleton("Logger")
-		logger.runtime_info("获得金币: %d, 当前金币: %d" % [amount, gold], "Player")
-		logger.debug_info("获得金币: %d, 当前金币: %d" % [amount, gold], "Player")
-	print("Gold: ", gold)
+func heal(amount: int) -> void:
+	health = min(health + amount, max_health)
 
-func _draw() -> void:
-	draw_circle(Vector2.ZERO, 20, Color(0, 0.5, 1))
+func add_exp(amount: int) -> void:
+	exp += amount
+	exp_gained.emit(amount)
+	
+	while exp >= exp_to_next_level:
+		exp -= exp_to_next_level
+		level_up()
+
+func level_up() -> void:
+	level += 1
+	exp_to_next_level = int(exp_to_next_level * 1.5)
+	max_health = int(max_health * 1.2)
+	health = max_health
+	speed = speed * 1.05
+	leveled_up.emit(level)
+
+func _on_hitbox_body_entered(body: Node2D) -> void:
+	if body.has_method("on_player_collision"):
+		body.on_player_collision(self)
+
+func get_exp_progress() -> float:
+	return float(exp) / float(exp_to_next_level)

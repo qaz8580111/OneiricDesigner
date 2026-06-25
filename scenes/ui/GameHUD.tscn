@@ -1,0 +1,41 @@
+[gd_scene load_steps=2 format=3 uid="uid://bhud"]
+
+[ext_resource type="Script" path="res://scripts/ui/GameHUD.gd" id="1"]
+
+[node name="GameHUD" type="Control"]
+script = ExtResource("1")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 0.0
+offset_bottom = 0.0
+
+[node name="HealthBar" type="ProgressBar" parent="."]
+position = Vector2(20, 20)
+size = Vector2(200, 20)
+max_value = 100.0
+value = 100.0
+tint_over = Color(1, 0.2, 0.2, 1)
+tint_under = Color(0.3, 0.3, 0.3, 0.5)
+
+[node name="ExpBar" type="ProgressBar" parent="."]
+position = Vector2(20, 50)
+size = Vector2(200, 15)
+max_value = 100.0
+value = 0.0
+tint_over = Color(0.2, 1, 0.5, 1)
+tint_under = Color(0.3, 0.3, 0.3, 0.5)
+
+[node name="LevelLabel" type="Label" parent="."]
+position = Vector2(230, 45)
+size = Vector2(60, 20)
+text = "Lv.1"
+custom_minimum_size = Vector2(60, 0)
+
+[node name="ScoreLabel" type="Label" parent="."]
+position = Vector2(20, 80)
+size = Vector2(150, 20)
+text = "Score: 0"
+custom_minimum_size = Vector2(150, 0)

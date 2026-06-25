@@ -1,7 +1,0 @@
-{
-  "name": "Example Mod",
-  "version": "1.0.0",
-  "author": "Developer",
-  "description": "An example mod showing how to add custom events",
-  "dependencies": []
-}
