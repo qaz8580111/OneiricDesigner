@@ -64,9 +64,11 @@ func _spawn_enemy() -> void:
 
 func _on_player_shot(position: Vector2, direction: Vector2) -> void:
 	var bullet: Area2D = BULLET_SCENE.instantiate()
-	bullet.position = position
-	bullet.set_direction(direction)
 	add_child(bullet)
+	bullet.global_position = position
+	bullet.set_direction(direction)
+	if bullet.has_method("add_ignore_body") and player:
+		bullet.add_ignore_body(player)
 	_bullets.append(bullet)
 	
 	bullet.hit.connect(_on_bullet_hit)

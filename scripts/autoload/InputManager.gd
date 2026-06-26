@@ -35,6 +35,9 @@ var _active_joypad_id: int = -1
 ## 缓存的移动向量（供 _process 轮询使用）
 var _cached_movement: Vector2 = Vector2.ZERO
 
+## 缓存的动作按下状态（_input 中捕获，_physics_process 中消费后清除）
+var _just_pressed_actions: Dictionary = {}
+
 ## 上一次检测到的设备类型（用于触发信号）
 var _last_detected_device: String = "keyboard"
 
@@ -60,6 +63,26 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	# 检测设备类型变化
 	_detect_device_from_event(event)
+	
+	# 缓存游戏相关动作的按下事件
+	if event.pressed and not event.echo:
+		# 检测鼠标左键射击
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+			if _is_action_allowed_in_context("game_shoot"):
+				_just_pressed_actions["game_shoot"] = true
+				return
+		
+		# 检查键盘/手柄游戏动作
+		var game_actions: Array[String] = [
+			"game_move_up", "game_move_down", "game_move_left", "game_move_right",
+			"game_shoot", "game_interact", "game_confirm", "game_cancel",
+			"game_advance", "game_skip",
+			"ui_cancel", "ui_confirm"
+		]
+		for action in game_actions:
+			if event.is_action_pressed(action):
+				if _is_action_allowed_in_context(action):
+					_just_pressed_actions[action] = true
 
 
 ## ==================== 公开接口 ====================
@@ -82,7 +105,12 @@ func is_action_just_pressed_safe(action: String) -> bool:
 	if not _is_action_allowed_in_context(action):
 		return false
 
-	return Input.is_action_just_pressed(action)
+	# 从 _input 事件缓存中读取（消费后清除）
+	if _just_pressed_actions.has(action) and _just_pressed_actions[action]:
+		_just_pressed_actions[action] = false
+		return true
+	
+	return false
 
 
 ## 安全检测动作持续按住
@@ -213,7 +241,7 @@ func _is_action_allowed_in_context(action: String) -> bool:
 
 	# 定义上下文允许的动作列表
 	var allowed_actions: Dictionary = {
-		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel"],
+		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot"],
 		"PAUSE_MENU": ["ui_", "game_interact"],
 		"SETTINGS": ["ui_"],
 		"EVENT_POPUP": ["game_confirm", "game_cancel"],

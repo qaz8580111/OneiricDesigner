@@ -53,13 +53,9 @@ func _handle_shoot(delta: float) -> void:
 		_shoot_timer = shoot_cooldown
 
 func _shoot() -> void:
-	var direction: Vector2 = Vector2.RIGHT
-	
-	var input_dir: Vector2 = InputManager.get_movement()
-	if input_dir != Vector2.ZERO:
-		direction = input_dir.normalized()
-	
-	shot.emit(position, direction)
+	var mouse_pos: Vector2 = get_global_mouse_position()
+	var direction: Vector2 = (mouse_pos - global_position).normalized()
+	shot.emit(global_position, direction)
 
 func take_damage(amount: int) -> void:
 	health -= amount

@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://scripts/entities/Bullet.gd" id="1"]
 
 [sub_resource type="RectangleShape2D" id="2"]
-size = Vector2(8, 8)
+size = Vector2(16, 16)
 
 [node name="Bullet" type="Area2D"]
 script = ExtResource("1")
@@ -12,7 +12,7 @@ script = ExtResource("1")
 offset = Vector2(0, 0)
 texture = null
 modulate = Color(0.2, 0.8, 1, 1)
-rect_size = Vector2(8, 8)
+rect_size = Vector2(16, 16)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("2")
