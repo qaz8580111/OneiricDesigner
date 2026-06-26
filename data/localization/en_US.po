@@ -1,13 +1,13 @@
 # English Translation File
 msgid ""
 msgstr ""
-"Project-Id-Version: UnknowWorld\n"
+"Project-Id-Version: OneiricDesigner\n"
 "Language: en_US\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 
 # Main Menu
 msgid "MENU_TITLE"
-msgstr "UnknowWorld"
+msgstr "OneiricDesigner"
 
 msgid "MENU_SUBTITLE"
 msgstr "Procedural Roguelike"

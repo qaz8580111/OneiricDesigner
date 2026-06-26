@@ -36,7 +36,7 @@ grow_vertical = 2
 
 [node name="Title" type="Label" parent="VBoxContainer"]
 layout_mode = 2
-text = "UnknowWorld"
+text = "OneiricDesigner"
 horizontal_alignment = 1
 vertical_alignment = 1
 theme_type_variation = &"HeaderMedium"
@@ -73,5 +73,5 @@ custom_minimum_size = Vector2(0, 30)
 
 [node name="VersionLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2
-text = "v1.0.0"
+text = "v1.0.1"
 horizontal_alignment = 1

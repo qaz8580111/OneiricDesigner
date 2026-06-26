@@ -70,6 +70,8 @@ func _show_pause_menu() -> void:
 func _start_game() -> void:
 	_clear_ui()
 	current_screen = Screen.GAME
+	# 强制重置输入上下文到 GAMEPLAY，避免菜单残留的 PAUSE_MENU 阻塞游戏输入
+	InputManager.reset_context("GAMEPLAY")
 	GameManager.start_new_game()
 
 func _spawn_game_elements() -> void:

@@ -81,7 +81,10 @@ func _collect_focusable_controls(parent: Control) -> void:
 func _scan_children(node: Node) -> void:
 	for child in node.get_children():
 		if child is Button or child is OptionButton or child is CheckBox or child is HSlider:
-			if child.visible and not child.disabled:
+			var is_disabled: bool = false
+			if child.has_method("is_disabled"):
+				is_disabled = child.is_disabled()
+			if child.visible and not is_disabled:
 				focusable_controls.append(child as Control)
 		_scan_children(child)
 

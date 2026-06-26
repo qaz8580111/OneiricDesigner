@@ -14,7 +14,6 @@ groups = PackedStringArray("player")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 modulate = Color(0, 0.5, 1, 1)
-rect_size = Vector2(40, 40)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("CircleShape2D_1")

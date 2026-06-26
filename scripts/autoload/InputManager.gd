@@ -51,13 +51,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	# 更新输入屏蔽计时器
 	if _input_cooldown_timer > 0.0:
 		_input_cooldown_timer -= delta
 
-	# 缓存移动向量（GAMEPLAY 上下文 或 UI 导航上下文都需要）
-	if _is_context_active("GAMEPLAY") or _is_context_active("PAUSE_MENU") or _is_context_active("SETTINGS"):
-		_cache_movement_input()
+	_cache_movement_input()
 
 
 func _input(event: InputEvent) -> void:
@@ -69,8 +66,6 @@ func _input(event: InputEvent) -> void:
 
 ## 获取移动向量（已处理死区+归一化）- 游戏角色移动专用
 func get_movement() -> Vector2:
-	if not _is_context_active("GAMEPLAY"):
-		return Vector2.ZERO
 	return _cached_movement
 
 ## 获取导航向量（已处理死区+归一化）- UI菜单导航专用
@@ -138,6 +133,12 @@ func pop_context() -> void:
 		_input_cooldown_timer = INPUT_COOLDOWN
 
 
+## 强制重置上下文栈（用于跨场景切换时清理残留上下文）
+func reset_context(context_name: String) -> void:
+	_context_stack = [context_name]
+	_input_cooldown_timer = INPUT_COOLDOWN
+
+
 ## 获取当前上下文名称
 func get_current_context() -> String:
 	return _context_stack.back()
@@ -203,18 +204,7 @@ func _cache_movement_input() -> void:
 	var input_x: float = Input.get_axis("game_move_left", "game_move_right")
 	var input_y: float = Input.get_axis("game_move_up", "game_move_down")
 
-	# 应用死区过滤
-	if abs(input_x) < JOYSTICK_DEADZONE:
-		input_x = 0.0
-	if abs(input_y) < JOYSTICK_DEADZONE:
-		input_y = 0.0
-
-	# 归一化向量（避免斜向移动速度过快）
-	var raw_vector: Vector2 = Vector2(input_x, input_y)
-	if raw_vector.length() > 1.0:
-		raw_vector = raw_vector.normalized()
-
-	_cached_movement = raw_vector
+	_cached_movement = Vector2(input_x, input_y)
 
 
 ## 检查动作是否在当前上下文允许

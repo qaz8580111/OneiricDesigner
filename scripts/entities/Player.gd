@@ -22,8 +22,15 @@ signal shot(position: Vector2, direction: Vector2)
 
 func _ready() -> void:
 	health = max_health
+	_create_placeholder_texture(sprite, Color(0, 0.5, 1, 1), 40, 40)
 	if hitbox:
 		hitbox.body_entered.connect(_on_hitbox_body_entered)
+
+func _create_placeholder_texture(sprite_node: Sprite2D, color: Color, width: int, height: int) -> void:
+	var image: Image = Image.create(width, height, false, Image.FORMAT_RGBA8)
+	image.fill(color)
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	sprite_node.texture = texture
 
 func _physics_process(delta: float) -> void:
 	_move(delta)

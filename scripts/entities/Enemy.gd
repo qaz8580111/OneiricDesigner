@@ -16,8 +16,15 @@ signal damaged(amount: int)
 
 func _ready() -> void:
 	_max_health = health
+	_create_placeholder_texture(sprite, Color(1, 0.2, 0.2, 1), 30, 30)
 	if hitbox:
 		hitbox.body_entered.connect(_on_hitbox_body_entered)
+
+func _create_placeholder_texture(sprite_node: Sprite2D, color: Color, width: int, height: int) -> void:
+	var image: Image = Image.create(width, height, false, Image.FORMAT_RGBA8)
+	image.fill(color)
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	sprite_node.texture = texture
 
 func _physics_process(delta: float) -> void:
 	if _player == null:

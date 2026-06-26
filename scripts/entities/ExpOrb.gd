@@ -4,7 +4,7 @@ extends Area2D
 @export var speed: float = 100.0
 @export var lifetime: float = 5.0
 
-@onready var sprite: Sprite2D = %Sprite2D
+@onready var sprite: Sprite2D = $Sprite2D
 
 var _target: Node2D = null
 var _lifetime_timer: float = 0.0
@@ -14,7 +14,14 @@ signal collected(amount: int)
 
 func _ready() -> void:
 	_lifetime_timer = lifetime
+	_create_placeholder_texture(sprite, Color(0.2, 1, 0.5, 1), 20, 20)
 	body_entered.connect(_on_body_entered)
+
+func _create_placeholder_texture(sprite_node: Sprite2D, color: Color, width: int, height: int) -> void:
+	var image: Image = Image.create(width, height, false, Image.FORMAT_RGBA8)
+	image.fill(color)
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	sprite_node.texture = texture
 
 func _physics_process(delta: float) -> void:
 	_lifetime_timer -= delta
