@@ -48,7 +48,8 @@ func _move(delta: float) -> void:
 func _handle_shoot(delta: float) -> void:
 	_shoot_timer -= delta
 	
-	if _shoot_timer <= 0.0 and InputManager.is_action_just_pressed_safe("game_shoot"):
+	# 使用 is_action_pressed_safe 检测持续按住，配合冷却时间实现连续射击
+	if _shoot_timer <= 0.0 and InputManager.is_action_pressed_safe("game_shoot"):
 		_shoot()
 		_shoot_timer = shoot_cooldown
 

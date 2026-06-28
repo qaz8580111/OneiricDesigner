@@ -38,6 +38,9 @@ var _cached_movement: Vector2 = Vector2.ZERO
 ## 缓存的动作按下状态（_input 中捕获，_physics_process 中消费后清除）
 var _just_pressed_actions: Dictionary = {}
 
+## 缓存的鼠标左键按住状态
+var _mouse_left_pressed: bool = false
+
 ## 上一次检测到的设备类型（用于触发信号）
 var _last_detected_device: String = "keyboard"
 
@@ -64,14 +67,24 @@ func _input(event: InputEvent) -> void:
 	# 检测设备类型变化
 	_detect_device_from_event(event)
 	
-	# 缓存游戏相关动作的按下事件
-	if event.pressed and not event.echo:
-		# 检测鼠标左键射击
-		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+	# 处理鼠标左键状态跟踪
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		_mouse_left_pressed = event.pressed
+		if event.pressed:
 			if _is_action_allowed_in_context("game_shoot"):
 				_just_pressed_actions["game_shoot"] = true
-				return
-		
+		return
+	
+	# 缓存游戏相关动作的按下事件
+	# 注意：不是所有 InputEvent 都有 pressed 和 echo 属性
+	# InputEventMouseMotion、InputEventJoypadMotion 等事件没有这些属性，直接跳过
+	if not ('pressed' in event):
+		return
+	
+	var is_pressed: bool = event.pressed
+	var is_echo: bool = 'echo' in event and event.echo
+	
+	if is_pressed and not is_echo:
 		# 检查键盘/手柄游戏动作
 		var game_actions: Array[String] = [
 			"game_move_up", "game_move_down", "game_move_left", "game_move_right",
@@ -80,6 +93,9 @@ func _input(event: InputEvent) -> void:
 			"ui_cancel", "ui_confirm"
 		]
 		for action in game_actions:
+			# 先检查动作是否存在于 InputMap 中，避免报错
+			if not InputMap.has_action(action):
+				continue
 			if event.is_action_pressed(action):
 				if _is_action_allowed_in_context(action):
 					_just_pressed_actions[action] = true
@@ -119,6 +135,19 @@ func is_action_pressed_safe(action: String) -> bool:
 		return false
 
 	if not _is_action_allowed_in_context(action):
+		return false
+
+	# 特殊处理 game_shoot：同时支持鼠标左键和键盘/手柄
+	if action == "game_shoot":
+		# 检查鼠标左键是否按住
+		if _mouse_left_pressed:
+			return true
+		# 检查键盘/手柄输入
+		if InputMap.has_action(action) and Input.is_action_pressed(action):
+			return true
+		return false
+
+	if not InputMap.has_action(action):
 		return false
 
 	return Input.is_action_pressed(action)
@@ -229,8 +258,14 @@ func _update_device_type(device: String) -> void:
 
 ## 缓存移动输入向量
 func _cache_movement_input() -> void:
-	var input_x: float = Input.get_axis("game_move_left", "game_move_right")
-	var input_y: float = Input.get_axis("game_move_up", "game_move_down")
+	# 安全获取轴输入，确保动作存在
+	var input_x: float = 0.0
+	var input_y: float = 0.0
+	
+	if InputMap.has_action("game_move_left") and InputMap.has_action("game_move_right"):
+		input_x = Input.get_axis("game_move_left", "game_move_right")
+	if InputMap.has_action("game_move_up") and InputMap.has_action("game_move_down"):
+		input_y = Input.get_axis("game_move_up", "game_move_down")
 
 	_cached_movement = Vector2(input_x, input_y)
 
