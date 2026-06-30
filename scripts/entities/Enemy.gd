@@ -1,19 +1,22 @@
 extends CharacterBody2D
 
-## 敌人移动速度
+## 预加载敌人数据资源类型
+const EnemyDataClass = preload("res://scripts/resources/enemy/EnemyData.gd")
+
+## 敌人数据资源（包含经验、掉落等配置）
+@export var enemy_data: EnemyDataClass = null
+
+## 敌人移动速度（若未配置 enemy_data，使用此值）
 @export var speed: float = 100.0
 
-## 敌人最大血量（默认 5，配合子弹默认伤害 1，需命中 5 次）
+## 敌人最大血量（若未配置 enemy_data，使用此值）
 @export var max_health: int = 5
 
 ## 当前血量，运行时会自动初始化为 max_health
 @export var health: int = 5
 
-## 敌人对玩家造成的碰撞伤害
+## 敌人对玩家造成的碰撞伤害（若未配置 enemy_data，使用此值）
 @export var damage: int = 10
-
-## 死亡时掉落经验值
-@export var exp_reward: int = 20
 
 @onready var sprite: Sprite2D = $Sprite2D
 @onready var hitbox: Area2D = $Hitbox
@@ -24,16 +27,31 @@ var _player: CharacterBody2D = null
 ## 原始颜色（用于受击闪烁后恢复）
 var _original_color: Color = Color.WHITE
 
-signal killed()
+signal killed(exp_reward: int)
 signal damaged(amount: int)
 
 
 func _ready() -> void:
+	# 如果配置了 enemy_data，应用配置到敌人参数
+	if enemy_data != null:
+		enemy_data.apply_to_enemy(self)
+	
 	# 确保当前血量不超过最大血量
 	health = max_health
-	_create_placeholder_texture(sprite, Color(1, 0.2, 0.2, 1), 30, 30)
+	
+	# 根据 enemy_data 或默认值创建占位纹理
+	var color: Color = Color(1, 0.2, 0.2, 1)
+	var width: int = 30
+	var height: int = 30
+	if enemy_data != null:
+		color = enemy_data.placeholder_color
+		width = int(enemy_data.placeholder_size.x)
+		height = int(enemy_data.placeholder_size.y)
+	_create_placeholder_texture(sprite, color, width, height)
+	
 	# 保存原始颜色，用于受击闪烁后恢复
 	_original_color = sprite.modulate
+	
 	if hitbox:
 		hitbox.body_entered.connect(_on_hitbox_body_entered)
 
@@ -100,7 +118,23 @@ func _flash_hit() -> void:
 
 ## 敌人死亡
 func _die() -> void:
-	killed.emit()
+	# 获取经验奖励（优先从 enemy_data 获取）
+	var exp_reward: int = 20
+	if enemy_data != null:
+		exp_reward = enemy_data.get_final_exp_reward()
+	
+	# 如果存在玩家，直接给予经验和掉落道具
+	if _player != null:
+		# 直接加经验
+		if _player.has_method("add_exp"):
+			_player.add_exp(exp_reward)
+		
+		# 生成并应用掉落道具
+		if enemy_data != null:
+			enemy_data.generate_drops(_player)
+	
+	# 发出死亡信号，传递经验奖励（供 GameWorld 统计）
+	killed.emit(exp_reward)
 	queue_free()
 
 

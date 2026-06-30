@@ -1,7 +1,6 @@
 extends Node2D
 
 ## 预加载子弹数据类型，避免 Godot 全局类注册延迟导致运行时找不到类型
-## 注意：预加载的脚本 const 不应标注为 Script 类型，否则无法调用 new()/duplicate()
 const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
 ## 敌人生成间隔（秒）
@@ -14,7 +13,6 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
 var BULLET_SCENE: PackedScene = preload("res://scenes/gameplay/Bullet.tscn")
 var ENEMY_SCENE: PackedScene = preload("res://scenes/gameplay/Enemy.tscn")
-var EXP_ORB_SCENE: PackedScene = preload("res://scenes/gameplay/ExpOrb.tscn")
 
 ## 默认子弹数据（可在编辑器中覆盖，方便调试和后续升级系统）
 @export var default_bullet_data: BulletDataClass = null
@@ -28,7 +26,6 @@ signal game_over()
 
 
 func _ready() -> void:
-	# 如果没有配置默认子弹数据，创建一个默认数据
 	if default_bullet_data == null:
 		default_bullet_data = BulletDataClass.new()
 	_find_player()
@@ -89,7 +86,6 @@ func _on_player_shot(position: Vector2, direction: Vector2) -> void:
 	add_child(bullet)
 	bullet.global_position = position
 
-	# 传入子弹数据资源（拷贝一份，避免共享数据被修改）
 	var bullet_data: BulletDataClass = default_bullet_data.duplicate()
 	if bullet.has_method("set_bullet_data"):
 		bullet.set_bullet_data(bullet_data)
@@ -108,7 +104,6 @@ func _on_bullet_hit(bullet: Area2D, target: Node2D) -> void:
 	if not target.has_method("take_damage"):
 		return
 
-	# 从命中的子弹读取实际伤害值（支持后续升级/词条系统）
 	var damage: int = 1
 	if bullet != null and bullet.has_method("get_bullet_data"):
 		var bullet_data: BulletDataClass = bullet.get_bullet_data()
@@ -125,31 +120,12 @@ func _on_bullet_destroyed(bullet: Area2D) -> void:
 
 
 ## 敌人死亡时调用
-func _on_enemy_killed(enemy: CharacterBody2D) -> void:
+## [param _exp_reward] 经验奖励（已由敌人直接给予玩家，此处忽略）
+## [param enemy]       死亡的敌人实例（注意：bind参数在信号参数之后）
+func _on_enemy_killed(_exp_reward: int, enemy: CharacterBody2D) -> void:
 	if enemy in _enemies:
 		_enemies.erase(enemy)
 		_enemy_count -= 1
-
-		# 从敌人节点读取经验值奖励，若读取失败使用默认值 20
-		var exp_reward: int = 20
-		if "exp_reward" in enemy:
-			exp_reward = enemy.exp_reward
-
-		_spawn_exp_orb(enemy.position, exp_reward)
-
-
-func _spawn_exp_orb(position: Vector2, exp_amount: int) -> void:
-	var exp_orb: Area2D = EXP_ORB_SCENE.instantiate()
-	exp_orb.position = position
-	exp_orb.exp_amount = exp_amount
-	add_child(exp_orb)
-
-	exp_orb.collected.connect(_on_exp_collected)
-
-
-func _on_exp_collected(amount: int) -> void:
-	if player and player.has_method("add_exp"):
-		player.add_exp(amount)
 
 
 func _on_player_killed() -> void:
