@@ -3,7 +3,7 @@ extends Node2D
 enum Screen { MAIN_MENU, GAME, SETTINGS, PAUSED, GAME_OVER }
 
 var current_screen: Screen = Screen.MAIN_MENU
-var player: Node2D
+var player: CharacterBody2D
 var game_world: Node2D
 var active_ui: Control
 var previous_screen: Screen
@@ -78,7 +78,10 @@ func _spawn_game_elements() -> void:
 	game_world = WORLD_SCENE.instantiate()
 	game_world_container.add_child(game_world)
 
-	player = PLAYER_SCENE.instantiate()
+	player = PLAYER_SCENE.instantiate() as CharacterBody2D
+	if player == null:
+		push_error("Player 场景实例化失败或根节点不是 CharacterBody2D")
+		return
 	player.position = Vector2(get_viewport_rect().size.x / 2, get_viewport_rect().size.y / 2)
 	game_world_container.add_child(player)
 

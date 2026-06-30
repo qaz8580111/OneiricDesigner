@@ -1,4 +1,4 @@
-[gd_scene load_steps=3 format=3 uid="uid://bplayer"]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/entities/Player.gd" id="1_player"]
 
@@ -10,6 +10,8 @@ radius = 18.0
 
 [node name="Player" type="CharacterBody2D"]
 script = ExtResource("1_player")
+collision_layer = 1
+collision_mask = 1
 groups = PackedStringArray("player")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
