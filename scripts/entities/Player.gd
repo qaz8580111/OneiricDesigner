@@ -8,21 +8,23 @@ extends CharacterBody2D
 @onready var hitbox: Area2D = $Hitbox
 
 var health: int = 100
-var level: int = 1
-var exp: int = 0
-var exp_to_next_level: int = 100
+var dream_fragment: int = 0
 
 var _shoot_timer: float = 0.0
 
 signal damaged(amount: int)
 signal killed()
-signal leveled_up(new_level: int)
-signal exp_gained(amount: int)
 signal shot(position: Vector2, direction: Vector2)
+signal dream_fragment_changed(amount: int)
 
 func _ready() -> void:
 	health = max_health
+	dream_fragment = 0
 	_create_placeholder_texture(sprite, Color(0, 0.5, 1, 1), 40, 40)
+	
+	if not is_in_group("player"):
+		add_to_group("player")
+	
 	if hitbox:
 		hitbox.body_entered.connect(_on_hitbox_body_entered)
 
@@ -48,7 +50,6 @@ func _move(delta: float) -> void:
 func _handle_shoot(delta: float) -> void:
 	_shoot_timer -= delta
 	
-	# 使用 is_action_pressed_safe 检测持续按住，配合冷却时间实现连续射击
 	if _shoot_timer <= 0.0 and InputManager.is_action_pressed_safe("game_shoot"):
 		_shoot()
 		_shoot_timer = shoot_cooldown
@@ -69,25 +70,12 @@ func take_damage(amount: int) -> void:
 func heal(amount: int) -> void:
 	health = min(health + amount, max_health)
 
-func add_exp(amount: int) -> void:
-	exp += amount
-	exp_gained.emit(amount)
-	
-	while exp >= exp_to_next_level:
-		exp -= exp_to_next_level
-		level_up()
-
-func level_up() -> void:
-	level += 1
-	exp_to_next_level = int(exp_to_next_level * 1.5)
-	max_health = int(max_health * 1.2)
-	health = max_health
-	speed = speed * 1.05
-	leveled_up.emit(level)
+func add_dream_fragment(amount: int) -> void:
+	if amount <= 0:
+		return
+	dream_fragment += amount
+	dream_fragment_changed.emit(dream_fragment)
 
 func _on_hitbox_body_entered(body: Node2D) -> void:
 	if body.has_method("on_player_collision"):
 		body.on_player_collision(self)
-
-func get_exp_progress() -> float:
-	return float(exp) / float(exp_to_next_level)

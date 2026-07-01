@@ -22,7 +22,7 @@ OneiricDesigner/
 │   │   ├── Player.tscn    # 玩家角色
 │   │   ├── Enemy.tscn     # 敌人
 │   │   ├── Bullet.tscn    # 子弹
-│   │   ├── ExpOrb.tscn    # 经验球
+│   │   ├── PickUp.tscn    # 拾取物
 │   │   └── GameWorld.tscn # 游戏世界
 │   └── ui/                # UI 场景
 │       ├── MainMenu.tscn  # 主菜单
@@ -41,7 +41,7 @@ OneiricDesigner/
 │   │   ├── Player.gd     # 玩家控制器
 │   │   ├── Enemy.gd      # 敌人工智能
 │   │   ├── Bullet.gd     # 子弹逻辑
-│   │   ├── ExpOrb.gd     # 经验球
+│   │   ├── PickUp.gd     # 拾取物逻辑
 │   │   └── GameWorld.gd  # 游戏世界管理
 │   └── ui/               # UI 脚本
 │       ├── MainMenu.gd   # 主菜单
@@ -110,14 +110,7 @@ OneiricDesigner/
 1. 玩家移动躲避敌人
 2. 空格键发射子弹
 3. 子弹击中敌人造成伤害
-4. 敌人死亡掉落经验球
-5. 拾取经验球升级
-
-### 升级系统
-- 每次升级提升:
-  - 生命上限 (+20%)
-  - 移动速度 (+5%)
-  - 恢复满血
+4. 敌人死亡掉落道具（梦境碎片、回血等）
 
 ## 控制说明
 
@@ -150,8 +143,7 @@ OneiricDesigner/
 - [x] 敌人追踪 AI
 - [x] 子弹射击
 - [x] 碰撞检测
-- [x] 经验球拾取
-- [x] 升级系统
+- [x] 道具掉落与拾取系统
 - [x] 菜单导航
 - [x] 暂停功能
 

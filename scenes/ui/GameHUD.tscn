@@ -20,22 +20,9 @@ value = 100.0
 tint_over = Color(1, 0.2, 0.2, 1)
 tint_under = Color(0.3, 0.3, 0.3, 0.5)
 
-[node name="ExpBar" type="ProgressBar" parent="."]
+[node name="FragmentLabel" type="Label" parent="."]
 position = Vector2(20, 50)
-size = Vector2(200, 15)
-max_value = 100.0
-value = 0.0
-tint_over = Color(0.2, 1, 0.5, 1)
-tint_under = Color(0.3, 0.3, 0.3, 0.5)
-
-[node name="LevelLabel" type="Label" parent="."]
-position = Vector2(230, 45)
-size = Vector2(60, 20)
-text = "Lv.1"
-custom_minimum_size = Vector2(60, 0)
-
-[node name="ScoreLabel" type="Label" parent="."]
-position = Vector2(20, 80)
-size = Vector2(150, 20)
-text = "Score: 0"
-custom_minimum_size = Vector2(150, 0)
+size = Vector2(200, 20)
+text = "梦境碎片: 0"
+custom_minimum_size = Vector2(200, 0)
+theme_override_colors/font_color = Color(1, 0.8, 0, 1)

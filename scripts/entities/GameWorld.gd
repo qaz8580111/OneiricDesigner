@@ -7,12 +7,13 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 @export var enemy_spawn_interval: float = 2.0
 
 ## 屏幕上同时存在的最大敌人数
-@export var max_enemies: int = 10
+@export var max_enemies: int = 100
 
 @onready var player: CharacterBody2D = null
 
 var BULLET_SCENE: PackedScene = preload("res://scenes/gameplay/Bullet.tscn")
 var ENEMY_SCENE: PackedScene = preload("res://scenes/gameplay/Enemy.tscn")
+var PICKUP_SCENE: PackedScene = preload("res://scenes/gameplay/PickUp.tscn")
 
 ## 默认子弹数据（可在编辑器中覆盖，方便调试和后续升级系统）
 @export var default_bullet_data: BulletDataClass = null
@@ -21,6 +22,7 @@ var _spawn_timer: float = 0.0
 var _enemy_count: int = 0
 var _enemies: Array[CharacterBody2D] = []
 var _bullets: Array[Area2D] = []
+var _pickups: Array[Area2D] = []
 
 signal game_over()
 
@@ -41,6 +43,9 @@ func _find_player() -> void:
 
 func _process(delta: float) -> void:
 	_spawn_enemies(delta)
+	
+	# 处理手动拾取输入
+	_handle_manual_pickup()
 
 
 func _spawn_enemies(delta: float) -> void:
@@ -76,6 +81,23 @@ func _spawn_enemy() -> void:
 	_enemy_count += 1
 
 	enemy.killed.connect(_on_enemy_killed.bind(enemy))
+	enemy.drops_generated.connect(_on_enemy_drops_generated)
+
+
+## 处理手动拾取输入
+func _handle_manual_pickup() -> void:
+	if not InputManager.is_action_just_pressed_safe("game_interact"):
+		return
+	
+	if player == null:
+		return
+	
+	# 查找玩家附近可手动拾取的道具
+	for pickup in _pickups:
+		if pickup.has_method("is_player_in_range") and pickup.has_method("pickup"):
+			if pickup.is_player_in_range():
+				pickup.pickup(player)
+				break
 
 
 ## 玩家发射子弹时调用
@@ -91,6 +113,7 @@ func _on_player_shot(position: Vector2, direction: Vector2) -> void:
 		bullet.set_bullet_data(bullet_data)
 
 	bullet.set_direction(direction)
+	bullet.set_owner_group("player")
 	_bullets.append(bullet)
 
 	bullet.hit.connect(_on_bullet_hit)
@@ -120,12 +143,46 @@ func _on_bullet_destroyed(bullet: Area2D) -> void:
 
 
 ## 敌人死亡时调用
-## [param _exp_reward] 经验奖励（已由敌人直接给予玩家，此处忽略）
-## [param enemy]       死亡的敌人实例（注意：bind参数在信号参数之后）
-func _on_enemy_killed(_exp_reward: int, enemy: CharacterBody2D) -> void:
+## [param enemy] 死亡的敌人实例
+func _on_enemy_killed(enemy: CharacterBody2D) -> void:
 	if enemy in _enemies:
 		_enemies.erase(enemy)
 		_enemy_count -= 1
+
+
+## 敌人掉落道具时调用
+## [param position] 掉落位置
+## [param drops]    掉落道具列表
+func _on_enemy_drops_generated(position: Vector2, drops: Array) -> void:
+	for drop_item in drops:
+		if drop_item == null:
+			continue
+		_spawn_pickup(position, drop_item)
+
+
+## 生成拾取物
+## [param position] 生成位置
+## [param drop_item] 道具数据
+func _spawn_pickup(position: Vector2, drop_item: Resource) -> void:
+	var pickup: Area2D = PICKUP_SCENE.instantiate()
+	add_child(pickup)
+	pickup.global_position = position + Vector2(
+		RandomManager.randf_range(-20, 20),
+		RandomManager.randf_range(-20, 20)
+	)
+	
+	if pickup.has_method("set_drop_item"):
+		pickup.set_drop_item(drop_item)
+	
+	_pickups.append(pickup)
+	
+	pickup.tree_exiting.connect(_on_pickup_tree_exiting.bind(pickup))
+
+
+## 拾取物被移除时调用
+func _on_pickup_tree_exiting(pickup: Area2D) -> void:
+	if pickup in _pickups:
+		_pickups.erase(pickup)
 
 
 func _on_player_killed() -> void:
@@ -144,3 +201,8 @@ func clear_all() -> void:
 		if bullet.is_inside_tree():
 			bullet.queue_free()
 	_bullets.clear()
+
+	for pickup in _pickups:
+		if pickup.is_inside_tree():
+			pickup.queue_free()
+	_pickups.clear()

@@ -85,7 +85,6 @@ func _spawn_game_elements() -> void:
 	player.position = Vector2(get_viewport_rect().size.x / 2, get_viewport_rect().size.y / 2)
 	game_world_container.add_child(player)
 
-	# 设置 GameWorld 的玩家引用并连接信号
 	game_world.player = player
 	player.shot.connect(game_world._on_player_shot)
 	player.killed.connect(game_world._on_player_killed)
