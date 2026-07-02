@@ -1,65 +1,28 @@
-## ==============================================================================
-## GameHUD.tscn - 游戏 HUD 界面场景
-## 职责：显示玩家实时状态信息（血量、梦境碎片数量）
-## 所属脚本：GameHUD.gd
-## 场景结构：
-##   GameHUD (Control) - 根节点，全屏覆盖
-##     ├── HealthBar (ProgressBar) - 血量条，显示核心血量
-##     └── FragmentLabel (Label) - 梦境碎片标签，显示当前收集数量
-## ==============================================================================
-
 [gd_scene load_steps=2 format=3 uid="uid://bhud"]
 
-## ==================== 外部资源引用 ====================
-## 引用 GameHUD.gd 脚本，处理UI逻辑和信号连接
 [ext_resource type="Script" path="res://scripts/ui/GameHUD.gd" id="1"]
 
-## ==================== 根节点 ====================
-## GameHUD - 全屏UI容器，覆盖整个屏幕
 [node name="GameHUD" type="Control"]
-## 绑定脚本
 script = ExtResource("1")
-## 锚点预设：全屏拉伸（anchors_preset=15）
 anchors_preset = 15
-## 右锚点：1.0（紧贴屏幕右边）
 anchor_right = 1.0
-## 底锚点：1.0（紧贴屏幕底部）
 anchor_bottom = 1.0
-## 左偏移：0（无偏移）
 offset_left = 0.0
-## 上偏移：0（无偏移）
 offset_top = 0.0
-## 右偏移：0（无偏移）
 offset_right = 0.0
-## 下偏移：0（无偏移）
 offset_bottom = 0.0
 
-## ==================== 血量条 ====================
-## HealthBar - 显示玩家核心血量的进度条，位于屏幕左上角
 [node name="HealthBar" type="ProgressBar" parent="."]
-## 位置：左上角(20, 20)
 position = Vector2(20, 20)
-## 尺寸：宽200像素，高20像素
 size = Vector2(200, 20)
-## 最大值：100（默认核心血量上限）
 max_value = 100.0
-## 当前值：100（默认满血）
 value = 100.0
-## 进度条上方颜色：红色（低血量时显示）
 tint_over = Color(1, 0.2, 0.2, 1)
-## 进度条下方颜色：深灰色半透明（背景）
 tint_under = Color(0.3, 0.3, 0.3, 0.5)
 
-## ==================== 梦境碎片标签 ====================
-## FragmentLabel - 显示玩家当前梦境碎片数量，位于血量条下方
 [node name="FragmentLabel" type="Label" parent="."]
-## 位置：(20, 50)，在血量条下方30像素处
 position = Vector2(20, 50)
-## 尺寸：宽200像素，高20像素
 size = Vector2(200, 20)
-## 默认文本：显示格式为"梦境碎片: 0"
 text = "梦境碎片: 0"
-## 最小宽度：200像素（确保文本不被截断）
 custom_minimum_size = Vector2(200, 0)
-## 字体颜色：金色（RGB: 1, 0.8, 0）
 theme_override_colors/font_color = Color(1, 0.8, 0, 1)

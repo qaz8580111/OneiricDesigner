@@ -1,54 +1,22 @@
-## ==============================================================================
-## Bullet.tscn - 子弹场景
-## 职责：定义子弹的节点结构，包含碰撞体和精灵
-## 所属脚本：Bullet.gd（根节点）
-## 场景结构：
-##   Bullet (Area2D) - 根节点，区域碰撞检测
-##     ├── Sprite2D - 子弹外观显示
-##     └── CollisionShape2D - 子弹碰撞体（16x16矩形）
-## ==============================================================================
-
 [gd_scene load_steps=3 format=3]
 
-## ==================== 外部资源引用 ====================
-
-## 引用 Bullet.gd 脚本（子弹核心逻辑）
 [ext_resource type="Script" path="res://scripts/entities/Bullet.gd" id="1"]
 
-## ==================== 子资源定义（碰撞形状） ====================
-
-## 子弹碰撞体形状：矩形，16x16像素
 [sub_resource type="RectangleShape2D" id="2"]
 size = Vector2(16, 16)
 
-## ==================== 根节点 ====================
-## Bullet - 子弹根节点，使用Area2D（用于碰撞检测）
 [node name="Bullet" type="Area2D"]
-## 绑定子弹核心脚本
 script = ExtResource("1")
-## 碰撞层：4（玩家子弹层，运行时可被脚本修改为8表示敌人子弹）
 collision_layer = 4
-## 碰撞掩码：2（检测敌人层，运行时可被脚本修改为1表示检测玩家层）
 collision_mask = 2
-## 启用碰撞检测（monitoring=true表示主动检测其他物体）
 monitoring = true
-## 允许被其他物体检测（monitorable=true表示可被其他物体检测到）
 monitorable = true
 
-## ==================== 子弹精灵 ====================
-## Sprite2D - 子弹外观显示节点
 [node name="Sprite2D" type="Sprite2D" parent="."]
-## 位置偏移：(0, 0)
 offset = Vector2(0, 0)
-## 纹理：null（运行时由脚本根据BulletForm生成）
 texture = null
-## 颜色：青色（RGB: 0.2, 0.8, 1），无美术资源时使用
 modulate = Color(0.2, 0.8, 1, 1)
-## 尺寸：16x16像素
 rect_size = Vector2(16, 16)
 
-## ==================== 子弹碰撞体 ====================
-## CollisionShape2D - 子弹碰撞检测体
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-## 使用16x16的矩形碰撞形状
 shape = SubResource("2")

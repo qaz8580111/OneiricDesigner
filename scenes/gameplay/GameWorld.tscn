@@ -1,31 +1,11 @@
-## ==============================================================================
-## GameWorld.tscn - 游戏世界场景
-## 职责：定义游戏世界容器，包含背景和游戏元素管理
-## 所属脚本：GameWorld.gd（根节点）
-## 场景结构：
-##   GameWorld (Node2D) - 根节点，游戏世界容器
-##     └── Background (ColorRect) - 游戏背景（深灰色）
-## ==============================================================================
-
 [gd_scene load_steps=2 format=3 uid="uid://bgameworld"]
 
-## ==================== 外部资源引用 ====================
-
-## 引用 GameWorld.gd 脚本（游戏世界核心逻辑）
 [ext_resource type="Script" path="res://scripts/entities/GameWorld.gd" id="1_world"]
 
-## ==================== 根节点 ====================
-## GameWorld - 游戏世界容器，作为所有游戏元素的父节点
 [node name="GameWorld" type="Node2D"]
-## 绑定游戏世界脚本
 script = ExtResource("1_world")
 
-## ==================== 游戏背景 ====================
-## Background - 游戏背景图层，提供深色背景
 [node name="Background" type="ColorRect" parent="."]
-## 颜色：深灰色（RGB: 0.1, 0.1, 0.15）
 color = Color(0.1, 0.1, 0.15, 1)
-## 尺寸：1280x720像素（默认屏幕大小）
 rect_size = Vector2(1280, 720)
-## 位置：(0, 0)
 rect_position = Vector2(0, 0)

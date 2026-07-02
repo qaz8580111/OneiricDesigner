@@ -1,49 +1,7 @@
-## ==============================================================================
-## Settings.tscn - 设置界面场景
-## 职责：定义游戏设置界面，包含游戏性、音频、视频、语言四个标签页
-## 所属脚本：Settings.gd（根节点）
-## 场景结构：
-##   Settings (Control) - 根节点，全屏UI容器
-##     ├── Background (ColorRect) - 设置背景（深紫色）
-##     └── VBoxContainer - 垂直布局容器
-##         ├── Title (Label) - 设置标题
-##         ├── TabContainer - 标签页容器
-##         │   ├── Gameplay (VBoxContainer) - 游戏性设置
-##         │   │   ├── GameplayTitle (Label)
-##         │   │   ├── DifficultyHBox (HBoxContainer)
-##         │   │   │   ├── DifficultyLabel (Label)
-##         │   │   │   └── DifficultyOption (OptionButton)
-##         │   │   └── FPSHBox (HBoxContainer)
-##         │   │       ├── FPSLabel (Label)
-##         │   │       └── FPSCheck (CheckBox)
-##         │   ├── Audio (VBoxContainer) - 音频设置
-##         │   │   ├── AudioTitle (Label)
-##         │   │   ├── MasterHBox (HBoxContainer)
-##         │   │   ├── MusicHBox (HBoxContainer)
-##         │   │   └── SFXHBox (HBoxContainer)
-##         │   ├── Video (VBoxContainer) - 视频设置
-##         │   │   ├── VideoTitle (Label)
-##         │   │   ├── ResolutionHBox (HBoxContainer)
-##         │   │   ├── FullscreenHBox (HBoxContainer)
-##         │   │   └── VSyncHBox (HBoxContainer)
-##         │   └── Language (VBoxContainer) - 语言设置
-##         │       ├── LanguageTitle (Label)
-##         │       └── LanguageHBox (HBoxContainer)
-##         └── ButtonContainer (HBoxContainer) - 底部按钮
-##             ├── BackButton (Button)
-##             ├── ResetButton (Button)
-##             └── ApplyButton (Button)
-## ==============================================================================
-
 [gd_scene load_steps=2 format=3 uid="uid://bsettings"]
 
-## ==================== 外部资源引用 ====================
-
-## 引用 Settings.gd 脚本（设置界面逻辑）
 [ext_resource type="Script" path="res://scripts/ui/Settings.gd" id="1_settings"]
 
-## ==================== 根节点 ====================
-## Settings - 设置界面根节点，全屏UI容器
 [node name="Settings" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -51,11 +9,8 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-## 绑定设置脚本
 script = ExtResource("1_settings")
 
-## ==================== 设置背景 ====================
-## Background - 设置界面背景图层
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -63,11 +18,8 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-## 颜色：深紫色（RGB: 0.1, 0.12, 0.2）
 color = Color(0.1, 0.12, 0.2, 1)
 
-## ==================== 垂直布局容器 ====================
-## VBoxContainer - 垂直排列设置标题、标签页和按钮
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -76,76 +28,54 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-## ==================== 设置标题 ====================
-## Title - 设置界面标题
 [node name="Title" type="Label" parent="VBoxContainer"]
 layout_mode = 2
-## 文本："Settings"
 text = "Settings"
-## 水平对齐：居中
 horizontal_alignment = 1
-## 主题变体：HeaderMedium
 theme_type_variation = &"HeaderMedium"
-## 字体大小：48
 theme_override_font_sizes/font_size = 48
 
-## ==================== 标签页容器 ====================
-## TabContainer - 包含四个设置标签页
 [node name="TabContainer" type="TabContainer" parent="VBoxContainer"]
 layout_mode = 2
-## 垂直尺寸：扩展填充（size_flags_vertical=3）
 size_flags_vertical = 3
 
-## ==================== 游戏性设置标签页 ====================
-## Gameplay - 游戏性设置容器
 [node name="Gameplay" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
 layout_mode = 2
 
-## 游戏性设置标题
 [node name="GameplayTitle" type="Label" parent="VBoxContainer/TabContainer/Gameplay"]
 layout_mode = 2
 text = "Gameplay Settings"
 theme_type_variation = &"HeaderSmall"
 
-## 难度设置水平布局
 [node name="DifficultyHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
 layout_mode = 2
 
-## 难度标签
 [node name="DifficultyLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/DifficultyHBox"]
 layout_mode = 2
 text = "Difficulty:"
 
-## 难度选项按钮
 [node name="DifficultyOption" type="OptionButton" parent="VBoxContainer/TabContainer/Gameplay/DifficultyHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-## FPS显示设置水平布局
 [node name="FPSHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
 layout_mode = 2
 
-## FPS标签
 [node name="FPSLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/FPSHBox"]
 layout_mode = 2
 text = "Show FPS Counter:"
 
-## FPS复选框
 [node name="FPSCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Gameplay/FPSHBox"]
 layout_mode = 2
 
-## ==================== 音频设置标签页 ====================
-## Audio - 音频设置容器
 [node name="Audio" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
 layout_mode = 2
 
-## 音频设置标题
 [node name="AudioTitle" type="Label" parent="VBoxContainer/TabContainer/Audio"]
 layout_mode = 2
 text = "Audio Settings"
 theme_type_variation = &"HeaderSmall"
 
-## 主音量设置
 [node name="MasterHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
 layout_mode = 2
 
@@ -167,7 +97,6 @@ layout_mode = 2
 text = "80"
 custom_minimum_size = Vector2(40, 0)
 
-## 音乐音量设置
 [node name="MusicHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
 layout_mode = 2
 
@@ -189,7 +118,6 @@ layout_mode = 2
 text = "70"
 custom_minimum_size = Vector2(40, 0)
 
-## 音效音量设置
 [node name="SFXHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
 layout_mode = 2
 
@@ -211,18 +139,14 @@ layout_mode = 2
 text = "90"
 custom_minimum_size = Vector2(40, 0)
 
-## ==================== 视频设置标签页 ====================
-## Video - 视频设置容器
 [node name="Video" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
 layout_mode = 2
 
-## 视频设置标题
 [node name="VideoTitle" type="Label" parent="VBoxContainer/TabContainer/Video"]
 layout_mode = 2
 text = "Video Settings"
 theme_type_variation = &"HeaderSmall"
 
-## 分辨率设置
 [node name="ResolutionHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
 layout_mode = 2
 
@@ -234,7 +158,6 @@ text = "Resolution:"
 layout_mode = 2
 size_flags_horizontal = 3
 
-## 全屏设置
 [node name="FullscreenHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
 layout_mode = 2
 
@@ -245,7 +168,6 @@ text = "Fullscreen:"
 [node name="FullscreenCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Video/FullscreenHBox"]
 layout_mode = 2
 
-## 垂直同步设置
 [node name="VSyncHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
 layout_mode = 2
 
@@ -255,21 +177,16 @@ text = "V-Sync:"
 
 [node name="VSyncCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Video/VSyncHBox"]
 layout_mode = 2
-## 默认启用垂直同步
 pressed = true
 
-## ==================== 语言设置标签页 ====================
-## Language - 语言设置容器
 [node name="Language" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
 layout_mode = 2
 
-## 语言设置标题
 [node name="LanguageTitle" type="Label" parent="VBoxContainer/TabContainer/Language"]
 layout_mode = 2
 text = "Language Settings"
 theme_type_variation = &"HeaderSmall"
 
-## 语言设置水平布局
 [node name="LanguageHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Language"]
 layout_mode = 2
 
@@ -281,24 +198,19 @@ text = "Language:"
 layout_mode = 2
 size_flags_horizontal = 3
 
-## ==================== 底部按钮容器 ====================
-## ButtonContainer - 水平排列底部操作按钮
 [node name="ButtonContainer" type="HBoxContainer" parent="VBoxContainer"]
 layout_mode = 2
 
-## 返回按钮
 [node name="BackButton" type="Button" parent="VBoxContainer/ButtonContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Back"
 
-## 重置按钮
 [node name="ResetButton" type="Button" parent="VBoxContainer/ButtonContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Reset to Default"
 
-## 应用按钮
 [node name="ApplyButton" type="Button" parent="VBoxContainer/ButtonContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
