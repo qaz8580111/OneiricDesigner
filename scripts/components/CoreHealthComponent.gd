@@ -1,0 +1,213 @@
+## CoreHealthComponent.gd - 核心血量组件
+## 职责：管理核心血量、无敌帧、死亡判定、红血状态
+## 继承：Node（基础节点，作为核心血量逻辑容器）
+extends Node
+
+## ========== 预加载资源（避免运行时加载延迟） ==========
+
+## 核心血量数据资源类，用于配置核心血量属性（上限、红血阈值、无敌帧等）
+const CoreHealthDataClass = preload("res://scripts/resources/player/CoreHealthData.gd")
+
+## ========== 导出变量（编辑器可配置） ==========
+
+## 核心血量配置数据，包含血量上限、红血阈值、无敌帧时长等配置
+@export var core_health_data: CoreHealthDataClass = null
+
+## ========== 节点引用（使用 @onready 延迟初始化） ==========
+
+## 无敌帧计时器，控制受击后无敌状态持续时间
+@onready var invincible_timer: Timer = $InvincibleTimer
+
+## ========== 成员变量（运行时数据） ==========
+
+## 当前核心血量
+var _current_hp: float = 0.0
+
+## 是否处于无敌状态（受击后短暂无敌）
+var _is_invincible: bool = false
+
+## 是否处于红血状态（血量低于阈值时触发）
+var _is_critical: bool = false
+
+## 是否死亡（核心血量归零时变为true）
+var _is_dead: bool = false
+
+## ========== 生命周期方法 ==========
+
+## _ready() - 节点进入场景树时调用一次，用于初始化
+func _ready() -> void:
+	## ========== 注册用户信号（用于外部监听） ==========
+	
+	## 核心血量变化信号：当核心血量变动时发出
+	## 参数：current - 当前核心血量，max - 核心血量上限
+	add_user_signal("core_health_changed", ["current", "max"])
+	
+	## 红血状态信号：当玩家进入/退出红血状态时发出
+	## 参数：is_active - 是否处于红血状态
+	add_user_signal("critical_state_active", ["is_active"])
+	
+	## 玩家死亡信号：当核心血量归零时发出
+	add_user_signal("player_died")
+	
+	## 核心血量配置变化信号：当核心血量配置被替换时发出
+	## 参数：new_data - 新的核心血量配置数据
+	add_user_signal("core_config_changed", ["new_data"])
+	
+	## 如果核心血量数据为空，创建默认核心血量数据
+	if core_health_data == null:
+		core_health_data = CoreHealthDataClass.new()
+	
+	## 初始化当前核心血量为最大值
+	_current_hp = core_health_data.max_hp
+	
+	## 配置并连接无敌帧计时器
+	if invincible_timer:
+		## 设置无敌帧时长（受击后无敌状态持续时间）
+		invincible_timer.wait_time = core_health_data.invincible_duration
+		## 设置为一次性计时器（触发一次后停止）
+		invincible_timer.one_shot = true
+		## 连接计时器超时信号到回调（无敌状态结束）
+		invincible_timer.timeout.connect(_on_invincible_timeout)
+
+## ========== 核心方法（伤害处理） ==========
+
+## 处理伤害（核心方法）
+## 只有在非死亡且非无敌状态下才会受到伤害
+## 参数：amount - 伤害数值
+## 返回：true表示伤害生效，false表示伤害被忽略（死亡或无敌中）
+func take_damage(amount: float) -> bool:
+	## 如果玩家已死亡或处于无敌状态，忽略伤害
+	if _is_dead or _is_invincible:
+		return false
+	
+	## 扣除核心血量
+	_current_hp -= amount
+	## 确保血量不小于0
+	_current_hp = max(_current_hp, 0.0)
+	
+	## 发出核心血量变化信号（通知UI更新）
+	emit_signal("core_health_changed", _current_hp, core_health_data.max_hp)
+	
+	## 记录伤害前的红血状态
+	var was_critical: bool = _is_critical
+	## 判断当前是否处于红血状态（血量低于阈值）
+	_is_critical = core_health_data.is_critical(_current_hp)
+	
+	## 如果红血状态发生变化，发出信号
+	if was_critical != _is_critical:
+		emit_signal("critical_state_active", _is_critical)
+	
+	## 如果血量归零，执行死亡逻辑
+	if _current_hp <= 0.0:
+		## 标记死亡状态
+		_is_dead = true
+		## 暂停游戏（防止死亡后继续受击）
+		get_tree().paused = true
+		## 发出玩家死亡信号
+		emit_signal("player_died")
+		## 返回伤害生效
+		return true
+	
+	## 如果血量未归零，启动无敌帧
+	_is_invincible = true
+	if invincible_timer:
+		invincible_timer.start()
+	
+	## 返回伤害生效
+	return true
+
+## ========== 恢复方法 ==========
+
+## 恢复核心血量（手动恢复，如拾取道具）
+## 参数：amount - 要恢复的血量值
+func heal_core(amount: float) -> void:
+	## 如果玩家已死亡，不执行恢复
+	if _is_dead:
+		return
+	
+	## 恢复血量（不超过最大值）
+	_current_hp = min(_current_hp + amount, core_health_data.max_hp)
+	
+	## 记录恢复前的红血状态
+	var was_critical: bool = _is_critical
+	## 判断当前是否处于红血状态
+	_is_critical = core_health_data.is_critical(_current_hp)
+	
+	## 发出核心血量变化信号（通知UI更新）
+	emit_signal("core_health_changed", _current_hp, core_health_data.max_hp)
+	
+	## 如果红血状态发生变化，发出信号
+	if was_critical != _is_critical:
+		emit_signal("critical_state_active", _is_critical)
+
+## ========== 状态查询方法（对外接口） ==========
+
+## 获取当前核心血量
+## 返回：当前核心血量
+func get_current_hp() -> float:
+	return _current_hp
+
+## 获取核心血量上限
+## 返回：核心血量上限
+func get_max_hp() -> float:
+	return core_health_data.max_hp
+
+## 判断是否处于红血状态
+## 返回：true表示处于红血状态，false表示正常状态
+func is_critical() -> bool:
+	return _is_critical
+
+## 判断是否处于无敌状态
+## 返回：true表示处于无敌状态，false表示可受击
+func is_invincible() -> bool:
+	return _is_invincible
+
+## 判断是否死亡
+## 返回：true表示已死亡，false表示存活
+func is_dead() -> bool:
+	return _is_dead
+
+## 获取当前血量百分比
+## 返回：血量百分比（0.0 ~ 1.0）
+func get_health_percentage() -> float:
+	if core_health_data.max_hp <= 0.0:
+		return 0.0
+	return _current_hp / core_health_data.max_hp
+
+## ========== 配置修改方法（词条系统支持） ==========
+
+## 应用核心血量配置修改（支持词条系统动态修改核心血量属性）
+## 参数：new_data - 新的核心血量配置数据
+func apply_core_mod(new_data: CoreHealthDataClass) -> void:
+	## 记录修改前的最大血量
+	var old_max_hp: float = core_health_data.max_hp
+	
+	## 将新配置与当前配置合并
+	core_health_data.apply_mod(new_data)
+	
+	## 如果原来有最大血量，按比例调整当前血量
+	if old_max_hp > 0.0:
+		_current_hp = (_current_hp / old_max_hp) * core_health_data.max_hp
+	
+	## 更新无敌帧计时器的等待时间
+	if invincible_timer:
+		invincible_timer.wait_time = core_health_data.invincible_duration
+	
+	## 记录修改前的红血状态
+	var was_critical: bool = _is_critical
+	## 判断当前是否处于红血状态
+	_is_critical = core_health_data.is_critical(_current_hp)
+	
+	## 如果红血状态发生变化，发出信号
+	if was_critical != _is_critical:
+		emit_signal("critical_state_active", _is_critical)
+	
+	## 发出配置变化信号
+	emit_signal("core_config_changed", new_data)
+
+## ========== 计时器回调 ==========
+
+## 无敌帧结束回调（无敌状态结束）
+func _on_invincible_timeout() -> void:
+	## 取消无敌状态，玩家可以再次受击
+	_is_invincible = false

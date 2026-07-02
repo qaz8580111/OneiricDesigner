@@ -1,12 +1,24 @@
+## TranslationManager.gd - 翻译管理单例
+## 职责：管理游戏多语言翻译，提供翻译查询接口，保存语言设置
+## 继承：Node（作为全局单例运行）
 extends Node
 
+## ========== 信号定义（用于与其他节点通信） ==========
+
+## 语言变化信号：当切换语言时发出
+## 参数：lang - 新的语言代码（如"zh_CN"、"en_US"）
 signal language_changed(lang: String)
 
+## ========== 成员变量（运行时数据） ==========
+
+## 当前语言代码（默认中文）
 var current_language: String = "zh_CN"
 
+## 翻译字典（包含所有语言的翻译数据）
+## 结构：{语言代码: {翻译键: 翻译文本}}
 var translations: Dictionary = {
 	"zh_CN": {
-		# 主菜单
+		## 主菜单翻译
 		"MENU_TITLE": "梦境设计师",
 		"MENU_SUBTITLE": "随机生成类游戏",
 		"BUTTON_START_GAME": "开始游戏",
@@ -14,7 +26,7 @@ var translations: Dictionary = {
 		"BUTTON_QUIT_GAME": "退出游戏",
 		"VERSION": "版本",
 		
-		# 设置菜单
+		## 设置菜单翻译
 		"SETTINGS_TITLE": "设置",
 		"TAB_GAMEPLAY": "游戏性",
 		"TAB_AUDIO": "音频",
@@ -32,23 +44,23 @@ var translations: Dictionary = {
 		"BUTTON_RESET": "重置为默认",
 		"BUTTON_APPLY": "应用",
 		
-		# 难度选项
+		## 难度选项翻译
 		"DIFFICULTY_EASY": "简单",
 		"DIFFICULTY_NORMAL": "普通",
 		"DIFFICULTY_HARD": "困难",
 		"DIFFICULTY_EXPERT": "专家",
 		
-		# 暂停菜单
+		## 暂停菜单翻译
 		"PAUSED_TITLE": "暂停",
 		"BUTTON_RESUME": "继续游戏",
 		"BUTTON_QUIT_TO_MENU": "返回主菜单",
 		
-		# 游戏信息
+		## 游戏信息翻译
 		"GAME_SEED": "种子",
 		"GAME_MODS": "模组",
 		"GAME_EVENTS": "事件",
 		
-		# 事件
+		## 事件翻译
 		"EVENT_TRIGGERED": "事件触发",
 		"EVENT_HEAL": "治疗",
 		"EVENT_DAMAGE": "伤害",
@@ -56,7 +68,7 @@ var translations: Dictionary = {
 		"EVENT_TRAP": "触发陷阱"
 	},
 	"en_US": {
-		# Main Menu
+		## 主菜单翻译（英文）
 		"MENU_TITLE": "OneiricDesigner",
 		"MENU_SUBTITLE": "Procedural Roguelike",
 		"BUTTON_START_GAME": "Start Game",
@@ -64,7 +76,7 @@ var translations: Dictionary = {
 		"BUTTON_QUIT_GAME": "Quit Game",
 		"VERSION": "Version",
 		
-		# Settings Menu
+		## 设置菜单翻译（英文）
 		"SETTINGS_TITLE": "Settings",
 		"TAB_GAMEPLAY": "Gameplay",
 		"TAB_AUDIO": "Audio",
@@ -82,23 +94,23 @@ var translations: Dictionary = {
 		"BUTTON_RESET": "Reset to Default",
 		"BUTTON_APPLY": "Apply",
 		
-		# Difficulty Options
+		## 难度选项翻译（英文）
 		"DIFFICULTY_EASY": "Easy",
 		"DIFFICULTY_NORMAL": "Normal",
 		"DIFFICULTY_HARD": "Hard",
 		"DIFFICULTY_EXPERT": "Expert",
 		
-		# Pause Menu
+		## 暂停菜单翻译（英文）
 		"PAUSED_TITLE": "Paused",
 		"BUTTON_RESUME": "Resume Game",
 		"BUTTON_QUIT_TO_MENU": "Quit to Menu",
 		
-		# Game Info
+		## 游戏信息翻译（英文）
 		"GAME_SEED": "Seed",
 		"GAME_MODS": "Mods",
 		"GAME_EVENTS": "Events",
 		
-		# Events
+		## 事件翻译（英文）
 		"EVENT_TRIGGERED": "Event Triggered",
 		"EVENT_HEAL": "Healing",
 		"EVENT_DAMAGE": "Damage",
@@ -107,44 +119,84 @@ var translations: Dictionary = {
 	}
 }
 
+## ========== 生命周期方法 ==========
+
+## _ready() - 节点进入场景树时调用一次，用于初始化
 func _ready() -> void:
+	## 从配置文件加载上次保存的语言设置
 	_load_language_setting()
 
+## ========== 配置文件管理 ==========
+
+## 从配置文件加载语言设置
 func _load_language_setting() -> void:
+	## 创建配置文件对象
 	var config = ConfigFile.new()
+	## 加载配置文件（user://表示用户数据目录）
 	var err = config.load("user://settings.cfg")
 	
+	## 如果加载成功，读取语言设置
 	if err == OK:
+		## 获取语言设置（默认中文）
 		set_language(config.get_value("Settings", "language", "zh_CN"))
 	else:
+		## 加载失败，使用默认语言
 		set_language("zh_CN")
 
-func set_language(lang: String) -> void:
-	if translations.has(lang):
-		current_language = lang
-		_save_language_setting()
-		language_changed.emit(lang)
-		print("Language changed to: ", lang)
-
+## 保存语言设置到配置文件
 func _save_language_setting() -> void:
+	## 创建配置文件对象
 	var config = ConfigFile.new()
+	## 加载现有配置文件
 	var err = config.load("user://settings.cfg")
 	
+	## 如果加载成功，更新语言设置并保存
 	if err == OK:
+		## 设置语言值到配置文件
 		config.set_value("Settings", "language", current_language)
+		## 保存配置文件
 		config.save("user://settings.cfg")
 
-# 重命名为 t() 避免与 Godot 内置 tr() 冲突
+## ========== 核心方法（语言切换） ==========
+
+## 设置当前语言
+## 参数：lang - 语言代码（如"zh_CN"、"en_US"）
+func set_language(lang: String) -> void:
+	## 如果语言代码存在于翻译字典中
+	if translations.has(lang):
+		## 更新当前语言
+		current_language = lang
+		## 保存语言设置到配置文件
+		_save_language_setting()
+		## 发出语言变化信号（通知UI更新翻译）
+		language_changed.emit(lang)
+		## 输出日志（用于调试）
+		print("Language changed to: ", lang)
+
+## ========== 翻译查询接口 ==========
+
+## 获取翻译文本（重命名为t()避免与Godot内置tr()冲突）
+## 参数：key - 翻译键（如"MENU_TITLE"）
+## 返回：翻译后的文本（找不到时返回原键）
 func t(key: String) -> String:
+	## 如果当前语言存在于翻译字典中
 	if translations.has(current_language):
+		## 获取当前语言的翻译字典
 		var lang_dict: Dictionary = translations[current_language]
+		## 如果翻译键存在，返回翻译文本
 		if lang_dict.has(key):
 			return lang_dict[key]
+	## 找不到翻译时返回原键
 	return key
 
+## 获取当前语言代码
+## 返回：当前语言代码
 func get_current_language() -> String:
 	return current_language
 
+## 获取语言的显示名称（用于设置界面）
+## 参数：lang - 语言代码
+## 返回：语言的显示名称（如"简体中文"、"English"）
 func get_language_display_name(lang: String) -> String:
 	match lang:
 		"zh_CN":
@@ -152,4 +204,5 @@ func get_language_display_name(lang: String) -> String:
 		"en_US":
 			return "English"
 		_:
+			## 未知语言返回原代码
 			return lang

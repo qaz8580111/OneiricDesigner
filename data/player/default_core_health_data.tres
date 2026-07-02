@@ -1,0 +1,8 @@
+[gd_resource type="CoreHealthData" load_steps=1 format=3]
+
+[resource]
+max_hp = 100.0
+critical_threshold = 0.3
+invincible_duration = 0.5
+death_vfx = null
+critical_sfx = null

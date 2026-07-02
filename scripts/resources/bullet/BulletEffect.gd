@@ -1,29 +1,34 @@
-## BulletEffect - 子弹特效资源基类
-## 所有子弹特效都应继承此类，实现 apply() 方法
-## 用于扩展：穿透、爆炸、中毒、冰冻、弹射、分裂等特效
+## BulletEffect.gd - 子弹特效资源基类
+## 职责：定义子弹特效的触发时机和接口，作为特效系统的扩展基类
+## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
+## 使用场景：通过继承此类创建不同特效（穿透、爆炸、中毒、冰冻、弹射、分裂等）
 class_name BulletEffect
 extends Resource
 
+## ========== 特效触发时机枚举 ==========
 
-## 特效触发时机枚举
 enum TriggerType {
-	ON_HIT,      # 命中敌人时触发
-	ON_DESTROY,  # 子弹销毁时触发
-	ON_SPAWN,    # 子弹生成时触发
-	ON_TRAVEL    # 飞行过程中每帧触发
+	ON_HIT,      ## 命中敌人时触发（如爆炸、中毒、击退等）
+	ON_DESTROY,  ## 子弹销毁时触发（如轨迹消失特效、残留伤害等）
+	ON_SPAWN,    ## 子弹生成时触发（如发射闪光、音效等）
+	ON_TRAVEL    ## 飞行过程中每帧触发（如轨迹拖尾、速度变化等）
 }
 
+## ========== 特效基础属性 ==========
 
-## 特效唯一标识（用于日志、调试和后续按ID查找）
+## 特效唯一标识（用于日志、调试和按ID查找）
 @export var effect_id: String = ""
 
-## 该特效的触发时机
+## 该特效的触发时机（决定何时执行特效逻辑）
 @export var trigger_type: TriggerType = TriggerType.ON_HIT
 
+## ========== 核心方法（扩展插槽） ==========
 
-## 子类重写此方法实现具体特效逻辑
-## [param bullet]  发射该特效的子弹实例
-## [param target]  命中目标，非命中类特效可能为 null
-## [param context] 额外上下文数据字典，方便传递临时数据
+## 应用特效（扩展插槽）
+## 子类必须重写此方法实现具体特效逻辑
+## 参数：bullet - 发射该特效的子弹实例（特效作用对象）
+##       target - 命中目标（命中类特效使用，非命中类特效可能为null）
+##       context - 额外上下文数据字典（如飞行方向、命中位置、伤害值等）
 func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> void:
+	## 默认实现：输出警告提示子类未重写
 	push_warning("BulletEffect.apply() 应在子类中重写，effect_id=%s" % effect_id)

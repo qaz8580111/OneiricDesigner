@@ -1,6 +1,9 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/entities/Player.gd" id="1_player"]
+[ext_resource type="Script" path="res://scripts/components/PlayerHealthController.gd" id="2_controller"]
+[ext_resource type="Script" path="res://scripts/components/ShieldComponent.gd" id="3_shield"]
+[ext_resource type="Script" path="res://scripts/components/CoreHealthComponent.gd" id="4_core"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_1"]
 radius = 20.0
@@ -31,3 +34,24 @@ current = true
 smooth_enabled = true
 smooth_follow = true
 smooth_speed = 0.1
+
+[node name="HealthController" type="Node" parent="."]
+script = ExtResource("2_controller")
+
+[node name="ShieldComponent" type="Node" parent="HealthController"]
+script = ExtResource("3_shield")
+
+[node name="RegenDelayTimer" type="Timer" parent="HealthController/ShieldComponent"]
+wait_time = 5.0
+one_shot = true
+
+[node name="RegenTimer" type="Timer" parent="HealthController/ShieldComponent"]
+wait_time = 1.5
+one_shot = true
+
+[node name="CoreHealthComponent" type="Node" parent="HealthController"]
+script = ExtResource("4_core")
+
+[node name="InvincibleTimer" type="Timer" parent="HealthController/CoreHealthComponent"]
+wait_time = 0.5
+one_shot = true

@@ -1,0 +1,11 @@
+[gd_resource type="ShieldData" load_steps=1 format=3]
+
+[resource]
+max_segments = 3
+segment_hp = 10.0
+regen_delay = 5.0
+regen_interval = 1.5
+break_vfx = null
+hit_sfx = null
+color_full = Color(0, 1, 1, 1)
+color_low = Color(1, 0.666667, 0, 1)
