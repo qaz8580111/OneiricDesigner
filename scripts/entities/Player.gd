@@ -27,6 +27,9 @@ extends CharacterBody2D
 ## 玩家当前拥有的梦境碎片数量
 var dream_fragment: int = 0
 
+## 是否启用自动射击（默认开启）
+var auto_shoot: bool = true
+
 ## 射击冷却计时器，递减到0时可再次射击
 var _shoot_timer: float = 0.0
 
@@ -130,11 +133,25 @@ func _handle_shoot(delta: float) -> void:
 	## 递减射击冷却计时器
 	_shoot_timer -= delta
 	
-	## 如果冷却完成且玩家按住射击键，执行射击
-	if _shoot_timer <= 0.0 and InputManager.is_action_pressed_safe("game_shoot"):
+	## 判断是否应该射击
+	## 自动射击模式：冷却完成后自动射击，无需按下鼠标
+	## 手动射击模式：需要按住鼠标左键才射击
+	var should_shoot: bool = false
+	if auto_shoot:
+		should_shoot = _shoot_timer <= 0.0
+	else:
+		should_shoot = _shoot_timer <= 0.0 and InputManager.is_action_pressed_safe("game_shoot")
+	
+	## 如果应该射击，执行射击动作
+	if should_shoot:
 		_shoot()
 		## 重置冷却计时器
 		_shoot_timer = shoot_cooldown
+
+## 设置自动射击模式（对外接口）
+## 参数：enabled - 是否启用自动射击
+func set_auto_shoot(enabled: bool) -> void:
+	auto_shoot = enabled
 
 ## 执行射击动作
 func _shoot() -> void:

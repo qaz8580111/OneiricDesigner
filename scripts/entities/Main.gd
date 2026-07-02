@@ -172,6 +172,10 @@ func _spawn_game_elements() -> void:
 	if player == null:
 		push_error("Player 场景实例化失败或根节点不是 CharacterBody2D")
 		return
+	
+	## 应用保存的自动射击设置
+	_apply_saved_auto_shoot_setting(player)
+	
 	## 设置玩家初始位置（屏幕中心）
 	player.position = Vector2(get_viewport_rect().size.x / 2, get_viewport_rect().size.y / 2)
 	## 将玩家添加到容器中
@@ -263,9 +267,11 @@ func _on_settings_back() -> void:
 		## 否则返回主菜单
 		_show_main_menu()
 
-## 设置应用回调（预留，暂无实现）
+## 设置应用回调：将设置应用到游戏元素
 func _on_settings_applied(settings: Dictionary) -> void:
-	pass
+	## 如果玩家存在，传递自动射击设置
+	if player != null and player.has_method("set_auto_shoot"):
+		player.set_auto_shoot(settings.get("auto_shoot", true))
 
 ## 游戏开始信号回调（响应GameManager.game_started）
 func _on_game_started() -> void:
@@ -286,6 +292,19 @@ func _on_game_resumed() -> void:
 	pass
 
 ## ========== 帧更新方法 ==========
+
+## 从配置文件读取并应用保存的自动射击设置
+## 参数：player_node - 玩家节点
+func _apply_saved_auto_shoot_setting(player_node: CharacterBody2D) -> void:
+	if not player_node.has_method("set_auto_shoot"):
+		return
+	
+	var config = ConfigFile.new()
+	var err = config.load("user://settings.cfg")
+	if err == OK:
+		var auto_shoot: bool = config.get_value("Settings", "auto_shoot", true)
+		player_node.set_auto_shoot(auto_shoot)
+		print("Auto shoot setting loaded: ", auto_shoot)
 
 ## _process() - 每帧调用一次，用于处理全局输入
 func _process(_delta: float) -> void:

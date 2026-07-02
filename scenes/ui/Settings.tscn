@@ -14,7 +14,8 @@
 ;       │   ├── Gameplay (VBoxContainer) - 游戏玩法设置
 ;       │   │   ├── GameplayTitle (Label)
 ;       │   │   ├── DifficultyHBox - 难度选择
-;       │   │   └── FPSHBox - FPS显示开关
+;       │   │   ├── FPSHBox - FPS显示开关
+;       │   │   └── AutoShootHBox - 自动射击开关
 ;       │   ├── Audio (VBoxContainer) - 音频设置
 ;       │   │   ├── AudioTitle (Label)
 ;       │   │   ├── MasterHBox - 主音量
@@ -122,6 +123,20 @@ text = "Show FPS Counter:"
 ; FPSCheck - FPS显示复选框
 [node name="FPSCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Gameplay/FPSHBox"]
 layout_mode = 2
+
+; AutoShootHBox - 自动射击开关水平布局
+[node name="AutoShootHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
+layout_mode = 2
+
+; AutoShootLabel - 自动射击标签
+[node name="AutoShootLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/AutoShootHBox"]
+layout_mode = 2
+text = "Auto Shoot:"
+
+; AutoShootCheck - 自动射击复选框（默认开启）
+[node name="AutoShootCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Gameplay/AutoShootHBox"]
+layout_mode = 2
+pressed = true
 
 ; ------------------------------ 音频设置 ------------------------------
 ; Audio (VBoxContainer) - 音频设置标签页

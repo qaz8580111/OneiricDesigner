@@ -23,6 +23,9 @@ var difficulty: int = 1
 ## 游戏性设置：是否显示FPS计数器
 var show_fps: bool = false
 
+## 游戏性设置：是否启用自动射击（默认开启）
+var auto_shoot: bool = true
+
 ## 音频设置：主音量（0~100）
 var master_volume: float = 80.0
 
@@ -57,6 +60,9 @@ var language_index: int = 0
 
 ## 游戏性标签页：FPS显示复选框
 @onready var fps_check: CheckBox
+
+## 游戏性标签页：自动射击复选框
+@onready var auto_shoot_check: CheckBox
 
 ## 音频标签页：主音量滑块
 @onready var master_slider: HSlider
@@ -160,6 +166,7 @@ func _find_all_ui_elements() -> void:
 	## 游戏性标签页元素
 	difficulty_option = $VBoxContainer/TabContainer/Gameplay/DifficultyHBox/DifficultyOption
 	fps_check = $VBoxContainer/TabContainer/Gameplay/FPSHBox/FPSCheck
+	auto_shoot_check = $VBoxContainer/TabContainer/Gameplay/AutoShootHBox/AutoShootCheck
 	
 	## 音频标签页元素
 	master_slider = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterSlider
@@ -270,6 +277,7 @@ func _on_apply_button_pressed() -> void:
 func _reset_to_defaults() -> void:
 	difficulty = 1
 	show_fps = false
+	auto_shoot = true
 	master_volume = 80.0
 	music_volume = 70.0
 	sfx_volume = 90.0
@@ -285,6 +293,7 @@ func _reset_to_defaults() -> void:
 func _update_ui_from_settings() -> void:
 	difficulty_option.selected = difficulty
 	fps_check.set_pressed_no_signal(show_fps)
+	auto_shoot_check.set_pressed_no_signal(auto_shoot)
 	master_slider.value = master_volume
 	master_value.text = str(int(master_volume))
 	music_slider.value = music_volume
@@ -300,6 +309,7 @@ func _update_ui_from_settings() -> void:
 func _collect_settings() -> void:
 	difficulty = difficulty_option.selected
 	show_fps = fps_check.is_pressed()
+	auto_shoot = auto_shoot_check.is_pressed()
 	master_volume = master_slider.value
 	music_volume = music_slider.value
 	sfx_volume = sfx_slider.value
@@ -316,6 +326,7 @@ func _collect_settings_dict() -> Dictionary:
 	return {
 		"difficulty": difficulty,
 		"show_fps": show_fps,
+		"auto_shoot": auto_shoot,
 		"master_volume": master_volume,
 		"music_volume": music_volume,
 		"sfx_volume": sfx_volume,
@@ -376,6 +387,7 @@ func _load_settings() -> void:
 	if err == OK:
 		difficulty = config.get_value("Settings", "difficulty", 1)
 		show_fps = config.get_value("Settings", "show_fps", false)
+		auto_shoot = config.get_value("Settings", "auto_shoot", true)
 		master_volume = config.get_value("Settings", "master_volume", 80.0)
 		music_volume = config.get_value("Settings", "music_volume", 70.0)
 		sfx_volume = config.get_value("Settings", "sfx_volume", 90.0)
