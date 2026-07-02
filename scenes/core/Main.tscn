@@ -1,18 +1,45 @@
+## ==============================================================================
+## Main.tscn - 游戏主场景
+## 职责：定义游戏的根场景结构，包含UI层和游戏世界容器
+## 所属脚本：Main.gd（根节点）
+## 场景结构：
+##   Main (Node2D) - 根节点，游戏主入口
+##     ├── CanvasLayer - UI层（始终在最上层）
+##     │   └── UIStack (Control) - UI容器，用于显示菜单、HUD等
+##     └── GameWorld (Node2D) - 游戏世界容器（运行时动态加载游戏世界场景）
+## ==============================================================================
+
 [gd_scene load_steps=2 format=3 uid="uid://bmainscene"]
 
+## ==================== 外部资源引用 ====================
+
+## 引用 Main.gd 脚本（游戏主控制逻辑）
 [ext_resource type="Script" path="res://scripts/entities/Main.gd" id="1_main"]
 
+## ==================== 根节点 ====================
+## Main - 游戏根节点，作为整个游戏的入口点
 [node name="Main" type="Node2D"]
+## 绑定游戏主控制脚本
 script = ExtResource("1_main")
 
+## ==================== UI层 ====================
+## CanvasLayer - UI层，确保UI始终在游戏画面最上层显示
 [node name="CanvasLayer" type="CanvasLayer" parent="."]
+## CanvasLayer 默认会自动覆盖整个屏幕，无需额外设置
 
+## ==================== UI容器 ====================
+## UIStack - UI栈容器，用于叠加显示多个UI界面（菜单、HUD等）
 [node name="UIStack" type="Control" parent="CanvasLayer"]
+## 布局模式：容器布局
 layout_mode = 3
+## 锚点预设：全屏拉伸
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
+## ==================== 游戏世界容器 ====================
+## GameWorld - 游戏世界容器，运行时由Main.gd动态加载GameWorld.tscn
 [node name="GameWorld" type="Node2D" parent="."]
+## 此节点为空容器，游戏开始时由Main.gd实例化GameWorld.tscn并添加到这里

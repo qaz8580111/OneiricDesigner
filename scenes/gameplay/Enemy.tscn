@@ -1,31 +1,70 @@
+## ==============================================================================
+## Enemy.tscn - 敌人角色场景
+## 职责：定义敌人角色的节点结构，包含碰撞体、精灵、Hitbox等
+## 所属脚本：Enemy.gd（根节点）
+## 场景结构：
+##   Enemy (CharacterBody2D) - 根节点，物理角色
+##     ├── Sprite2D - 敌人外观显示
+##     ├── CollisionShape2D - 敌人碰撞体（半径16）
+##     └── Hitbox (Area2D) - 伤害检测区域（半径15）
+##         └── CollisionShape2D
+## ==============================================================================
+
 [gd_scene load_steps=4 format=3]
 
+## ==================== 外部资源引用 ====================
+
+## 引用 Enemy.gd 脚本（敌人核心逻辑）
 [ext_resource type="Script" path="res://scripts/entities/Enemy.gd" id="1"]
 
+## ==================== 子资源定义（碰撞形状） ====================
+
+## Hitbox碰撞体形状：圆形，半径15像素（用于子弹检测）
 [sub_resource type="CircleShape2D" id="2"]
 radius = 15.0
 
+## 主碰撞体形状：圆形，半径16像素（用于敌人物理碰撞和子弹检测）
 [sub_resource type="CircleShape2D" id="3"]
 radius = 16.0
 
+## ==================== 根节点 ====================
+## Enemy - 敌人角色根节点，使用CharacterBody2D（支持物理移动）
 [node name="Enemy" type="CharacterBody2D"]
+## 绑定敌人核心脚本
 script = ExtResource("1")
+## 碰撞层：2（敌人层）
 collision_layer = 2
+## 碰撞掩码：2（检测敌人层碰撞）
 collision_mask = 2
+## 所属组："enemy"（用于子弹命中检测）
 groups = PackedStringArray("enemy")
 
+## ==================== 敌人精灵 ====================
+## Sprite2D - 敌人外观显示节点
 [node name="Sprite2D" type="Sprite2D" parent="."]
+## 位置偏移：(0, 0)
 offset = Vector2(0, 0)
+## 纹理：null（运行时由脚本生成占位纹理）
 texture = null
+## 颜色：红色（RGB: 1, 0.2, 0.2），无美术资源时使用
 modulate = Color(1, 0.2, 0.2, 1)
+## 尺寸：30x30像素
 rect_size = Vector2(30, 30)
 
+## ==================== 主碰撞体 ====================
+## CollisionShape2D - 敌人物理碰撞体
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+## 使用半径16的圆形碰撞形状
 shape = SubResource("3")
 
+## ==================== Hitbox（伤害检测） ====================
+## Hitbox - 伤害检测区域，用于检测玩家碰撞和子弹命中
 [node name="Hitbox" type="Area2D" parent="."]
+## 碰撞层：0（不参与物理碰撞）
 collision_layer = 0
+## 碰撞掩码：1（只检测玩家层，用于敌人碰撞玩家时造成伤害）
 collision_mask = 1
 
+## Hitbox的碰撞形状
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Hitbox"]
 shape = SubResource("2")

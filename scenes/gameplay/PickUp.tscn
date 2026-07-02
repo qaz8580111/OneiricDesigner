@@ -1,30 +1,74 @@
+## ==============================================================================
+## PickUp.tscn - 拾取物场景
+## 职责：定义拾取物的节点结构，包含双重碰撞检测系统
+## 所属脚本：PickUp.gd（根节点）
+## 场景结构：
+##   PickUp (Area2D) - 根节点，主碰撞检测（小范围，半径10）
+##     ├── Sprite2D - 拾取物外观显示
+##     ├── CollisionShape2D - 主碰撞体（半径10）
+##     └── MagnetArea (Area2D) - 磁铁区域（大范围，半径100）
+##         └── CollisionShape2D - 磁铁碰撞体（半径100）
+## 
+## 碰撞设计说明：
+##   - 主碰撞体（半径10）：精确接触检测，触发拾取
+##   - 磁铁区域（半径100）：大范围检测，触发自动吸附或手动拾取提示
+## ==============================================================================
+
 [gd_scene load_steps=4 format=3]
 
+## ==================== 外部资源引用 ====================
+
+## 引用 PickUp.gd 脚本（拾取物核心逻辑）
 [ext_resource type="Script" path="res://scripts/entities/PickUp.gd" id="1"]
 
+## ==================== 子资源定义（碰撞形状） ====================
+
+## 主碰撞体形状：圆形，半径10像素（用于精确接触检测）
 [sub_resource type="CircleShape2D" id="2"]
 radius = 10.0
 
+## 磁铁区域碰撞体形状：圆形，半径100像素（用于大范围检测）
 [sub_resource type="CircleShape2D" id="3"]
 radius = 100.0
 
+## ==================== 根节点 ====================
+## PickUp - 拾取物根节点，使用Area2D（用于碰撞检测）
 [node name="PickUp" type="Area2D"]
+## 绑定拾取物核心脚本
 script = ExtResource("1")
+## 碰撞层：8（拾取物层）
 collision_layer = 8
+## 碰撞掩码：1（检测玩家层）
 collision_mask = 1
+## 启用碰撞检测
 monitoring = true
+## 允许被其他物体检测
 monitorable = true
 
+## ==================== 拾取物精灵 ====================
+## Sprite2D - 拾取物外观显示节点
 [node name="Sprite2D" type="Sprite2D" parent="."]
+## 纹理由脚本根据道具类型动态设置
 
+## ==================== 主碰撞体 ====================
+## CollisionShape2D - 拾取物主碰撞体（精确接触检测）
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+## 使用半径10的圆形碰撞形状（精确检测玩家接触）
 shape = SubResource("2")
 
+## ==================== 磁铁区域 ====================
+## MagnetArea - 大范围检测区域，用于触发自动吸附或手动拾取提示
 [node name="MagnetArea" type="Area2D" parent="."]
+## 碰撞层：0（不参与物理碰撞）
 collision_layer = 0
+## 碰撞掩码：1（只检测玩家层）
 collision_mask = 1
+## 启用碰撞检测
 monitoring = true
+## 不允许被其他物体检测（只用于检测玩家，不被玩家检测）
 monitorable = false
 
+## 磁铁区域的碰撞形状
 [node name="CollisionShape2D" type="CollisionShape2D" parent="MagnetArea"]
+## 使用半径100的圆形碰撞形状（大范围检测玩家靠近）
 shape = SubResource("3")

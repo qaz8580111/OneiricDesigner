@@ -1,77 +1,159 @@
+## ==============================================================================
+## MainMenu.tscn - 主菜单场景
+## 职责：定义游戏主菜单界面，包含标题、按钮和版本信息
+## 所属脚本：MainMenu.gd（根节点）
+## 场景结构：
+##   MainMenu (Control) - 根节点，全屏UI容器
+##     ├── Background (ColorRect) - 菜单背景（深紫色）
+##     └── VBoxContainer - 垂直布局容器
+##         ├── Title (Label) - 游戏标题
+##         ├── Subtitle (Label) - 游戏副标题
+##         ├── Spacer1 (Control) - 空白间隔（50像素）
+##         ├── StartButton (Button) - 开始游戏按钮
+##         ├── SettingsButton (Button) - 设置按钮
+##         ├── QuitButton (Button) - 退出游戏按钮
+##         ├── Spacer2 (Control) - 空白间隔（30像素）
+##         └── VersionLabel (Label) - 版本号标签
+## ==============================================================================
+
 [gd_scene load_steps=2 format=3 uid="uid://bmainmenu"]
 
+## ==================== 外部资源引用 ====================
+
+## 引用 MainMenu.gd 脚本（主菜单逻辑）
 [ext_resource type="Script" path="res://scripts/ui/MainMenu.gd" id="1_mainmenu"]
 
+## ==================== 根节点 ====================
+## MainMenu - 主菜单根节点，全屏UI容器
 [node name="MainMenu" type="Control"]
+## 布局模式：容器布局（layout_mode=3）
 layout_mode = 3
+## 锚点预设：全屏拉伸（anchors_preset=15）
 anchors_preset = 15
+## 右锚点：1.0
 anchor_right = 1.0
+## 底锚点：1.0
 anchor_bottom = 1.0
+## 水平拉伸：填充父节点（grow_horizontal=2）
 grow_horizontal = 2
+## 垂直拉伸：填充父节点（grow_vertical=2）
 grow_vertical = 2
+## 绑定主菜单脚本
 script = ExtResource("1_mainmenu")
 
+## ==================== 菜单背景 ====================
+## Background - 主菜单背景图层
 [node name="Background" type="ColorRect" parent="."]
+## 布局模式：锚点布局（layout_mode=1）
 layout_mode = 1
+## 锚点预设：全屏拉伸
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+## 颜色：深紫色（RGB: 0.1, 0.12, 0.2）
 color = Color(0.1, 0.12, 0.2, 1)
 
+## ==================== 垂直布局容器 ====================
+## VBoxContainer - 垂直排列所有菜单元素
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
+## 布局模式：锚点布局
 layout_mode = 1
+## 锚点预设：居中（anchors_preset=8）
 anchors_preset = 8
+## 左锚点：0.5（水平居中）
 anchor_left = 0.5
+## 上锚点：0.5（垂直居中）
 anchor_top = 0.5
+## 右锚点：0.5
 anchor_right = 0.5
+## 底锚点：0.5
 anchor_bottom = 0.5
+## 左偏移：-150（宽度300像素）
 offset_left = -150.0
+## 上偏移：-150（高度300像素）
 offset_top = -150.0
+## 右偏移：150
 offset_right = 150.0
+## 下偏移：150
 offset_bottom = 150.0
 grow_horizontal = 2
 grow_vertical = 2
 
+## ==================== 游戏标题 ====================
+## Title - 游戏主标题
 [node name="Title" type="Label" parent="VBoxContainer"]
+## 布局模式：控件布局（layout_mode=2）
 layout_mode = 2
+## 文本："OneiricDesigner"
 text = "OneiricDesigner"
+## 水平对齐：居中
 horizontal_alignment = 1
+## 垂直对齐：居中
 vertical_alignment = 1
+## 主题变体：HeaderMedium（中等标题样式）
 theme_type_variation = &"HeaderMedium"
+## 字体大小：64
 theme_override_font_sizes/font_size = 64
 
+## ==================== 游戏副标题 ====================
+## Subtitle - 游戏副标题
 [node name="Subtitle" type="Label" parent="VBoxContainer"]
 layout_mode = 2
+## 文本："Procedural Roguelike"
 text = "Procedural Roguelike"
+## 水平对齐：居中
 horizontal_alignment = 1
+## 主题变体：TitleSmall（小标题样式）
 theme_type_variation = &"TitleSmall"
 
+## ==================== 空白间隔1 ====================
+## Spacer1 - 标题与按钮之间的空白间隔
 [node name="Spacer1" type="Control" parent="VBoxContainer"]
 layout_mode = 2
+## 最小高度：50像素
 custom_minimum_size = Vector2(0, 50)
 
+## ==================== 开始游戏按钮 ====================
+## StartButton - 开始游戏按钮
 [node name="StartButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
+## 文本："Start Game"
 text = "Start Game"
+## 主题变体：ButtonLarge（大按钮样式）
 theme_type_variation = &"ButtonLarge"
 
+## ==================== 设置按钮 ====================
+## SettingsButton - 打开设置界面按钮
 [node name="SettingsButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
+## 文本："Settings"
 text = "Settings"
+## 主题变体：ButtonLarge
 theme_type_variation = &"ButtonLarge"
 
+## ==================== 退出游戏按钮 ====================
+## QuitButton - 退出游戏按钮
 [node name="QuitButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
+## 文本："Quit Game"
 text = "Quit Game"
+## 主题变体：ButtonLarge
 theme_type_variation = &"ButtonLarge"
 
+## ==================== 空白间隔2 ====================
+## Spacer2 - 按钮与版本号之间的空白间隔
 [node name="Spacer2" type="Control" parent="VBoxContainer"]
 layout_mode = 2
+## 最小高度：30像素
 custom_minimum_size = Vector2(0, 30)
 
+## ==================== 版本号标签 ====================
+## VersionLabel - 显示游戏版本号
 [node name="VersionLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2
+## 文本："v1.0.1"
 text = "v1.0.1"
+## 水平对齐：居中
 horizontal_alignment = 1

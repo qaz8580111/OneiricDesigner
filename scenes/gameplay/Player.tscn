@@ -1,57 +1,132 @@
+## ==============================================================================
+## Player.tscn - 玩家角色场景
+## 职责：定义玩家角色的节点结构，包含碰撞体、精灵、相机、健康系统等
+## 所属脚本：Player.gd（根节点）、PlayerHealthController.gd（健康控制器）
+## 场景结构：
+##   Player (CharacterBody2D) - 根节点，物理角色
+##     ├── Sprite2D - 玩家外观显示
+##     ├── CollisionShape2D - 玩家碰撞体（半径20）
+##     ├── Hitbox (Area2D) - 伤害检测区域（半径18）
+##     │   └── CollisionShape2D
+##     ├── Camera2D - 跟随玩家的相机
+##     └── HealthController (Node) - 健康系统容器
+##         ├── ShieldComponent (Node) - 护盾组件
+##         │   ├── RegenDelayTimer (Timer) - 护盾恢复延迟计时器
+##         │   └── RegenTimer (Timer) - 护盾恢复计时器
+##         └── CoreHealthComponent (Node) - 核心血量组件
+##             └── InvincibleTimer (Timer) - 无敌帧计时器
+## ==============================================================================
+
 [gd_scene load_steps=6 format=3]
 
+## ==================== 外部资源引用 ====================
+
+## 引用 Player.gd 脚本（玩家核心逻辑）
 [ext_resource type="Script" path="res://scripts/entities/Player.gd" id="1_player"]
+
+## 引用 PlayerHealthController.gd 脚本（健康系统协调器）
 [ext_resource type="Script" path="res://scripts/components/PlayerHealthController.gd" id="2_controller"]
+
+## 引用 ShieldComponent.gd 脚本（护盾组件）
 [ext_resource type="Script" path="res://scripts/components/ShieldComponent.gd" id="3_shield"]
+
+## 引用 CoreHealthComponent.gd 脚本（核心血量组件）
 [ext_resource type="Script" path="res://scripts/components/CoreHealthComponent.gd" id="4_core"]
 
+## ==================== 子资源定义（碰撞形状） ====================
+
+## 主碰撞体形状：圆形，半径20像素（用于玩家物理碰撞）
 [sub_resource type="CircleShape2D" id="CircleShape2D_1"]
 radius = 20.0
 
+## Hitbox碰撞体形状：圆形，半径18像素（用于伤害检测，比主碰撞体略小）
 [sub_resource type="CircleShape2D" id="CircleShape2D_2"]
 radius = 18.0
 
+## ==================== 根节点 ====================
+## Player - 玩家角色根节点，使用CharacterBody2D（支持物理移动）
 [node name="Player" type="CharacterBody2D"]
+## 绑定玩家核心脚本
 script = ExtResource("1_player")
+## 碰撞层：1（玩家层）
 collision_layer = 1
+## 碰撞掩码：1（检测玩家层碰撞）
 collision_mask = 1
+## 所属组："player"（用于敌人查找玩家）
 groups = PackedStringArray("player")
 
+## ==================== 玩家精灵 ====================
+## Sprite2D - 玩家外观显示节点
 [node name="Sprite2D" type="Sprite2D" parent="."]
+## 颜色：蓝色（RGB: 0, 0.5, 1），无美术资源时使用
 modulate = Color(0, 0.5, 1, 1)
 
+## ==================== 主碰撞体 ====================
+## CollisionShape2D - 玩家物理碰撞体
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+## 使用半径20的圆形碰撞形状
 shape = SubResource("CircleShape2D_1")
 
+## ==================== Hitbox（伤害检测） ====================
+## Hitbox - 伤害检测区域，用于检测敌人碰撞
 [node name="Hitbox" type="Area2D" parent="."]
+## 碰撞层：0（不参与物理碰撞）
+## 碰撞掩码：1（只检测玩家层，用于敌人碰撞玩家时造成伤害）
+collision_mask = 1
 
+## Hitbox的碰撞形状
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Hitbox"]
 shape = SubResource("CircleShape2D_2")
 
+## ==================== 相机 ====================
+## Camera2D - 跟随玩家的相机节点
 [node name="Camera2D" type="Camera2D" parent="."]
+## 位置偏移：(0, 0)
 position = Vector2(0, 0)
+## 设置为当前相机（激活状态）
 current = true
+## 启用平滑跟随
 smooth_enabled = true
+## 平滑跟随模式（根据玩家移动自动调整）
 smooth_follow = true
+## 平滑速度：0.1（数值越小越平滑，但响应越慢）
 smooth_speed = 0.1
 
+## ==================== 健康控制器 ====================
+## HealthController - 健康系统容器，协调护盾和核心血量
 [node name="HealthController" type="Node" parent="."]
+## 绑定健康系统协调器脚本
 script = ExtResource("2_controller")
 
+## ==================== 护盾组件 ====================
+## ShieldComponent - 护盾段数管理组件
 [node name="ShieldComponent" type="Node" parent="HealthController"]
+## 绑定护盾组件脚本
 script = ExtResource("3_shield")
 
+## 护盾恢复延迟计时器：脱战后等待5秒开始恢复护盾
 [node name="RegenDelayTimer" type="Timer" parent="HealthController/ShieldComponent"]
+## 等待时间：5秒
 wait_time = 5.0
+## 一次性计时器（触发一次后停止）
 one_shot = true
 
+## 护盾恢复计时器：每1.5秒恢复一段护盾
 [node name="RegenTimer" type="Timer" parent="HealthController/ShieldComponent"]
+## 等待时间：1.5秒
 wait_time = 1.5
+## 一次性计时器（触发一次后停止）
 one_shot = true
 
+## ==================== 核心血量组件 ====================
+## CoreHealthComponent - 核心血量管理组件
 [node name="CoreHealthComponent" type="Node" parent="HealthController"]
+## 绑定核心血量组件脚本
 script = ExtResource("4_core")
 
+## 无敌帧计时器：受击后无敌0.5秒
 [node name="InvincibleTimer" type="Timer" parent="HealthController/CoreHealthComponent"]
+## 等待时间：0.5秒
 wait_time = 0.5
+## 一次性计时器（触发一次后停止）
 one_shot = true
