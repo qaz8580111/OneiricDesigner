@@ -52,6 +52,9 @@ func _ready() -> void:
 	magnet_area.body_exited.connect(_on_magnet_body_exited)
 	## 查找玩家引用
 	_find_player()
+	
+	## 添加道具脉冲动画（让道具更明显）
+	_start_pulse_animation()
 
 ## ========== 玩家查找方法 ==========
 
@@ -63,14 +66,14 @@ func _find_player() -> void:
 
 ## ========== 物理帧更新方法 ==========
 
-## _physics_process() - 每物理帧调用一次（默认60次/秒），用于处理自动吸附逻辑
+## _physics_process() - 每物理帧调用一次（默认60次/秒），用于处理拾取交互
 func _physics_process(delta: float) -> void:
-	## 如果正在拾取、玩家为空或道具数据为空，直接返回
-	if _is_picking or _player == null or drop_item == null:
+	## 如果正在拾取或道具数据为空，直接返回
+	if _is_picking or drop_item == null:
 		return
 	
 	## 自动吸附类型（梦境碎片、回血）：飞向玩家
-	if drop_item.get_auto_adsorb():
+	if drop_item.get_auto_adsorb() and _player != null:
 		## 计算从道具位置指向玩家位置的方向向量并归一化
 		var direction: Vector2 = (_player.position - position).normalized()
 		## 计算道具与玩家之间的距离
@@ -82,6 +85,11 @@ func _physics_process(delta: float) -> void:
 			var speed_multiplier: float = 1.0 + (1.0 - distance / adsorb_radius) * 2.0
 			## 更新道具位置（方向 × 速度 × 乘数 × 时间）
 			position += direction * adsorb_speed * speed_multiplier * delta
+	
+	## 如果玩家在拾取范围内且按空格键，执行拾取
+	if _player != null and is_player_in_range():
+		if InputManager.is_action_just_pressed_safe("game_interact"):
+			pickup(_player)
 
 ## ========== 道具数据设置 ==========
 
@@ -149,6 +157,19 @@ func _create_placeholder_texture(sprite_node: Sprite2D, color: Color, width: int
 	var texture: ImageTexture = ImageTexture.create_from_image(image)
 	## 将纹理设置到Sprite2D节点上
 	sprite_node.texture = texture
+
+## 启动道具脉冲动画（让道具更明显，方便玩家发现）
+func _start_pulse_animation() -> void:
+	if sprite == null:
+		return
+	
+	## 创建循环脉冲动画（缩放+透明度变化）
+	var tween: Tween = create_tween()
+	tween.set_loops()
+	tween.set_trans(Tween.TRANS_SINE)
+	tween.set_ease(Tween.EASE_IN_OUT)
+	tween.tween_property(sprite, "scale", Vector2(1.2, 1.2), 1.0)
+	tween.tween_property(sprite, "scale", Vector2(1.0, 1.0), 1.0)
 
 ## ========== 碰撞检测回调 ==========
 

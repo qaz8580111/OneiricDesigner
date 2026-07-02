@@ -8,6 +8,12 @@ extends Node2D
 ## 子弹数据资源类，用于配置子弹属性（伤害、速度、形态、特效等）
 const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
+## 敌人数据资源类，用于配置敌人属性
+const EnemyDataClass = preload("res://scripts/resources/enemy/EnemyData.gd")
+
+## 掉落道具数据资源类，用于配置道具属性和效果
+const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
+
 ## ========== 导出变量（编辑器可配置） ==========
 
 ## 敌人生成间隔（秒），控制敌人出现频率
@@ -15,6 +21,17 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
 ## 屏幕上同时存在的最大敌人数，防止敌人过多导致性能问题
 @export var max_enemies: int = 100
+
+## ========== 精英怪配置 ==========
+
+## 精英怪生成间隔（秒），比普通怪更长
+@export var elite_spawn_interval: float = 15.0
+
+## 屏幕上同时存在的最大精英怪数
+@export var max_elite_enemies: int = 3
+
+## 精英怪数据资源（配置精英怪的属性、掉落等）
+@export var elite_enemy_data: EnemyDataClass = null
 
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
@@ -54,6 +71,14 @@ var _bullets: Array[Area2D] = []
 ## 场景中所有拾取物的管理列表
 var _pickups: Array[Area2D] = []
 
+## ========== 精英怪成员变量 ==========
+
+## 精英怪生成计时器，递减到0时生成新精英怪
+var _elite_spawn_timer: float = 0.0
+
+## 当前场景中存活的精英怪数
+var _elite_enemy_count: int = 0
+
 ## ========== 信号定义（用于与其他节点通信） ==========
 
 ## 游戏结束时发出此信号（玩家死亡）
@@ -67,10 +92,77 @@ func _ready() -> void:
 	if default_bullet_data == null:
 		default_bullet_data = BulletDataClass.new()
 	
+	## 初始化精英怪数据（如果配置了精英怪但没有数据，创建默认精英怪数据）
+	_initialize_elite_enemy_data()
+	
 	## 查找玩家并连接信号
 	_find_player()
 
 ## ========== 玩家查找与信号连接 ==========
+
+## 初始化精英怪数据（如果配置了精英怪但没有数据，创建默认精英怪数据）
+func _initialize_elite_enemy_data() -> void:
+	## 如果已经配置了精英怪数据，直接使用
+	if elite_enemy_data != null:
+		return
+	
+	## 创建默认精英怪数据
+	elite_enemy_data = EnemyDataClass.new()
+	elite_enemy_data.enemy_id = "elite_default"
+	elite_enemy_data.enemy_name = "Elite Enemy"
+	elite_enemy_data.speed = 180.0
+	elite_enemy_data.wander_speed = 100.0
+	elite_enemy_data.wander_interval = 3.0
+	elite_enemy_data.max_health = 20
+	elite_enemy_data.damage = 25
+	elite_enemy_data.detection_range = 500.0
+	elite_enemy_data.attack_range = 200.0
+	elite_enemy_data.attack_cooldown = 0.8
+	elite_enemy_data.placeholder_color = Color(1, 0.5, 0, 1)
+	elite_enemy_data.placeholder_size = Vector2(36, 36)
+	elite_enemy_data.is_elite = true
+	elite_enemy_data.elite_prefix = "★"
+	
+	## 添加随机掉落道具
+	_add_elite_drops()
+
+## 为精英怪添加随机掉落道具
+func _add_elite_drops() -> void:
+	if elite_enemy_data == null:
+		return
+	
+	## 创建大型梦境碎片掉落（80%概率掉落，手动拾取）
+	var fragment_drop: DropItemClass = DropItemClass.new()
+	fragment_drop.item_id = "elite_fragment"
+	fragment_drop.item_name = "Large Dream Fragment"
+	fragment_drop.item_type = DropItemClass.ItemType.DREAM_FRAGMENT
+	fragment_drop.value = 20
+	fragment_drop.drop_chance = 0.8
+	fragment_drop.is_rare = false
+	fragment_drop.auto_adsorb = false
+	elite_enemy_data.drop_items.append(fragment_drop)
+	
+	## 创建大型回血道具掉落（60%概率掉落，手动拾取）
+	var health_drop: DropItemClass = DropItemClass.new()
+	health_drop.item_id = "elite_health"
+	health_drop.item_name = "Large Health Pack"
+	health_drop.item_type = DropItemClass.ItemType.HEALTH
+	health_drop.value = 30
+	health_drop.drop_chance = 0.6
+	health_drop.is_rare = false
+	health_drop.auto_adsorb = false
+	elite_enemy_data.drop_items.append(health_drop)
+	
+	## 创建攻击增益道具掉落（30%概率掉落，稀有，手动拾取）
+	var buff_drop: DropItemClass = DropItemClass.new()
+	buff_drop.item_id = "elite_buff_attack"
+	buff_drop.item_name = "Power Boost"
+	buff_drop.item_type = DropItemClass.ItemType.BUFF
+	buff_drop.value = 5
+	buff_drop.drop_chance = 0.3
+	buff_drop.is_rare = true
+	buff_drop.auto_adsorb = false
+	elite_enemy_data.drop_items.append(buff_drop)
 
 ## 查找玩家并连接相关信号
 func _find_player() -> void:
@@ -95,8 +187,11 @@ func _find_player() -> void:
 
 ## _process() - 每帧调用一次，用于处理非物理相关逻辑
 func _process(delta: float) -> void:
-	## 处理敌人生成
+	## 处理普通敌人生成
 	_spawn_enemies(delta)
+	
+	## 处理精英敌人生成
+	_spawn_elite_enemies(delta)
 	
 	## 处理手动拾取输入（按E键拾取道具）
 	_handle_manual_pickup()
@@ -120,7 +215,8 @@ func _spawn_enemies(delta: float) -> void:
 		_spawn_timer = enemy_spawn_interval
 
 ## 生成单个敌人
-func _spawn_enemy() -> void:
+## 参数：is_elite - 是否为精英怪
+func _spawn_enemy(is_elite: bool = false) -> void:
 	## 实例化敌人节点
 	var enemy: CharacterBody2D = ENEMY_SCENE.instantiate()
 
@@ -144,17 +240,52 @@ func _spawn_enemy() -> void:
 			## 左边：X在屏幕左方，随机Y位置
 			enemy.position = Vector2(-margin, RandomManager.randf_range(0, screen_size.y))
 
+	## 如果是精英怪且有精英怪数据配置，应用精英怪数据
+	if is_elite and elite_enemy_data != null:
+		enemy.enemy_data = elite_enemy_data
+		## 添加精英怪组标记
+		enemy.add_to_group("elite_enemy")
+	else:
+		## 添加普通敌人组标记
+		enemy.add_to_group("normal_enemy")
+
 	## 将敌人添加到场景树中
 	add_child(enemy)
 	## 将敌人添加到管理列表
 	_enemies.append(enemy)
-	## 增加敌人计数
-	_enemy_count += 1
+	
+	## 根据类型增加对应计数
+	if is_elite:
+		_elite_enemy_count += 1
+	else:
+		_enemy_count += 1
 
-	## 连接敌人死亡信号：当敌人死亡时触发回调（绑定敌人实例）
-	enemy.killed.connect(_on_enemy_killed.bind(enemy))
+	## 连接敌人死亡信号：当敌人死亡时触发回调（绑定敌人实例和是否精英标记）
+	enemy.killed.connect(_on_enemy_killed.bind(enemy, is_elite))
 	## 连接敌人掉落信号：当敌人生成掉落物时触发回调
 	enemy.drops_generated.connect(_on_enemy_drops_generated)
+
+## ========== 精英怪生成系统 ==========
+
+## 处理精英敌人生成逻辑
+## 参数：delta - 帧间隔时间（秒）
+func _spawn_elite_enemies(delta: float) -> void:
+	## 如果没有精英怪数据配置，不生成精英怪
+	if elite_enemy_data == null:
+		return
+	
+	## 如果当前精英怪数量已达上限，不生成新精英怪
+	if _elite_enemy_count >= max_elite_enemies:
+		return
+
+	## 递减精英怪生成计时器
+	_elite_spawn_timer -= delta
+
+	## 如果计时器归零，生成新精英怪
+	if _elite_spawn_timer <= 0.0:
+		_spawn_enemy(true)
+		## 重置精英怪生成计时器
+		_elite_spawn_timer = elite_spawn_interval
 
 ## ========== 道具拾取系统 ==========
 
@@ -236,21 +367,25 @@ func _on_bullet_destroyed(bullet: Area2D) -> void:
 
 ## 敌人死亡时的回调（响应enemy.killed信号）
 ## 参数：enemy - 死亡的敌人实例
-func _on_enemy_killed(enemy: CharacterBody2D) -> void:
+## 参数：is_elite - 是否为精英怪
+func _on_enemy_killed(enemy: CharacterBody2D, is_elite: bool = false) -> void:
 	## 从管理列表中移除敌人
 	if enemy in _enemies:
 		_enemies.erase(enemy)
-		## 减少敌人计数
-		_enemy_count -= 1
+		## 根据类型减少对应计数
+		if is_elite:
+			_elite_enemy_count -= 1
+		else:
+			_enemy_count -= 1
 
 ## 敌人掉落道具时的回调（响应enemy.drops_generated信号）
 ## 参数：position - 掉落位置，drops - 掉落道具列表
 func _on_enemy_drops_generated(position: Vector2, drops: Array) -> void:
-	## 遍历所有掉落道具，生成拾取物
+	## 使用call_deferred延迟生成拾取物，避免在物理回调中修改场景树
 	for drop_item in drops:
 		if drop_item == null:
 			continue
-		_spawn_pickup(position, drop_item)
+		call_deferred("_spawn_pickup", position, drop_item)
 
 ## 生成拾取物
 ## 参数：position - 生成位置，drop_item - 道具数据资源

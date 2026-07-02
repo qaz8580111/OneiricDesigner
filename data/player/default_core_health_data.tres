@@ -1,8 +1,17 @@
 [gd_resource type="CoreHealthData" load_steps=1 format=3]
 
+# ========== 玩家核心血量配置 ==========
+# 对应脚本: res://scripts/resources/player/CoreHealthData.gd
+# 注意: Godot编辑器重新保存此文件时可能会剥离 # 注释
+
 [resource]
+# 核心血量上限（默认100点）- 玩家总血量，护盾耗尽后扣除此值
 max_hp = 100.0
+# 红血预警阈值（默认0.3，即30%）- 低于此百分比触发警示
 critical_threshold = 0.3
+# 核心受击后无敌帧时长（默认0.5秒）- 避免连续受击瞬间死亡
 invincible_duration = 0.5
+# 死亡特效（PackedScene）- 血量归零播放的粒子效果
 death_vfx = null
+# 红血警示音效（AudioStream）- 进入红血状态播放的音效
 critical_sfx = null

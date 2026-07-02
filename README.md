@@ -14,7 +14,6 @@
 OneiricDesigner/
 ├── project.godot          # Godot 项目配置文件
 ├── icon.svg               # 游戏图标
-├── assets/                # 纯资源层（预留）
 ├── scenes/                # 场景文件
 │   ├── core/              # 核心场景
 │   │   └── Main.tscn      # 主场景
@@ -36,6 +35,10 @@ OneiricDesigner/
 │   │   ├── RandomManager.gd      # 随机数管理
 │   │   ├── TranslationManager.gd # 多语言翻译
 │   │   └── MenuController.gd     # 菜单导航
+│   ├── components/        # 组件系统
+│   │   ├── PlayerHealthController.gd  # 玩家健康控制器
+│   │   ├── ShieldComponent.gd         # 护盾组件
+│   │   └── CoreHealthComponent.gd     # 核心血量组件
 │   ├── entities/          # 游戏实体
 │   │   ├── Main.gd       # 主场景逻辑
 │   │   ├── Player.gd     # 玩家控制器
@@ -43,12 +46,35 @@ OneiricDesigner/
 │   │   ├── Bullet.gd     # 子弹逻辑
 │   │   ├── PickUp.gd     # 拾取物逻辑
 │   │   └── GameWorld.gd  # 游戏世界管理
+│   ├── resources/         # 资源数据类
+│   │   ├── bullet/       # 子弹资源
+│   │   │   ├── BulletData.gd    # 子弹数据配置
+│   │   │   ├── BulletForm.gd    # 子弹形态定义
+│   │   │   └── BulletEffect.gd  # 子弹特效定义
+│   │   ├── enemy/        # 敌人资源
+│   │   │   ├── EnemyData.gd     # 敌人数据配置
+│   │   │   └── DropItem.gd      # 掉落道具数据
+│   │   └── player/       # 玩家资源
+│   │       ├── ShieldData.gd    # 护盾数据配置
+│   │       └── CoreHealthData.gd # 核心血量数据配置
 │   └── ui/               # UI 脚本
 │       ├── MainMenu.gd   # 主菜单
 │       ├── PauseMenu.gd  # 暂停菜单
-│       ├── Settings.gd    # 设置菜单
+│       ├── Settings.gd   # 设置菜单
 │       └── GameHUD.gd    # 游戏 HUD
-└── data/                  # 数据驱动（预留）
+└── data/                 # 数据配置文件
+    ├── enemy/            # 敌人配置
+    │   └── elite_enemy_data.tres # 精英怪数据
+    ├── items/            # 道具配置
+    │   ├── drop_elite_fragment.tres # 精英碎片
+    │   ├── drop_elite_health.tres   # 精英回血
+    │   └── drop_elite_buff.tres     # 精英BUFF
+    ├── localization/     # 本地化配置
+    │   ├── zh_CN.po      # 中文翻译
+    │   └── en_US.po      # 英文翻译
+    └── player/           # 玩家配置
+        ├── default_shield_data.tres    # 默认护盾配置
+        └── default_core_health_data.tres # 默认核心血量配置
 ```
 
 ## 核心系统

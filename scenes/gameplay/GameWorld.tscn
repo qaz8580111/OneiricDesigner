@@ -1,10 +1,30 @@
 [gd_scene load_steps=2 format=3 uid="uid://bgameworld"]
 
+; ==============================================================================
+; GameWorld.tscn - 游戏世界场景
+; 职责：定义游戏世界的根节点，作为所有游戏实体（玩家、敌人、物品）的容器
+; 所属脚本：GameWorld.gd (根节点) - 游戏世界管理器，处理敌人生成、场景管理等
+;
+; 场景结构：
+;   GameWorld (Node2D)
+;   ├── Background (ColorRect) - 游戏背景（深灰蓝色）
+;   └── [动态添加] Player, Enemy, PickUp 等游戏实体
+;
+; 使用方式：在Main.tscn中作为子节点加载，玩家和敌人通过脚本动态生成到此节点下
+; ==============================================================================
+
 [ext_resource type="Script" path="res://scripts/entities/GameWorld.gd" id="1_world"]
 
+; ------------------------------ 根节点 ------------------------------
+; GameWorld (Node2D) - 游戏世界根节点
+; 作为所有游戏实体的父容器，提供统一的坐标空间
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_world")
 
+; ------------------------------ 背景 ------------------------------
+; Background (ColorRect) - 游戏背景
+; 颜色：深灰蓝 (0.1, 0.1, 0.15, 1)，营造梦境氛围
+; 尺寸：1280x720，覆盖默认游戏窗口
 [node name="Background" type="ColorRect" parent="."]
 color = Color(0.1, 0.1, 0.15, 1)
 rect_size = Vector2(1280, 720)

@@ -1,0 +1,35 @@
+[gd_resource type="EnemyData" load_steps=1 format=3]
+
+# ========== 精英敌人配置数据 ==========
+# 对应脚本: res://scripts/resources/enemy/EnemyData.gd
+# 职责：定义精英敌人的所有行为和属性参数，包括移动、攻击、外观等
+
+[resource]
+# 敌人唯一ID - 用于脚本中识别和生成此类型敌人
+enemy_id = "elite_001"
+# 敌人显示名称 - UI中显示的敌人名称（带精英标记）
+enemy_name = "Elite Enemy"
+# 敌人移动速度（180像素/秒）- CHASE状态下的移动速度
+speed = 180.0
+# 敌人漫游速度（100像素/秒）- WANDER状态下的随机移动速度
+wander_speed = 100.0
+# 漫游间隔（3秒）- WANDER状态下每次改变方向的时间间隔
+wander_interval = 3.0
+# 最大生命值（20点）- 精英敌人比普通敌人更耐打
+max_health = 20
+# 攻击伤害（25点）- 精英敌人攻击造成的伤害值
+damage = 25
+# 检测范围（500像素）- 敌人能发现玩家的最大距离
+detection_range = 500.0
+# 攻击范围（200像素）- 敌人进入此范围后开始攻击
+attack_range = 200.0
+# 攻击冷却（0.8秒）- 每次攻击后需要等待的时间
+attack_cooldown = 0.8
+# 占位颜色（橙色）- 无纹理时的显示颜色，区分精英与普通敌人
+placeholder_color = Color(1, 0.5, 0, 1)
+# 占位尺寸（36x36像素）- 无纹理时的精灵大小
+placeholder_size = Vector2(36, 36)
+# 是否精英敌人 - true表示此敌人为精英类型，掉落更好的物品
+is_elite = true
+# 精英前缀标记 - 显示在敌人名称前的特殊符号
+elite_prefix = "★"

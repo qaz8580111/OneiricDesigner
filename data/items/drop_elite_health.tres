@@ -1,0 +1,21 @@
+[gd_resource type="DropItem" load_steps=1 format=3]
+
+# ========== 精英掉落物配置 - 大型生命包 ==========
+# 对应脚本: res://scripts/resources/items/DropItem.gd
+# 职责：定义精英敌人掉落的大型生命恢复物品属性
+
+[resource]
+# 物品唯一ID - 用于脚本中识别和处理此物品
+item_id = "elite_health"
+# 物品显示名称 - UI中显示的物品名称
+item_name = "Large Health Pack"
+# 物品类型（1=HEALTH）- 0:DREAM_FRAGMENT 1:HEALTH 2:WEAPON 3:ITEM 4:BUFF
+item_type = 1
+# 物品数值（恢复30点血量）- HEALTH类型表示恢复血量值
+value = 30
+# 掉落概率（60%）- 精英敌人死亡后掉落此物品的概率
+drop_chance = 0.6
+# 是否稀有物品 - 非稀有物品，普通视觉效果
+is_rare = false
+# 是否自动吸附 - true表示接触玩家自动拾取
+auto_adsorb = true

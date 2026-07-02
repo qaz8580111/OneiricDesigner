@@ -1,7 +1,27 @@
 [gd_scene load_steps=2 format=3 uid="uid://bpausemenu"]
 
+; ==============================================================================
+; PauseMenu.tscn - 暂停菜单界面
+; 职责：定义游戏暂停时显示的菜单，包含继续游戏、设置、返回主菜单等选项
+; 所属脚本：PauseMenu.gd (根节点) - 暂停菜单控制器，处理暂停/继续逻辑等
+;
+; 场景结构：
+;   PauseMenu (Control)
+;   ├── Background (ColorRect) - 半透明黑色遮罩（0.7透明度）
+;   └── VBoxContainer - 垂直布局容器
+;       ├── Title (Label) - 标题（Paused）
+;       ├── ResumeButton (Button) - 继续游戏按钮
+;       ├── SettingsButton (Button) - 设置按钮
+;       └── QuitButton (Button) - 返回主菜单按钮
+;
+; 使用方式：游戏暂停时作为UIStack的子节点动态加载到CanvasLayer中
+; ==============================================================================
+
 [ext_resource type="Script" path="res://scripts/ui/PauseMenu.gd" id="1_pausemenu"]
 
+; ------------------------------ 根节点 ------------------------------
+; PauseMenu (Control) - 暂停菜单根节点
+; anchors_preset=15：全屏锚定
 [node name="PauseMenu" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -11,6 +31,9 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_pausemenu")
 
+; ------------------------------ 背景遮罩 ------------------------------
+; Background (ColorRect) - 半透明遮罩
+; 颜色：黑色，透明度0.7，用于遮挡游戏画面，突出菜单
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -20,6 +43,9 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 0.7)
 
+; ------------------------------ 菜单内容 ------------------------------
+; VBoxContainer - 垂直布局容器
+; anchors_preset=8：居中锚定，偏移-150,-100到150,100形成300x200的居中区域
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 8
@@ -34,20 +60,28 @@ offset_bottom = 100.0
 grow_horizontal = 2
 grow_vertical = 2
 
+; Title (Label) - 暂停标题
+; 使用HeaderMedium主题变体，居中显示
 [node name="Title" type="Label" parent="VBoxContainer"]
 layout_mode = 2
 text = "Paused"
 horizontal_alignment = 1
 theme_type_variation = &"HeaderMedium"
 
+; ResumeButton (Button) - 继续游戏按钮
+; 点击后恢复游戏运行
 [node name="ResumeButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Resume Game"
 
+; SettingsButton (Button) - 设置按钮
+; 打开设置界面
 [node name="SettingsButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Settings"
 
+; QuitButton (Button) - 返回主菜单按钮
+; 退出当前游戏，返回主菜单
 [node name="QuitButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Quit to Menu"

@@ -1,31 +1,64 @@
 [gd_scene load_steps=4 format=3]
 
+; ==============================================================================
+; Enemy.tscn - 敌人角色场景
+; 职责：定义敌人角色的完整节点结构，包含碰撞体、精灵、伤害检测区域等
+; 所属脚本：Enemy.gd (根节点) - 敌人控制器，处理AI状态机、移动、攻击等逻辑
+;
+; 场景结构：
+;   Enemy (CharacterBody2D)
+;   ├── Sprite2D - 敌人外观显示（红色方块）
+;   ├── CollisionShape2D - 敌人物理碰撞体（半径16）
+;   └── Hitbox (Area2D) - 伤害检测区域（半径15，略小于物理碰撞体）
+;       └── CollisionShape2D
+;
+; 碰撞层配置：
+;   - Enemy (CharacterBody2D): collision_layer=2, collision_mask=2（敌人层）
+;   - Hitbox (Area2D): collision_mask=1（只检测与玩家层的碰撞）
+; ==============================================================================
+
 [ext_resource type="Script" path="res://scripts/entities/Enemy.gd" id="1"]
 
+; 伤害检测碰撞体形状 - 略小于物理碰撞体（半径15像素），提供更精确的受击判定
 [sub_resource type="CircleShape2D" id="2"]
 radius = 15.0
 
+; 物理碰撞体形状 - 用于角色移动和碰撞检测（半径16像素）
 [sub_resource type="CircleShape2D" id="3"]
 radius = 16.0
 
+; ------------------------------ 根节点 ------------------------------
+; Enemy (CharacterBody2D) - 敌人物理角色根节点
+; 碰撞层：2（敌人层），与其他敌人层物体碰撞
+; 所属组：enemy（用于查找敌人引用和子弹碰撞检测）
 [node name="Enemy" type="CharacterBody2D"]
 script = ExtResource("1")
 collision_layer = 2
 collision_mask = 2
 groups = PackedStringArray("enemy")
 
+; ------------------------------ 外观与碰撞 ------------------------------
+; Sprite2D - 敌人外观显示
+; 颜色：红色 (1, 0.2, 0.2, 1)，用于区分敌人与玩家
 [node name="Sprite2D" type="Sprite2D" parent="."]
 offset = Vector2(0, 0)
 texture = null
 modulate = Color(1, 0.2, 0.2, 1)
 rect_size = Vector2(30, 30)
 
+; CollisionShape2D - 敌人物理碰撞体
+; 使用 CircleShape2D_3（半径16），用于角色移动和物理碰撞检测
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("3")
 
+; Hitbox (Area2D) - 伤害检测区域
+; 使用较小的碰撞体（半径15），只检测碰撞掩码（不参与物理碰撞）
+; collision_mask=1：只检测与玩家层物体的碰撞（玩家子弹）
 [node name="Hitbox" type="Area2D" parent="."]
 collision_layer = 0
 collision_mask = 1
 
+; CollisionShape2D - 伤害检测碰撞体
+; 使用 CircleShape2D_2（半径15），略小于物理碰撞体
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Hitbox"]
 shape = SubResource("2")

@@ -1,13 +1,39 @@
 [gd_scene load_steps=4 format=3]
 
+; ==============================================================================
+; PickUp.tscn - 拾取物品场景
+; 职责：定义可拾取物品的节点结构，包含双碰撞系统（接触检测+磁吸区域）
+; 所属脚本：PickUp.gd (根节点) - 拾取物品控制器，处理吸附逻辑、拾取判定等
+;
+; 场景结构：
+;   PickUp (Area2D)
+;   ├── Sprite2D - 物品外观显示（z_index=100确保在最上层）
+;   ├── CollisionShape2D - 主碰撞体（半径10，用于接触检测）
+;   └── MagnetArea (Area2D) - 磁吸区域（半径100，用于靠近检测）
+;       └── CollisionShape2D
+;
+; 碰撞层配置：
+;   - PickUp (Area2D): collision_layer=8, collision_mask=1（物品层，检测玩家层）
+;   - MagnetArea (Area2D): collision_layer=0, collision_mask=1（只检测不参与碰撞）
+;
+; 双碰撞系统说明：
+;   - 小碰撞体（半径10）：精确接触检测，触发拾取
+;   - 大磁吸区域（半径100）： proximity检测，触发吸附动画和视觉反馈
+; ==============================================================================
+
 [ext_resource type="Script" path="res://scripts/entities/PickUp.gd" id="1"]
 
+; 主碰撞体形状 - 小碰撞体（半径10像素），用于精确接触检测
 [sub_resource type="CircleShape2D" id="2"]
 radius = 10.0
 
+; 磁吸区域碰撞体形状 - 大碰撞体（半径100像素），用于靠近检测
 [sub_resource type="CircleShape2D" id="3"]
 radius = 100.0
 
+; ------------------------------ 根节点 ------------------------------
+; PickUp (Area2D) - 拾取物品根节点
+; collision_layer=8（物品层），collision_mask=1（检测玩家层）
 [node name="PickUp" type="Area2D"]
 script = ExtResource("1")
 collision_layer = 8
@@ -15,16 +41,28 @@ collision_mask = 1
 monitoring = true
 monitorable = true
 
+; ------------------------------ 外观与碰撞 ------------------------------
+; Sprite2D - 物品外观显示
+; z_index=100：确保物品显示在其他游戏元素之上
 [node name="Sprite2D" type="Sprite2D" parent="."]
+z_index = 100
 
+; CollisionShape2D - 主碰撞体
+; 使用 CircleShape2D_2（半径10），用于精确接触检测和拾取触发
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("2")
 
+; ------------------------------ 磁吸系统 ------------------------------
+; MagnetArea (Area2D) - 磁吸区域
+; 大半径区域，用于检测玩家靠近，触发吸附动画和视觉反馈
+; collision_layer=0：不参与物理碰撞，只做检测
 [node name="MagnetArea" type="Area2D" parent="."]
 collision_layer = 0
 collision_mask = 1
 monitoring = true
 monitorable = false
 
+; CollisionShape2D - 磁吸区域碰撞体
+; 使用 CircleShape2D_3（半径100），用于 proximity 检测
 [node name="CollisionShape2D" type="CollisionShape2D" parent="MagnetArea"]
 shape = SubResource("3")

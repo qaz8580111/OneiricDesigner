@@ -119,7 +119,7 @@ func _ready() -> void:
 	## 获取初始漫游方向
 	_wander_direction = _get_random_direction()
 	
-	## 设置敌人占位纹理（红色方块，无美术资源时使用）
+	## 设置敌人占位纹理（无美术资源时使用）
 	var color: Color = Color(1, 0.2, 0.2, 1)
 	var width: int = 30
 	var height: int = 30
@@ -128,7 +128,13 @@ func _ready() -> void:
 		color = enemy_data.placeholder_color
 		width = int(enemy_data.placeholder_size.x)
 		height = int(enemy_data.placeholder_size.y)
+	
+	## 创建占位纹理
 	_create_placeholder_texture(sprite, color, width, height)
+	
+	## 如果是精英怪，添加发光效果
+	if enemy_data != null and enemy_data.is_elite:
+		_create_elite_glow_effect()
 	
 	## 保存敌人原始颜色，用于受伤后恢复
 	_original_color = sprite.modulate
@@ -153,6 +159,43 @@ func _create_placeholder_texture(sprite_node: Sprite2D, color: Color, width: int
 	var texture: ImageTexture = ImageTexture.create_from_image(image)
 	## 将纹理设置到Sprite2D节点上
 	sprite_node.texture = texture
+
+## 创建精英怪发光效果（使精英怪更加醒目）
+func _create_elite_glow_effect() -> void:
+	if sprite == null:
+		return
+	
+	## 创建发光精灵作为子节点
+	var glow_sprite: Sprite2D = Sprite2D.new()
+	glow_sprite.name = "EliteGlow"
+	glow_sprite.offset = Vector2.ZERO
+	glow_sprite.modulate = Color(1, 0.5, 0, 0.4)
+	glow_sprite.scale = Vector2(1.5, 1.5)
+	glow_sprite.z_index = -1
+	
+	## 创建发光纹理
+	var image: Image = Image.create(
+		int(sprite.texture.get_size().x),
+		int(sprite.texture.get_size().y),
+		false,
+		Image.FORMAT_RGBA8
+	)
+	image.fill(Color(1, 0.5, 0, 0.6))
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	glow_sprite.texture = texture
+	
+	## 将发光精灵添加到敌人节点
+	sprite.add_child(glow_sprite)
+	
+	## 添加呼吸动画（使发光效果有脉动感）
+	var tween: Tween = create_tween()
+	tween.set_loops()
+	tween.set_trans(Tween.TRANS_SINE)
+	tween.set_ease(Tween.EASE_IN_OUT)
+	tween.tween_property(glow_sprite, "scale", Vector2(1.8, 1.8), 1.0)
+	tween.tween_property(glow_sprite, "scale", Vector2(1.5, 1.5), 1.0)
+	tween.tween_property(glow_sprite, "modulate:a", 0.6, 1.0)
+	tween.tween_property(glow_sprite, "modulate:a", 0.3, 1.0)
 
 ## ========== 物理帧更新方法 ==========
 
@@ -384,8 +427,8 @@ func _die() -> void:
 	
 	## 发出死亡信号（用于统计、清理等）
 	killed.emit()
-	## 从场景树中移除并销毁敌人节点
-	queue_free()
+	## 使用call_deferred延迟销毁，避免物理回调中修改场景树导致错误
+	call_deferred("queue_free")
 
 ## ========== 碰撞检测 ==========
 

@@ -1,11 +1,23 @@
 [gd_resource type="ShieldData" load_steps=1 format=3]
 
+# ========== 护盾配置数据 ==========
+# 对应脚本: res://scripts/resources/player/ShieldData.gd
+# 职责：定义护盾系统的所有配置参数，包括护盾段数、恢复逻辑、视觉表现等
+
 [resource]
+# 最大护盾段数（默认3段）- 护盾的总段数，每段有独立血量
 max_segments = 3
+# 每段护盾血量（默认10点）- 单段护盾能承受的伤害值
 segment_hp = 10.0
+# 护盾恢复延迟时间（默认5秒）- 受击后需等待此时间才开始恢复
 regen_delay = 5.0
+# 护盾恢复间隔（默认1.5秒）- 每间隔此时间恢复一段护盾
 regen_interval = 1.5
+# 护盾破碎特效（PackedScene）- 护盾完全破碎时播放的粒子效果
 break_vfx = null
+# 护盾受击音效（AudioStream）- 护盾承受伤害时播放的音效
 hit_sfx = null
+# 护盾完整时颜色（青色）- 护盾满血状态下的显示颜色
 color_full = Color(0, 1, 1, 1)
+# 护盾低血量时颜色（橙色）- 护盾仅剩一段时的警示颜色
 color_low = Color(1, 0.666667, 0, 1)

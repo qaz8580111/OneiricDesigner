@@ -1,7 +1,30 @@
 [gd_scene load_steps=2 format=3 uid="uid://bmainmenu"]
 
+; ==============================================================================
+; MainMenu.tscn - 主菜单界面
+; 职责：定义游戏启动时的主菜单，包含开始游戏、设置、退出等选项
+; 所属脚本：MainMenu.gd (根节点) - 主菜单控制器，处理按钮点击事件等
+;
+; 场景结构：
+;   MainMenu (Control)
+;   ├── Background (ColorRect) - 菜单背景（深蓝灰色）
+;   └── VBoxContainer - 垂直布局容器
+;       ├── Title (Label) - 游戏标题（OneiricDesigner）
+;       ├── Subtitle (Label) - 副标题（Procedural Roguelike）
+;       ├── Spacer1 (Control) - 间距（50像素）
+;       ├── StartButton (Button) - 开始游戏按钮
+;       ├── SettingsButton (Button) - 设置按钮
+;       ├── QuitButton (Button) - 退出游戏按钮
+;       ├── Spacer2 (Control) - 间距（30像素）
+;       └── VersionLabel (Label) - 版本号显示
+; ==============================================================================
+
 [ext_resource type="Script" path="res://scripts/ui/MainMenu.gd" id="1_mainmenu"]
 
+; ------------------------------ 根节点 ------------------------------
+; MainMenu (Control) - 主菜单根节点
+; anchors_preset=15：全屏锚定
+; layout_mode=3：锚点布局模式
 [node name="MainMenu" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -11,6 +34,9 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_mainmenu")
 
+; ------------------------------ 背景 ------------------------------
+; Background (ColorRect) - 菜单背景
+; 颜色：深蓝灰 (0.1, 0.12, 0.2, 1)，营造神秘氛围
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -20,6 +46,9 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.1, 0.12, 0.2, 1)
 
+; ------------------------------ 菜单内容 ------------------------------
+; VBoxContainer - 垂直布局容器
+; anchors_preset=8：居中锚定，偏移-150,-150到150,150形成300x300的居中区域
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 8
@@ -34,6 +63,8 @@ offset_bottom = 150.0
 grow_horizontal = 2
 grow_vertical = 2
 
+; Title (Label) - 游戏标题
+; 字体大小64，居中显示，使用HeaderMedium主题变体
 [node name="Title" type="Label" parent="VBoxContainer"]
 layout_mode = 2
 text = "OneiricDesigner"
@@ -42,35 +73,49 @@ vertical_alignment = 1
 theme_type_variation = &"HeaderMedium"
 theme_override_font_sizes/font_size = 64
 
+; Subtitle (Label) - 副标题
+; 使用TitleSmall主题变体，居中显示
 [node name="Subtitle" type="Label" parent="VBoxContainer"]
 layout_mode = 2
 text = "Procedural Roguelike"
 horizontal_alignment = 1
 theme_type_variation = &"TitleSmall"
 
+; Spacer1 (Control) - 间距控件
+; 高度50像素，用于标题和按钮之间的分隔
 [node name="Spacer1" type="Control" parent="VBoxContainer"]
 layout_mode = 2
 custom_minimum_size = Vector2(0, 50)
 
+; StartButton (Button) - 开始游戏按钮
+; 使用ButtonLarge主题变体
 [node name="StartButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Start Game"
 theme_type_variation = &"ButtonLarge"
 
+; SettingsButton (Button) - 设置按钮
+; 使用ButtonLarge主题变体
 [node name="SettingsButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Settings"
 theme_type_variation = &"ButtonLarge"
 
+; QuitButton (Button) - 退出游戏按钮
+; 使用ButtonLarge主题变体
 [node name="QuitButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Quit Game"
 theme_type_variation = &"ButtonLarge"
 
+; Spacer2 (Control) - 间距控件
+; 高度30像素，用于按钮和版本号之间的分隔
 [node name="Spacer2" type="Control" parent="VBoxContainer"]
 layout_mode = 2
 custom_minimum_size = Vector2(0, 30)
 
+; VersionLabel (Label) - 版本号显示
+; 居中显示当前版本号
 [node name="VersionLabel" type="Label" parent="VBoxContainer"]
 layout_mode = 2
 text = "v1.0.1"

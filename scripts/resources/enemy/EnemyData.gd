@@ -67,6 +67,14 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 ## 敌人占位纹理大小（无美术资源时使用，默认30x30像素）
 @export var placeholder_size: Vector2 = Vector2(30, 30)
 
+## ========== 精英怪配置 ==========
+
+## 是否为精英怪（精英怪具有更高属性和特殊外观）
+@export var is_elite: bool = false
+
+## 精英怪名称前缀（显示时添加到名称前，如"★ 精英"）
+@export var elite_prefix: String = "★"
+
 ## ========== 核心方法 ==========
 
 ## 获取敌人射击用的子弹数据（带默认值）

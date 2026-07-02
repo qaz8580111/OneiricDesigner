@@ -1,12 +1,39 @@
 [gd_scene load_steps=2 format=3 uid="uid://bmainscene"]
 
+; ==============================================================================
+; Main.tscn - 游戏主场景
+; 职责：定义游戏的顶级场景结构，包含UI层和游戏世界层
+; 所属脚本：Main.gd (根节点) - 主场景控制器，处理场景切换、全局状态管理等
+;
+; 场景结构：
+;   Main (Node2D)
+;   ├── CanvasLayer - UI层（始终显示在最上层，不受相机影响）
+;   │   └── UIStack (Control) - UI栈容器，用于动态加载不同UI界面
+;   │       └── [动态添加] MainMenu, GameHUD, PauseMenu, Settings 等UI场景
+;   └── GameWorld (Node2D) - 游戏世界层
+;       └── [动态添加] Player, Enemy, PickUp 等游戏实体
+;
+; 分层设计说明：
+;   - CanvasLayer：独立于游戏世界的UI层，使用CanvasLayer确保UI始终可见
+;   - GameWorld：游戏实体所在的世界层，跟随相机移动
+; ==============================================================================
+
 [ext_resource type="Script" path="res://scripts/entities/Main.gd" id="1_main"]
 
+; ------------------------------ 根节点 ------------------------------
+; Main (Node2D) - 游戏主场景根节点
+; 作为所有游戏内容的顶级容器
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
 
+; ------------------------------ UI层 ------------------------------
+; CanvasLayer - UI层容器
+; CanvasLayer会自动将其子节点渲染在所有其他内容之上，不受相机影响
 [node name="CanvasLayer" type="CanvasLayer" parent="."]
 
+; UIStack (Control) - UI栈容器
+; anchors_preset=15：全屏锚定，作为所有UI界面的父容器
+; UI界面通过脚本动态添加到此节点下
 [node name="UIStack" type="Control" parent="CanvasLayer"]
 layout_mode = 3
 anchors_preset = 15
@@ -15,4 +42,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
+; ------------------------------ 游戏世界层 ------------------------------
+; GameWorld (Node2D) - 游戏世界容器
+; 所有游戏实体（玩家、敌人、物品）通过脚本动态添加到此节点下
 [node name="GameWorld" type="Node2D" parent="."]
