@@ -34,6 +34,7 @@ script = ExtResource("1_main")
 ; UIStack (Control) - UI栈容器
 ; anchors_preset=15：全屏锚定，作为所有UI界面的父容器
 ; UI界面通过脚本动态添加到此节点下
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到子节点按钮
 [node name="UIStack" type="Control" parent="CanvasLayer"]
 layout_mode = 3
 anchors_preset = 15
@@ -41,6 +42,23 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
+
+; DeathOverlay (ColorRect) - 死亡过渡黑屏遮罩
+; 用于玩家死亡时的黑屏过渡动画，开始时完全透明，死亡后逐渐变黑
+; anchors_preset=15：全屏锚定，覆盖整个屏幕
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到下方UI按钮
+; 注意：必须用IGNORE(2)而非PASS(1)，PASS会拦截事件导致按钮无法点击
+[node name="DeathOverlay" type="ColorRect" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0)
+visible = true
 
 ; ------------------------------ 游戏世界层 ------------------------------
 ; GameWorld (Node2D) - 游戏世界容器

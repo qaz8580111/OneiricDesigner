@@ -38,6 +38,9 @@ var _direction: Vector2 = Vector2.RIGHT
 ## 子弹所属阵营（"player"或"enemy"），用于防止误伤友军
 var _owner_group: String = ""
 
+## 是否命中过目标（防重复伤害标记）
+var _has_hit: bool = false
+
 ## ========== 信号定义（用于与其他节点通信） ==========
 
 ## 子弹命中目标时发出此信号
@@ -51,8 +54,10 @@ signal destroyed()
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
 func _ready() -> void:
-	## 连接碰撞检测信号：当有物体进入子弹区域时触发回调
+	## 连接碰撞检测信号：当有物理体进入子弹区域时触发回调
 	body_entered.connect(_on_body_entered)
+	## 连接碰撞检测信号：当有区域体进入子弹区域时触发回调（用于检测玩家Hitbox）
+	area_entered.connect(_on_area_entered)
 	
 	## 如果子弹数据为空，创建默认子弹数据
 	if _bullet_data == null:
@@ -99,13 +104,12 @@ func _apply_bullet_data() -> void:
 
 ## 设置子弹飞行方向（对外接口，由发射者调用）
 ## 参数：direction - 飞行方向向量
+## 注意：位置偏移由发射者在 instantiate 后设置，避免重复偏移
 func set_direction(direction: Vector2) -> void:
 	## 归一化方向向量，确保单位长度
 	_direction = direction.normalized()
 	## 设置子弹旋转角度为方向向量的角度
 	rotation = _direction.angle()
-	## 将子弹位置向飞行方向偏移，避免刚生成就与发射者碰撞
-	position += _direction * spawn_offset
 
 ## ========== 物理帧更新方法 ==========
 
@@ -157,13 +161,17 @@ func _check_screen_boundary() -> void:
 
 ## ========== 碰撞检测回调 ==========
 
-## 碰撞检测回调：当有物体进入子弹区域时调用
-## 参数：body - 进入区域的物体节点
+## 碰撞检测回调：当有物理体进入子弹区域时调用
+## 参数：body - 进入区域的物理体节点（如CharacterBody2D）
 func _on_body_entered(body: Node2D) -> void:
+	## 如果已经命中过目标，忽略后续碰撞（防止同一子弹造成多次伤害）
+	if _has_hit:
+		return
+	
 	## 如果子弹有所属阵营，且碰撞的物体与子弹同阵营，忽略碰撞（防止误伤友军）
 	if _owner_group != "" and body.is_in_group(_owner_group):
 		return
-
+	
 	## 如果有子弹数据，触发命中时的特效（ON_HIT类型）
 	if _bullet_data != null:
 		_bullet_data.trigger_effects(
@@ -172,11 +180,57 @@ func _on_body_entered(body: Node2D) -> void:
 			body,
 			{"direction": _direction}
 		)
-
-	## 如果碰撞的物体有take_damage方法，发出命中信号并销毁子弹
+	
+	## 标记已命中，防止重复伤害
+	_has_hit = true
+	
+	## 尝试直接调用take_damage方法
+	var damage_amount: float = _bullet_data.damage if _bullet_data else 10.0
 	if body.has_method("take_damage"):
+		body.call("take_damage", damage_amount)
 		hit.emit(self, body)
-		_destroy()
+	
+	## 销毁子弹
+	_destroy()
+
+## 碰撞检测回调：当有区域体进入子弹区域时调用（用于检测玩家Hitbox）
+## 参数：area - 进入区域的Area2D节点（如玩家Hitbox）
+func _on_area_entered(area: Area2D) -> void:
+	## 如果已经命中过目标，忽略后续碰撞（防止同一子弹造成多次伤害）
+	if _has_hit:
+		return
+	
+	## 检查区域的父节点是否属于同一阵营
+	if _owner_group != "":
+		var parent_node: Node = area.get_parent()
+		if parent_node != null and parent_node.is_in_group(_owner_group):
+			return
+	
+	## 如果有子弹数据，触发命中时的特效（ON_HIT类型）
+	if _bullet_data != null:
+		_bullet_data.trigger_effects(
+			BulletEffectClass.TriggerType.ON_HIT,
+			self,
+			area,
+			{"direction": _direction}
+		)
+	
+	## 找到区域的父节点（通常是CharacterBody2D）
+	var target: Node2D = area.get_parent()
+	if target == null:
+		target = area
+	
+	## 标记已命中，防止重复伤害
+	_has_hit = true
+	
+	## 尝试直接调用take_damage方法
+	var damage_amount: float = _bullet_data.damage if _bullet_data else 10.0
+	if target.has_method("take_damage"):
+		target.call("take_damage", damage_amount)
+		hit.emit(self, target)
+	
+	## 销毁子弹
+	_destroy()
 
 ## ========== 子弹销毁 ==========
 

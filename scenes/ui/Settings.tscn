@@ -40,6 +40,7 @@
 ; ------------------------------ 根节点 ------------------------------
 ; Settings (Control) - 设置界面根节点
 ; anchors_preset=15：全屏锚定
+; mouse_filter=2（MOUSE_FILTER_PASS）：先处理自身输入，再传递给子节点按钮
 [node name="Settings" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -47,11 +48,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 script = ExtResource("1_settings")
 
 ; ------------------------------ 背景 ------------------------------
 ; Background (ColorRect) - 设置背景
 ; 颜色：深蓝灰 (0.1, 0.12, 0.2, 1)
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到按钮
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -59,10 +62,12 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 color = Color(0.1, 0.12, 0.2, 1)
 
 ; ------------------------------ 主布局 ------------------------------
 ; VBoxContainer - 主垂直布局容器
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到子按钮
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -70,6 +75,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 
 ; Title (Label) - 设置标题
 ; 字体大小48，居中显示

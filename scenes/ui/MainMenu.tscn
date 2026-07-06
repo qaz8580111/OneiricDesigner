@@ -25,6 +25,7 @@
 ; MainMenu (Control) - 主菜单根节点
 ; anchors_preset=15：全屏锚定
 ; layout_mode=3：锚点布局模式
+; mouse_filter=2（MOUSE_FILTER_PASS）：先处理自身输入，再传递给子节点按钮
 [node name="MainMenu" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -32,11 +33,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 script = ExtResource("1_mainmenu")
 
 ; ------------------------------ 背景 ------------------------------
 ; Background (ColorRect) - 菜单背景
 ; 颜色：深蓝灰 (0.1, 0.12, 0.2, 1)，营造神秘氛围
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到按钮
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -44,11 +47,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 color = Color(0.1, 0.12, 0.2, 1)
 
 ; ------------------------------ 菜单内容 ------------------------------
 ; VBoxContainer - 垂直布局容器
 ; anchors_preset=8：居中锚定，偏移-150,-150到150,150形成300x300的居中区域
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到子按钮
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 8
@@ -62,6 +67,7 @@ offset_right = 150.0
 offset_bottom = 150.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 
 ; Title (Label) - 游戏标题
 ; 字体大小64，居中显示，使用HeaderMedium主题变体

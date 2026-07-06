@@ -31,6 +31,11 @@ var active_ui: Control
 ## 上一个屏幕状态（用于从设置界面返回）
 var previous_screen: Screen
 
+## 是否正在执行死亡动画（用于_process中更新透明度）
+var _is_death_fading: bool = false
+## 死亡动画开始时间（毫秒）
+var _death_fade_start_time: int = 0
+
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
 ## UI栈容器，用于显示菜单、设置、HUD等UI界面
@@ -38,6 +43,9 @@ var previous_screen: Screen
 
 ## 游戏世界容器，用于放置玩家和游戏世界
 @onready var game_world_container: Node2D = $GameWorld
+
+## 死亡过渡黑屏遮罩（ColorRect），用于玩家死亡时的黑屏过渡动画
+@onready var death_overlay: ColorRect = $CanvasLayer/DeathOverlay
 
 ## ========== 场景预加载（避免运行时重复加载） ==========
 
@@ -68,6 +76,9 @@ var game_hud: Control = null
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
 func _ready() -> void:
+	## 设置此节点为PROCESS_MODE_ALWAYS（暂停状态下仍可更新，确保死亡动画正常运行）
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	
 	## 连接游戏管理器的信号（GameManager是全局单例）
 	if GameManager:
 		## 游戏开始信号：当游戏开始时触发回调
@@ -90,6 +101,9 @@ func _show_main_menu() -> void:
 	_clear_ui()
 	## 设置当前屏幕状态为MAIN_MENU
 	current_screen = Screen.MAIN_MENU
+
+	## 切换输入上下文到SETTINGS（允许UI操作，如点击按钮）
+	InputManager.reset_context("SETTINGS")
 
 	## 实例化主菜单场景
 	active_ui = MAIN_MENU_SCENE.instantiate()
@@ -157,6 +171,8 @@ func _start_game() -> void:
 	current_screen = Screen.GAME
 	## 强制重置输入上下文到GAMEPLAY，避免菜单残留的PAUSE_MENU阻塞游戏输入
 	InputManager.reset_context("GAMEPLAY")
+	## 重置死亡遮罩状态（确保游戏开始时屏幕正常）
+	_reset_death_overlay()
 	## 调用GameManager开始新游戏
 	GameManager.start_new_game()
 
@@ -282,6 +298,8 @@ func _on_game_started() -> void:
 func _on_game_ended() -> void:
 	## 设置当前屏幕状态为GAME_OVER
 	current_screen = Screen.GAME_OVER
+	## 开始死亡黑屏过渡动画
+	_start_death_fade()
 
 ## 游戏暂停信号回调（响应GameManager.game_paused）
 func _on_game_paused() -> void:
@@ -306,8 +324,71 @@ func _apply_saved_auto_shoot_setting(player_node: CharacterBody2D) -> void:
 		player_node.set_auto_shoot(auto_shoot)
 		print("Auto shoot setting loaded: ", auto_shoot)
 
-## _process() - 每帧调用一次，用于处理全局输入
+## 开始死亡黑屏过渡动画
+## 使用_process方法更新透明度，确保在暂停状态下也能运行
+func _start_death_fade() -> void:
+	## 如果黑屏遮罩不存在，直接返回主菜单
+	if death_overlay == null:
+		_show_main_menu()
+		return
+	
+	## 设置黑屏遮罩为可见
+	death_overlay.visible = true
+	## 重置遮罩透明度为0（完全透明）
+	death_overlay.color.a = 0.0
+	
+	## 标记正在执行死亡动画
+	_is_death_fading = true
+	## 记录动画开始时间
+	_death_fade_start_time = Time.get_ticks_msec()
+	
+	## 设置死亡遮罩为PROCESS_MODE_ALWAYS（暂停状态下仍可更新）
+	death_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+
+## 重置死亡遮罩状态（游戏开始前调用）
+func _reset_death_overlay() -> void:
+	if death_overlay != null:
+		death_overlay.color.a = 0.0
+		death_overlay.visible = true
+
+## 更新死亡黑屏过渡动画
+## 在_process中每帧调用，处理透明度渐变和返回主菜单逻辑
+func _update_death_fade() -> void:
+	## 如果不在死亡动画状态，直接返回
+	if not _is_death_fading or death_overlay == null:
+		return
+	
+	## 渐变持续时间（秒）
+	var fade_duration: float = 2.0
+	## 计算经过的时间（转换为秒）
+	var elapsed: float = (Time.get_ticks_msec() - _death_fade_start_time) / 1000.0
+	
+	## 如果动画已完成（黑屏完全显示）
+	if elapsed >= fade_duration:
+		## 设置透明度为1（完全不透明）
+		death_overlay.color.a = 1.0
+		## 等待1秒后返回主菜单
+		if elapsed >= fade_duration + 1.0:
+			## 重置死亡动画状态
+			_is_death_fading = false
+			## 恢复游戏（取消暂停状态）
+			get_tree().paused = false
+			## 重置死亡遮罩透明度（否则主菜单会被黑屏挡住）
+			death_overlay.color.a = 0.0
+			## 返回主菜单
+			_show_main_menu()
+		return
+	
+	## 计算当前透明度（使用线性插值）
+	var alpha: float = elapsed / fade_duration
+	## 更新遮罩颜色透明度
+	death_overlay.color.a = alpha
+
+## _process() - 每帧调用一次，用于处理全局输入和死亡动画
 func _process(_delta: float) -> void:
+	## 处理死亡黑屏过渡动画
+	_update_death_fade()
+	
 	## 检测取消/暂停按钮（如ESC键）
 	if InputManager.is_action_just_pressed_safe("ui_cancel"):
 		## 如果当前在游戏中，显示暂停菜单

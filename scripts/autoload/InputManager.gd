@@ -67,13 +67,13 @@ func _input(event: InputEvent) -> void:
 	# 检测设备类型变化
 	_detect_device_from_event(event)
 	
-	# 处理鼠标左键状态跟踪
+	### 处理鼠标左键状态跟踪（仅更新状态，不消费事件）
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		_mouse_left_pressed = event.pressed
-		if event.pressed:
-			if _is_action_allowed_in_context("game_shoot"):
-				_just_pressed_actions["game_shoot"] = true
-		return
+		## 仅在 GAMEPLAY 上下文中将鼠标左键按下缓存为 game_shoot 动作
+		if event.pressed and get_current_context() == "GAMEPLAY":
+			_just_pressed_actions["game_shoot"] = true
+		## 注意：不使用 return，让事件继续传递给UI系统
 	
 	# 缓存游戏相关动作的按下事件
 	# 注意：不是所有 InputEvent 都有 pressed 和 echo 属性

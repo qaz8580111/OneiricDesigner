@@ -421,8 +421,8 @@ func _on_pickup_tree_exiting(pickup: Area2D) -> void:
 
 ## 玩家死亡时的回调（响应player.killed或HealthController.player_died信号）
 func _on_player_killed() -> void:
-	## 发出游戏结束信号（用于Main.gd处理游戏结束流程）
-	game_over.emit()
+	## 调用GameManager结束游戏（触发game_ended信号，通知Main.gd处理死亡流程）
+	GameManager.end_game()
 
 ## ========== 清理方法 ==========
 

@@ -22,6 +22,7 @@
 ; ------------------------------ 根节点 ------------------------------
 ; PauseMenu (Control) - 暂停菜单根节点
 ; anchors_preset=15：全屏锚定
+; mouse_filter=2（MOUSE_FILTER_PASS）：先处理自身输入，再传递给子节点按钮
 [node name="PauseMenu" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -29,11 +30,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 script = ExtResource("1_pausemenu")
 
 ; ------------------------------ 背景遮罩 ------------------------------
 ; Background (ColorRect) - 半透明遮罩
 ; 颜色：黑色，透明度0.7，用于遮挡游戏画面，突出菜单
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到按钮
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -41,11 +44,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 color = Color(0, 0, 0, 0.7)
 
 ; ------------------------------ 菜单内容 ------------------------------
 ; VBoxContainer - 垂直布局容器
 ; anchors_preset=8：居中锚定，偏移-150,-100到150,100形成300x200的居中区域
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到子按钮
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 8
@@ -59,6 +64,7 @@ offset_right = 150.0
 offset_bottom = 100.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 
 ; Title (Label) - 暂停标题
 ; 使用HeaderMedium主题变体，居中显示

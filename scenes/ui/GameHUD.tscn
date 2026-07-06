@@ -18,6 +18,7 @@
 ; ------------------------------ 根节点 ------------------------------
 ; GameHUD (Control) - HUD根节点
 ; anchors_preset=15：全屏锚定，覆盖整个屏幕
+; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，避免遮挡菜单按钮点击
 [node name="GameHUD" type="Control"]
 script = ExtResource("1")
 anchors_preset = 15
@@ -27,6 +28,7 @@ offset_left = 0.0
 offset_top = 0.0
 offset_right = 0.0
 offset_bottom = 0.0
+mouse_filter = 2
 
 ; ------------------------------ 血量显示 ------------------------------
 ; HealthBar (ProgressBar) - 玩家血量条

@@ -25,8 +25,8 @@ TranslationManager="*res://scripts/autoload/TranslationManager.gd"
 
 [display]
 
-window/size/viewport_width=1280
-window/size/viewport_height=720
+window/size/viewport_width=400
+window/size/viewport_height=240
 
 [input]
 

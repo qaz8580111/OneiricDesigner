@@ -351,18 +351,25 @@ func _perform_attack() -> void:
 	bullet.set_bullet_data(bullet_data)
 	## 设置子弹所属阵营为"enemy"（防止误伤友军）
 	bullet.set_owner_group("enemy")
+	
+	## 先禁用碰撞检测（避免刚加入场景树时与发射者自身碰撞）
+	bullet.monitoring = false
+	
 	## 设置子弹碰撞层为8（敌人子弹层）
 	bullet.collision_layer = 8
 	## 设置子弹碰撞掩码为1（只检测玩家层）
 	bullet.collision_mask = 1
 	
-	## 将子弹添加到父节点（GameWorld）的场景树中
-	get_parent().add_child(bullet)
-	
 	## 设置子弹飞行方向
 	bullet.set_direction(direction)
 	## 设置子弹生成位置（敌人前方30像素偏移，避免立即碰撞）
 	bullet.global_position = global_position + direction * 30.0
+	
+	## 将子弹添加到父节点（GameWorld）的场景树中
+	get_parent().add_child(bullet)
+	
+	## 添加到场景树后再启用碰撞检测
+	bullet.monitoring = true
 	
 	## 设置子弹外观（如果有Sprite2D节点）
 	var bullet_sprite: Sprite2D = bullet.get_node_or_null("Sprite2D")
