@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/FrozenBulletData.gd" id="1"]
+[ext_resource type="BulletForm" path="res://data/bullet/form/frozen_bullet_form.tres" id="2"]
+[ext_resource type="FrozenEffect" path="res://data/bullet/effect/frozen_effect.tres" id="3"]
+
+[resource type="FrozenBulletData" script_class="FrozenBulletData"]
+script = ExtResource("1")
+damage = 2
+speed = 500.0
+form = ExtResource("2")
+effects = [ExtResource("3")]
+damage_multiplier = 0.5
+speed_multiplier = 0.9

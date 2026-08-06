@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 ; ==============================================================================
 ; Player.tscn - 玩家角色场景
@@ -32,6 +32,7 @@
 [ext_resource type="Script" path="res://scripts/components/PlayerHealthController.gd" id="2_controller"]
 [ext_resource type="Script" path="res://scripts/components/ShieldComponent.gd" id="3_shield"]
 [ext_resource type="Script" path="res://scripts/components/CoreHealthComponent.gd" id="4_core"]
+[ext_resource type="BulletData" path="res://data/bullet/player_default_bullet.tres" id="5_bullet"]
 
 ; 物理碰撞体形状 - 用于角色移动和碰撞检测（半径20像素）
 [sub_resource type="CircleShape2D" id="CircleShape2D_1"]
@@ -45,11 +46,13 @@ radius = 18.0
 ; Player (CharacterBody2D) - 玩家物理角色根节点
 ; 碰撞层：1（玩家层），碰撞掩码：1+2（检测玩家层和敌人层，实现物理碰撞排斥）
 ; 所属组：player（用于查找玩家引用）
+; bullet_data：玩家发射子弹的配置数据（引用资源文件）
 [node name="Player" type="CharacterBody2D"]
 script = ExtResource("1_player")
 collision_layer = 1
 collision_mask = 3
 groups = PackedStringArray("player")
+bullet_data = ExtResource("5_bullet")
 
 ; ------------------------------ 外观与碰撞 ------------------------------
 ; Sprite2D - 玩家外观显示

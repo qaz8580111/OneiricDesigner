@@ -422,6 +422,34 @@ func _flash_hit() -> void:
 	if is_instance_valid(sprite):
 		sprite.modulate = _original_color
 
+## 应用减速效果（用于冰冻等控制技能）
+## 参数：duration - 减速持续时间（秒）
+##       speed_multiplier - 速度系数（0.3表示速度变为30%）
+##       effect_color - 效果颜色（用于改变敌人外观）
+func apply_slowdown(duration: float, speed_multiplier: float, effect_color: Color) -> void:
+	## 保存原始速度
+	var original_speed: float = speed
+	var original_wander_speed: float = wander_speed
+	
+	## 应用减速
+	speed *= speed_multiplier
+	wander_speed *= speed_multiplier
+	
+	## 改变敌人颜色显示效果
+	if sprite != null:
+		sprite.modulate = effect_color
+	
+	## 等待持续时间结束
+	await get_tree().create_timer(duration).timeout
+	
+	## 恢复原始速度
+	speed = original_speed
+	wander_speed = original_wander_speed
+	
+	## 恢复原始颜色
+	if sprite != null:
+		sprite.modulate = _original_color
+
 ## 敌人死亡逻辑
 func _die() -> void:
 	## 获取敌人掉落道具列表（根据概率计算）

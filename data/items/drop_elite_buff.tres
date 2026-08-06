@@ -1,21 +1,13 @@
-[gd_resource type="DropItem" load_steps=1 format=3]
+[gd_resource type="Resource" load_steps=2 format=3]
 
-# ========== 精英掉落物配置 - 攻击增益 ==========
-# 对应脚本: res://scripts/resources/items/DropItem.gd
-# 职责：定义精英敌人掉落的攻击增益物品属性
+[ext_resource type="Script" path="res://scripts/resources/items/DropItem.gd" id="1"]
 
-[resource]
-# 物品唯一ID - 用于脚本中识别和处理此物品
+[resource type="DropItem" script_class="DropItem"]
+script = ExtResource("1")
 item_id = "elite_buff_attack"
-# 物品显示名称 - UI中显示的物品名称
 item_name = "Power Boost"
-# 物品类型（4=BUFF）- 0:DREAM_FRAGMENT 1:HEALTH 2:WEAPON 3:ITEM 4:BUFF
 item_type = 4
-# 物品数值（攻击加成5点）- BUFF类型表示增益数值
 value = 5
-# 掉落概率（30%）- 精英敌人死亡后掉落此物品的概率
 drop_chance = 0.3
-# 是否稀有物品 - 稀有物品会有特殊视觉效果
 is_rare = true
-# 是否自动吸附 - false表示需要玩家按E/空格手动拾取
 auto_adsorb = false

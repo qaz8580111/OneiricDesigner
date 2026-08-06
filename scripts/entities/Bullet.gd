@@ -184,8 +184,8 @@ func _on_body_entered(body: Node2D) -> void:
 	## 标记已命中，防止重复伤害
 	_has_hit = true
 	
-	## 尝试直接调用take_damage方法
-	var damage_amount: float = _bullet_data.damage if _bullet_data else 10.0
+	## 调用目标的take_damage方法（使用get_final_damage获取最终伤害，支持扩展）
+	var damage_amount: float = _bullet_data.get_final_damage() if _bullet_data else 10.0
 	if body.has_method("take_damage"):
 		body.call("take_damage", damage_amount)
 		hit.emit(self, body)
@@ -223,8 +223,8 @@ func _on_area_entered(area: Area2D) -> void:
 	## 标记已命中，防止重复伤害
 	_has_hit = true
 	
-	## 尝试直接调用take_damage方法
-	var damage_amount: float = _bullet_data.damage if _bullet_data else 10.0
+	## 调用目标的take_damage方法（使用get_final_damage获取最终伤害，支持扩展）
+	var damage_amount: float = _bullet_data.get_final_damage() if _bullet_data else 10.0
 	if target.has_method("take_damage"):
 		target.call("take_damage", damage_amount)
 		hit.emit(self, target)

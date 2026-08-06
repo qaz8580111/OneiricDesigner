@@ -3,6 +3,11 @@
 ## 继承：CharacterBody2D（Godot 4的2D物理角色节点）
 extends CharacterBody2D
 
+## ========== 预加载资源（避免运行时加载延迟） ==========
+
+## 子弹数据资源类，用于配置子弹属性（伤害、速度、形态、特效等）
+const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
+
 ## ========== 导出变量（编辑器可配置） ==========
 
 ## 玩家移动速度（像素/秒）
@@ -10,6 +15,9 @@ extends CharacterBody2D
 
 ## 射击冷却时间（秒），控制射速
 @export var shoot_cooldown: float = 0.2
+
+## 玩家子弹配置（决定子弹伤害、速度、形态、特效等）
+@export var bullet_data: BulletDataClass = null
 
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
@@ -45,8 +53,8 @@ var _blink_timer: Timer = null
 ## ========== 信号定义（用于与其他节点通信） ==========
 
 ## 玩家发射子弹时发出此信号
-## 参数：position - 子弹发射位置，direction - 子弹飞行方向
-signal shot(position: Vector2, direction: Vector2)
+## 参数：position - 子弹发射位置，direction - 子弹飞行方向，bullet_data - 子弹配置数据
+signal shot(position: Vector2, direction: Vector2, bullet_data: BulletDataClass)
 
 ## 梦境碎片数量变化时发出此信号
 ## 参数：amount - 当前梦境碎片总数
@@ -159,8 +167,8 @@ func _shoot() -> void:
 	var mouse_pos: Vector2 = get_global_mouse_position()
 	## 计算从玩家位置指向鼠标位置的方向向量并归一化
 	var direction: Vector2 = (mouse_pos - global_position).normalized()
-	## 发出shot信号，通知GameWorld创建子弹（数据传递：发射位置和方向）
-	shot.emit(global_position, direction)
+	## 发出shot信号，通知GameWorld创建子弹（包含子弹配置数据）
+	shot.emit(global_position, direction, bullet_data)
 
 ## ========== 血量与伤害系统 ==========
 

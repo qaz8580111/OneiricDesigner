@@ -311,8 +311,8 @@ func _handle_manual_pickup() -> void:
 ## ========== 子弹系统 ==========
 
 ## 玩家发射子弹时的回调（响应player.shot信号）
-## 参数：position - 子弹发射位置，direction - 子弹飞行方向
-func _on_player_shot(position: Vector2, direction: Vector2) -> void:
+## 参数：position - 子弹发射位置，direction - 子弹飞行方向，bullet_data - 玩家配置的子弹数据
+func _on_player_shot(position: Vector2, direction: Vector2, bullet_data: BulletDataClass) -> void:
 	## 实例化子弹节点
 	var bullet: Area2D = BULLET_SCENE.instantiate()
 	## 将子弹添加到场景树中
@@ -320,11 +320,16 @@ func _on_player_shot(position: Vector2, direction: Vector2) -> void:
 	## 设置子弹发射位置
 	bullet.global_position = position
 
-	## 复制默认子弹数据（每个子弹独立一份，避免共享数据被修改）
-	var bullet_data: BulletDataClass = default_bullet_data.duplicate()
+	## 使用玩家传递的子弹数据，如果为空则使用默认子弹数据
+	var bullet_data_to_use: BulletDataClass = bullet_data
+	if bullet_data_to_use == null:
+		bullet_data_to_use = default_bullet_data
+	
+	## 复制子弹数据（每个子弹独立一份，避免共享数据被修改）
+	var bullet_data_copy: BulletDataClass = bullet_data_to_use.duplicate()
 	## 设置子弹数据
 	if bullet.has_method("set_bullet_data"):
-		bullet.set_bullet_data(bullet_data)
+		bullet.set_bullet_data(bullet_data_copy)
 
 	## 设置子弹飞行方向
 	bullet.set_direction(direction)
@@ -341,20 +346,8 @@ func _on_player_shot(position: Vector2, direction: Vector2) -> void:
 ## 子弹命中目标时的回调（响应bullet.hit信号）
 ## 参数：bullet - 命中的子弹实例，target - 被命中的目标节点
 func _on_bullet_hit(bullet: Area2D, target: Node2D) -> void:
-	## 如果目标没有take_damage方法，直接返回
-	if not target.has_method("take_damage"):
-		return
-
-	## 默认伤害为1
-	var damage: int = 1
-	## 如果子弹有子弹数据，获取最终伤害值
-	if bullet != null and bullet.has_method("get_bullet_data"):
-		var bullet_data: BulletDataClass = bullet.get_bullet_data()
-		if bullet_data != null:
-			damage = bullet_data.get_final_damage()
-
-	## 调用目标的take_damage方法造成伤害
-	target.take_damage(damage)
+	## 伤害计算已在Bullet.gd中完成，此处仅做额外逻辑处理
+	pass
 
 ## 子弹销毁时的回调（响应bullet.destroyed信号）
 ## 参数：bullet - 被销毁的子弹实例

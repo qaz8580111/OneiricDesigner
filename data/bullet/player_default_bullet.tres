@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/BulletData.gd" id="1"]
+
+[resource type="BulletData" script_class="BulletData"]
+script = ExtResource("1")
+damage = 1
+speed = 500.0
+form = null
+effects = []

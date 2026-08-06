@@ -1,21 +1,13 @@
-[gd_resource type="DropItem" load_steps=1 format=3]
+[gd_resource type="Resource" load_steps=2 format=3]
 
-# ========== 精英掉落物配置 - 大型梦境碎片 ==========
-# 对应脚本: res://scripts/resources/items/DropItem.gd
-# 职责：定义精英敌人掉落的大型梦境碎片属性
+[ext_resource type="Script" path="res://scripts/resources/items/DropItem.gd" id="1"]
 
-[resource]
-# 物品唯一ID - 用于脚本中识别和处理此物品
+[resource type="DropItem" script_class="DropItem"]
+script = ExtResource("1")
 item_id = "elite_fragment"
-# 物品显示名称 - UI中显示的物品名称
 item_name = "Large Dream Fragment"
-# 物品类型（0=DREAM_FRAGMENT）- 0:DREAM_FRAGMENT 1:HEALTH 2:WEAPON 3:ITEM 4:BUFF
 item_type = 0
-# 物品数值（20个碎片）- DREAM_FRAGMENT类型表示获得的碎片数量
 value = 20
-# 掉落概率（80%）- 精英敌人死亡后掉落此物品的概率
 drop_chance = 0.8
-# 是否稀有物品 - 非稀有物品，普通视觉效果（金色）
 is_rare = false
-# 是否自动吸附 - true表示接触玩家自动拾取
 auto_adsorb = true

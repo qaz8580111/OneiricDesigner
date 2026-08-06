@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://bgameworld"]
+[gd_scene load_steps=3 format=3 uid="uid://bgameworld"]
 
 ; ==============================================================================
 ; GameWorld.tscn - 游戏世界场景
@@ -14,12 +14,15 @@
 ; ==============================================================================
 
 [ext_resource type="Script" path="res://scripts/entities/GameWorld.gd" id="1_world"]
+[ext_resource type="BulletData" path="res://data/bullet/player_default_bullet.tres" id="2_playerbullet"]
 
 ; ------------------------------ 根节点 ------------------------------
 ; GameWorld (Node2D) - 游戏世界根节点
 ; 作为所有游戏实体的父容器，提供统一的坐标空间
+; default_bullet_data: 玩家发射子弹的默认配置（引用资源文件）
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_world")
+default_bullet_data = ExtResource("2_playerbullet")
 
 ; ------------------------------ 背景 ------------------------------
 ; Background (ColorRect) - 游戏背景
