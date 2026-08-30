@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/PiercingEffect.gd" id="1"]
+
+[resource type="PiercingEffect" script_class="PiercingEffect"]
+script = ExtResource("1")
+effect_id = "piercing"
+trigger_type = 0
+pierce_count = 3
+damage_decay = 0.85

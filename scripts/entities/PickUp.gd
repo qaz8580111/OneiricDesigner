@@ -1,12 +1,26 @@
 ## PickUp.gd - 拾取物核心脚本
 ## 职责：管理道具拾取逻辑，区分自动吸附和手动拾取两种模式
 ## 继承：Area2D（Godot 4的2D区域节点，用于碰撞检测）
+## 节点结构：PickUp(Area2D) → Sprite2D(外观) + CollisionShape2D(贴身拾取判定) + MagnetArea(子Area2D, 大范围磁吸/提示检测)
+## 系统交互：
+##   - 组判定：所有回调用 is_in_group("player") 过滤（零数组分配）
+##   - 信号：body_entered(自动吸附型触碰即拾取)、MagnetArea.body_entered/exited(手动型显示/隐藏拾取提示)
+##   - 生成：由 GameWorld._spawn_pickup 实例化并 set_drop_item 注入数据；
+##           手动拾取由 GameWorld._handle_manual_pickup 轮询交互键(E)后调用 pickup()
+## 碰撞层：主区域 layer=8(物品层)/mask=1(检测玩家层)；MagnetArea layer=0/mask=1（纯检测，自身不参与碰撞）
+## 双层区域设计意图：主碰撞体小(需贴近才触发)、MagnetArea大(提前感知玩家)——
+##   自动吸附道具在大区域内被"磁吸"飞向玩家，手动道具在大区域内高亮提示可拾取
 extends Area2D
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========
 
 ## 掉落道具数据资源类，用于配置道具属性和效果
 const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
+
+## ========== 静态纹理缓存（性能优化） ==========
+## 设计意图：每次掉落都创建Image+ImageTexture有分配和上传开销，
+##           掉落物颜色/尺寸组合有限，用static缓存按"颜色|尺寸"复用纹理
+static var _texture_cache: Dictionary = {}
 
 ## ========== 成员变量（运行时数据） ==========
 
@@ -21,6 +35,19 @@ var drop_item: DropItemClass = null
 ## 吸附范围（像素），玩家进入此范围后道具开始吸附或显示拾取提示
 @export var adsorb_radius: float = 100.0
 
+## 存活寿命（秒），超过后自动消失
+## 性能修复核心（渐进卡顿根因）：旧实现掉落物永不回收——每次击杀都掉落道具，
+## 长时间游玩后数百个拾取物常驻场景，每个含2个Area2D物理碰撞器（主碰撞体+100px磁吸区）
+## +1个无限循环Tween动画+每帧_physics_process，物理broadphase与逐帧动画负担
+## 随击杀数线性膨胀 → 帧率逐步下滑 → 物理步进跟不上60Hz时引擎牺牲游戏速度换对齐
+## （"游戏像被放慢"的直接来源），CPU饱和同时拖累音频线程造成声音卡顿；
+## 加入寿命回收后同屏拾取物数量有稳态上限（约掉落速率×寿命），不再无限增长
+@export var lifetime: float = 25.0
+
+## 消失前闪烁警告时长（秒）：最后这段时间闪烁提示玩家"再不捡就没了"
+## （roguelike掉落物的标准做法——有限寿命+临期视觉警告，兼顾性能与拾取体验）
+const BLINK_WINDOW: float = 3.0
+
 ## ========== 内部状态变量 ==========
 
 ## 是否正在被拾取（防止重复拾取）
@@ -31,6 +58,9 @@ var _player: CharacterBody2D = null
 
 ## 原始颜色（用于恢复手动拾取提示状态）
 var _original_color: Color = Color.WHITE
+
+## 已存活时间（秒），每物理帧累计，达到lifetime后触发回收
+var _life_timer: float = 0.0
 
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
@@ -68,6 +98,9 @@ func _find_player() -> void:
 
 ## _physics_process() - 每物理帧调用一次（默认60次/秒），用于处理拾取交互
 func _physics_process(delta: float) -> void:
+	## ---------- 生命周期管理（最先执行，即使数据异常的拾取物也会正常到期回收） ----------
+	_update_lifetime(delta)
+
 	## 如果正在拾取或道具数据为空，直接返回
 	if _is_picking or drop_item == null:
 		return
@@ -84,12 +117,40 @@ func _physics_process(delta: float) -> void:
 			## 距离越近速度越快（速度乘数：1.0 ~ 3.0）
 			var speed_multiplier: float = 1.0 + (1.0 - distance / adsorb_radius) * 2.0
 			## 更新道具位置（方向 × 速度 × 乘数 × 时间）
+			## 用局部position即可：PickUp挂在原点的GameWorld下，局部坐标与全局坐标等价
 			position += direction * adsorb_speed * speed_multiplier * delta
 	
 	## 如果玩家在拾取范围内且按空格键，执行拾取
 	if _player != null and is_player_in_range():
 		if InputManager.is_action_just_pressed_safe("game_interact"):
 			pickup(_player)
+
+## ========== 生命周期管理（性能修复核心） ==========
+
+## 更新存活时间：到期自动回收，最后BLINK_WINDOW秒闪烁警告
+## 数据流：每物理帧累计_life_timer → 剩余寿命进入闪烁窗口时方波闪烁 → 归零queue_free
+## 回收路径说明：queue_free触发tree_exiting信号 → GameWorld._on_pickup_tree_exiting
+## 同步清理_pickups管理列表（生成时已连接），无需额外通知逻辑
+func _update_lifetime(delta: float) -> void:
+	## 累计已存活时间
+	_life_timer += delta
+	## 计算剩余寿命
+	var remain: float = lifetime - _life_timer
+
+	## 寿命耗尽：自动消失（queue_free本就是延迟到帧末的安全销毁；
+	## 若同帧已被拾取标记_is_picking，重复queue_free幂等无害）
+	if remain <= 0.0:
+		queue_free()
+		return
+
+	## 临近消失：闪烁警告（0.4秒一周期：0.2秒原色 / 0.2秒25%透明度）
+	## 方波闪烁用fmod取余判断相位，零额外计时器分配；
+	## 仅在未进入拾取流程时执行，避免覆盖拾取瞬间的表现
+	if remain < BLINK_WINDOW and sprite != null and not _is_picking:
+		var blink_on: bool = fmod(remain, 0.4) < 0.2
+		## 保留原色相只改透明度：闪烁期间颜色语义不丢失（碎片仍金黄/血包仍绿色）
+		sprite.modulate = _original_color if blink_on else Color(
+			_original_color.r, _original_color.g, _original_color.b, 0.25)
 
 ## ========== 道具数据设置 ==========
 
@@ -144,17 +205,27 @@ func set_drop_item(item: DropItemClass) -> void:
 ## ========== 辅助方法 ==========
 
 ## 创建占位纹理（无美术资源时使用）
+## 性能设计：纹理按"颜色|尺寸"键入静态缓存，同配置掉落物共享纹理，
+##           大量掉落时零Image生成/纹理上传开销
 ## 参数：sprite_node - 要设置纹理的Sprite2D节点
 ##       color - 纹理颜色
 ##       width - 纹理宽度（像素）
 ##       height - 纹理高度（像素）
 func _create_placeholder_texture(sprite_node: Sprite2D, color: Color, width: int, height: int) -> void:
+	## 缓存键：颜色|宽|高
+	var cache_key: String = "%s|%d|%d" % [color.to_html(), width, height]
+	## 缓存命中：直接复用（零开销路径）
+	if _texture_cache.has(cache_key):
+		sprite_node.texture = _texture_cache[cache_key]
+		return
+	## 缓存未命中：首次生成
 	## 创建指定尺寸的RGBA8格式图像
 	var image: Image = Image.create(width, height, false, Image.FORMAT_RGBA8)
 	## 用指定颜色填充整个图像
 	image.fill(color)
-	## 将图像转换为纹理
+	## 将图像转换为纹理并存入缓存
 	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	_texture_cache[cache_key] = texture
 	## 将纹理设置到Sprite2D节点上
 	sprite_node.texture = texture
 
@@ -177,7 +248,8 @@ func _start_pulse_animation() -> void:
 ## 参数：body - 进入碰撞区域的物体节点
 func _on_body_entered(body: Node2D) -> void:
 	## 如果正在拾取或接触的不是玩家，直接返回
-	if _is_picking or body not in get_tree().get_nodes_in_group("player"):
+	## 性能说明：用is_in_group代替"body in get_nodes_in_group()"（后者每次分配数组）
+	if _is_picking or not body.is_in_group("player"):
 		return
 	
 	## 手动拾取类型（武器、物品、BUFF）：不触发接触拾取，必须通过交互键
@@ -190,8 +262,8 @@ func _on_body_entered(body: Node2D) -> void:
 ## 玩家进入吸附范围回调（磁铁区域触发）
 ## 参数：body - 进入磁铁区域的物体节点
 func _on_magnet_body_entered(body: Node2D) -> void:
-	## 如果进入的不是玩家，直接返回
-	if body not in get_tree().get_nodes_in_group("player"):
+	## 如果进入的不是玩家，直接返回（is_in_group零分配）
+	if not body.is_in_group("player"):
 		return
 	
 	## 手动拾取类型：显示拾取提示（改变透明度）
@@ -201,8 +273,8 @@ func _on_magnet_body_entered(body: Node2D) -> void:
 ## 玩家离开吸附范围回调（磁铁区域触发）
 ## 参数：body - 离开磁铁区域的物体节点
 func _on_magnet_body_exited(body: Node2D) -> void:
-	## 如果离开的不是玩家，直接返回
-	if body not in get_tree().get_nodes_in_group("player"):
+	## 如果离开的不是玩家，直接返回（is_in_group零分配）
+	if not body.is_in_group("player"):
 		return
 	
 	## 隐藏拾取提示（恢复原始颜色）
@@ -233,6 +305,11 @@ func pickup(target: Node2D) -> void:
 	
 	## 标记正在拾取（防止重复拾取）
 	_is_picking = true
+	
+	## 拾取音效：稀有BUFF用特殊音效
+	if AudioManager:
+		var sfx: String = "buff_pickup" if drop_item.is_rare else "pickup_item"
+		AudioManager.play_2d(sfx, global_position, 0.8)
 	
 	## 应用道具效果到目标（添加碎片、恢复血量等）
 	drop_item.apply(target)

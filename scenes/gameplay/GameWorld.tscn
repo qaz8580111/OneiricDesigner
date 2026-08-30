@@ -7,7 +7,8 @@
 ;
 ; 场景结构：
 ;   GameWorld (Node2D)
-;   ├── Background (ColorRect) - 游戏背景（深灰蓝色）
+;   ├── BgLayer (CanvasLayer, layer=-1) - 背景层（固定屏幕，不随相机移动）
+;   │   └── Background (ColorRect) - 游戏背景（深灰蓝色，全屏锚点）
 ;   └── [动态添加] Player, Enemy, PickUp 等游戏实体
 ;
 ; 使用方式：在Main.tscn中作为子节点加载，玩家和敌人通过脚本动态生成到此节点下
@@ -25,10 +26,21 @@ script = ExtResource("1_world")
 default_bullet_data = ExtResource("2_playerbullet")
 
 ; ------------------------------ 背景 ------------------------------
+; BgLayer (CanvasLayer) - 背景层
+; layer=-1：绘制在游戏世界之下；CanvasLayer不随相机移动，
+; 背景永远铺满屏幕（玩家移动到任何位置都不会露出默认清屏色）
+; 注意：project.godot 的 default_clear_color 与本背景同色(0.1,0.1,0.15)，
+; 双重保证世界无限大时看不到任何背景色分界；若修改背景色需同步修改清屏色
+[node name="BgLayer" type="CanvasLayer" parent="."]
+layer = -1
+
 ; Background (ColorRect) - 游戏背景
 ; 颜色：深灰蓝 (0.1, 0.1, 0.15, 1)，营造梦境氛围
-; 尺寸：1280x720，覆盖默认游戏窗口
-[node name="Background" type="ColorRect" parent="."]
+; 全屏锚点（anchors_preset=15）：相对视口自适应，任意分辨率下都铺满
+[node name="Background" type="ColorRect" parent="BgLayer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 color = Color(0.1, 0.1, 0.15, 1)
-rect_size = Vector2(1280, 720)
-rect_position = Vector2(0, 0)

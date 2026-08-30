@@ -1,6 +1,14 @@
 ## InputManager - 输入系统统一网关
 ## 遵循 INPUT_ARCHITECTURE_SPEC.md 规范
 ## 所有业务层代码必须通过此单例访问输入，禁止直接调用 Input API
+## 架构角色：autoload单例（注册名InputManager，class_name为InputManagerClass避免歧义），
+##           是业务层（玩家/菜单/对话等）与Godot底层Input API之间的唯一桥梁
+## 核心机制：
+##   1. "捕获-消费"模型：_input捕获首次按下→缓存到_just_pressed_actions→
+##      业务层经is_action_just_pressed_safe轮询消费后清除，同一按下事件只会被消费一次
+##   2. 上下文栈（LIFO）：菜单/对话/玩法各注册上下文，只有栈顶上下文允许的动作才生效
+##   3. 输入屏蔽期：上下文切换后短暂冷却（INPUT_COOLDOWN），防止切界面瞬间残留按键误触发
+##   4. 设备自动识别：键盘/手柄/触屏事件驱动current_device切换，UI据此切换操作提示图标
 class_name InputManagerClass
 extends Node
 
@@ -15,6 +23,7 @@ enum VibrationType {
 signal input_device_changed(device: String)
 
 ## 当前活跃输入设备（"keyboard" | "joypad" | "touch"）
+## 自定义getter委托_get_current_device：当前为直通实现，预留后续做只读保护/派生逻辑的扩展点
 var current_device: String = "keyboard": get = _get_current_device
 
 ## 摇杆死区阈值（规范要求 ≥ 0.15）
@@ -23,7 +32,7 @@ const JOYSTICK_DEADZONE: float = 0.2
 ## 输入屏蔽时间（规范要求 ≥ 0.15s）
 const INPUT_COOLDOWN: float = 0.2
 
-## 上下文栈（LIFO）
+## 上下文栈（LIFO）：栈底恒为GAMEPLAY（默认玩法上下文），pop时保留栈底保证永不为空
 var _context_stack: Array[String] = ["GAMEPLAY"]
 
 ## 输入屏蔽计时器
@@ -45,6 +54,7 @@ var _mouse_left_pressed: bool = false
 var _last_detected_device: String = "keyboard"
 
 
+## _ready() - 初始化：配置处理模式、监听手柄热插拔、探测初始连接的手柄
 func _ready() -> void:
 	# 设置为始终处理，确保暂停状态下也能接收输入
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -56,13 +66,17 @@ func _ready() -> void:
 	_detect_active_joypad()
 
 
+## _process() - 每帧递减屏蔽冷却计时，并缓存移动轴供get_movement()读取
 func _process(delta: float) -> void:
+	## 冷却期倒计时（期间is_action_just_pressed_safe一律返回false）
 	if _input_cooldown_timer > 0.0:
 		_input_cooldown_timer -= delta
 
 	_cache_movement_input()
 
 
+## _input() - 事件捕获入口：识别设备类型、跟踪鼠标状态、把"首次按下"缓存为待消费动作
+## 用_input而非_unhandled_input：网关必须先于一切业务看到事件，才能完成设备识别与状态跟踪
 func _input(event: InputEvent) -> void:
 	# 检测设备类型变化
 	_detect_device_from_event(event)
@@ -97,6 +111,7 @@ func _input(event: InputEvent) -> void:
 			if not InputMap.has_action(action):
 				continue
 			if event.is_action_pressed(action):
+				## 双重过滤：动作存在 + 当前上下文允许，才写入缓存等待消费
 				if _is_action_allowed_in_context(action):
 					_just_pressed_actions[action] = true
 
@@ -173,6 +188,7 @@ func vibrate(type: VibrationType) -> void:
 			duration = 0.5
 
 	Input.start_joy_vibration(_active_joypad_id, strength, strength, duration)
+	## 注：低频/高频马达使用相同强度（简化分级模型；如需轰鸣感可差异化这两个参数）
 
 
 ## 注册输入上下文（用于模式切换）
@@ -184,6 +200,7 @@ func push_context(context_name: String) -> void:
 
 ## 注销输入上下文（恢复上层）
 func pop_context() -> void:
+	## 栈底GAMEPLAY永不弹出（size>1才pop），保证任何时刻都有合法上下文
 	if _context_stack.size() > 1:
 		_context_stack.pop_back()
 		# 触发输入屏蔽期
@@ -208,6 +225,7 @@ func start_input_cooldown(duration: float = INPUT_COOLDOWN) -> void:
 
 ## ==================== 私有实现 ====================
 
+## current_device的自定义getter（直通返回）：预留只读封装/派生逻辑的扩展点
 func _get_current_device() -> String:
 	return current_device
 
@@ -249,14 +267,15 @@ func _detect_device_from_event(event: InputEvent) -> void:
 		_update_device_type(detected)
 
 
-## 更新设备类型并触发信号
+## 更新设备类型并触发信号（去重：设备未实际变化不发信号，避免UI重复刷新）
 func _update_device_type(device: String) -> void:
 	if current_device != device:
 		current_device = device
 		input_device_changed.emit(device)
 
 
-## 缓存移动输入向量
+## 缓存移动输入向量（每帧刷新）：玩家等业务层读缓存而非直接查Input，
+## 统一走网关保证死区/轴策略只在一处实现，便于全局调整
 func _cache_movement_input() -> void:
 	# 安全获取轴输入，确保动作存在
 	var input_x: float = 0.0
@@ -274,7 +293,7 @@ func _cache_movement_input() -> void:
 func _is_action_allowed_in_context(action: String) -> bool:
 	var current_context: String = get_current_context()
 
-	# 定义上下文允许的动作列表
+	# 定义上下文允许的动作列表（值为动作名或前缀，如"ui_"放行全部ui_开头的动作）
 	var allowed_actions: Dictionary = {
 		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot"],
 		"PAUSE_MENU": ["ui_", "game_interact"],
@@ -287,12 +306,13 @@ func _is_action_allowed_in_context(action: String) -> bool:
 	var allowed: Array = allowed_actions.get(current_context, [])
 
 	for prefix in allowed:
+		## 前缀匹配（"ui_"命中"ui_confirm"）或全名匹配，任一命中即放行
 		if action.begins_with(prefix) or action == prefix:
 			return true
 
 	return false
 
 
-## 检查指定上下文是否在栈顶
+## 检查指定上下文是否在栈顶（与get_current_context()配合的便捷判断）
 func _is_context_active(context_name: String) -> bool:
 	return get_current_context() == context_name

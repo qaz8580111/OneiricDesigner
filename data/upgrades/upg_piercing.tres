@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+[ext_resource type="Resource" path="res://data/bullet/effect/piercing_effect.tres" id="2"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_piercing"
+display_name = "贯穿之矛"
+description = "子弹可穿透3名敌人，每次穿透伤害衰减15%"
+rarity = 1
+max_stacks = 1
+bullet_effect = ExtResource("2")

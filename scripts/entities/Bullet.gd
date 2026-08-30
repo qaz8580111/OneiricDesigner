@@ -1,6 +1,16 @@
 ## Bullet.gd - 子弹核心脚本
 ## 职责：管理子弹移动、碰撞检测、特效触发、边界回收等逻辑
 ## 继承：Area2D（Godot 4的2D区域节点，用于碰撞检测）
+## 节点结构：Bullet(Area2D) → Sprite2D(外观) + CollisionShape2D(命中判定形状)
+## 系统交互：
+##   - 信号：hit → GameWorld 连接（预留扩展逻辑）；destroyed → GameWorld 从 _bullets 管理列表移除
+##   - 数据：set_bullet_data 注入"玩家私有副本再duplicate"的独立数据，每颗子弹的特效修改互不干扰
+## 碰撞层/掩码（场景默认 + 发射者按阵营覆盖，本脚本不写死）：
+##   - 玩家子弹：沿用场景默认 layer=4(子弹层)/mask=2(敌人层) → 只检测敌人
+##   - 敌人子弹：Enemy._perform_attack 覆盖为 layer=8(敌方子弹层)/mask=1(玩家层) → 只检测玩家
+##   - 双保险：除碰撞层过滤外，_owner_group 同阵营比较兜底防误伤友军
+## 设计意图：弹幕运动不用物理移动——_physics_process 中 position += velocity*delta 直接积分
+##           （子弹挂在原点的GameWorld下，局部坐标=全局坐标），命中判定交给 Area2D 的 body/area_entered
 extends Area2D
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========
@@ -13,6 +23,9 @@ const BulletFormClass = preload("res://scripts/resources/bullet/BulletForm.gd")
 
 ## 子弹特效资源类，用于配置子弹特效（生成、飞行、命中、销毁）
 const BulletEffectClass = preload("res://scripts/resources/bullet/BulletEffect.gd")
+
+## 残影节点类（对象池管理的高频视觉元素，拖尾专用）
+const TrailGhostClass = preload("res://scripts/entities/TrailGhost.gd")
 
 ## ========== 导出变量（编辑器可配置） ==========
 
@@ -40,6 +53,38 @@ var _owner_group: String = ""
 
 ## 是否命中过目标（防重复伤害标记）
 var _has_hit: bool = false
+
+## 命中保活标记（本次命中后是否继续存活）
+## 数据流：ON_HIT特效（如穿透）在apply中置true → 碰撞回调据此跳过销毁
+## 每次命中前由碰撞回调重置为false，避免状态残留
+var _keep_alive: bool = false
+
+## ========== 拖尾系统（运行时数据） ==========
+
+## 是否启用拖尾（由追踪/加速等特效在首次触发时调用 enable_trail 开启）
+var _trail_enabled: bool = false
+
+## 拖尾生成间隔（秒），越小拖尾越密集
+var _trail_interval: float = 0.035
+
+## 拖尾生成计时器（累计到间隔后生成一个拖尾节点）
+var _trail_timer: float = 0.0
+
+## 拖尾颜色（由 enable_trail 的调用方指定，体现特效特色）
+var _trail_color: Color = Color(1, 1, 1, 0.6)
+
+## ========== 性能优化：视口/相机缓存 ==========
+
+## 缓存的相机引用（每0.5秒刷新一次，避免每帧get_camera_2d开销）
+## 设计意图：边界检测每物理帧需要相机位置，get_camera_2d内部有查找开销；
+##           几百颗子弹×每帧查询=热点，缓存后几乎零成本
+var _cached_camera: Camera2D = null
+
+## 相机刷新计时器（累计到0.5秒时重新查找相机）
+var _camera_refresh_timer: float = 0.0
+
+## 缓存的屏幕尺寸（与相机同步刷新，窗口模式下不变）
+var _cached_screen_size: Vector2 = Vector2.ZERO
 
 ## ========== 信号定义（用于与其他节点通信） ==========
 
@@ -86,6 +131,38 @@ func get_bullet_data() -> BulletDataClass:
 func set_owner_group(group_name: String) -> void:
 	_owner_group = group_name
 
+## ========== 拖尾系统方法 ==========
+
+## 启用拖尾（对外接口，由追踪/加速等特效调用）
+## 数据流：特效apply() → bullet.enable_trail() → _physics_process()中按间隔生成渐隐残影
+## 参数：color - 拖尾颜色；interval - 生成间隔（秒），越小越密集
+func enable_trail(color: Color = Color(1, 1, 1, 0.6), interval: float = 0.035) -> void:
+	_trail_enabled = true
+	_trail_color = color
+	_trail_interval = interval
+
+## 按间隔生成拖尾残影（在物理帧中调用）
+## 性能设计：残影从TrailGhost对象池获取（复用节点），自身驱动渐隐动画，
+##           无Tween分配、无节点创建——彻底消除高频拖尾的节点churn卡顿
+## 设计意图：残影挂在子弹的父节点（世界）上而非子弹自身，
+##           这样子弹销毁后残影仍能继续播放渐隐动画，避免被一起回收
+func _update_trail(delta: float) -> void:
+	## 未启用拖尾时跳过
+	if not _trail_enabled:
+		return
+	var world: Node = get_parent()
+	if world == null:
+		return
+
+	## 累计时间达到间隔后生成一个残影
+	_trail_timer += delta
+	if _trail_timer < _trail_interval:
+		return
+	_trail_timer = 0.0
+
+	## 从对象池生成残影（池满时自动跳过，绝不卡顿）
+	TrailGhostClass.spawn(world, global_position, _trail_color, 8.0, 0.25, 0.2)
+
 ## ========== 子弹外观应用 ==========
 
 ## 应用子弹数据到子弹外观
@@ -127,23 +204,32 @@ func _physics_process(delta: float) -> void:
 	## 触发子弹飞行时的特效（ON_TRAVEL类型）
 	_bullet_data.trigger_effects(BulletEffectClass.TriggerType.ON_TRAVEL, self)
 
+	## 更新拖尾残影（若已被特效启用）
+	_update_trail(delta)
+
 	## 检查子弹是否超出屏幕边界
 	_check_screen_boundary()
 
 ## ========== 屏幕边界检测 ==========
 
 ## 检查子弹是否超出屏幕边界，超出则自动销毁
+## 性能设计：相机/屏幕尺寸使用缓存（每0.5秒刷新），避免每帧的查找开销
 func _check_screen_boundary() -> void:
-	## 获取当前视图的相机节点
-	var camera: Camera2D = get_viewport().get_camera_2d()
-	## 如果没有相机，直接返回
-	if camera == null:
+	## 相机刷新计时：每0.5秒重新查找一次相机并缓存屏幕尺寸
+	## 数据流：计时器归零 → get_camera_2d重新查找 → 更新缓存引用
+	_camera_refresh_timer += get_physics_process_delta_time()
+	if _camera_refresh_timer >= 0.5 or _cached_screen_size == Vector2.ZERO:
+		_camera_refresh_timer = 0.0
+		_cached_camera = get_viewport().get_camera_2d()
+		_cached_screen_size = get_viewport_rect().size
+
+	## 如果没有缓存的相机，直接返回（等下次刷新）
+	if _cached_camera == null:
 		return
 
-	## 获取屏幕尺寸
-	var screen_size: Vector2 = get_viewport_rect().size
-	## 获取相机全局位置
-	var camera_pos: Vector2 = camera.global_position
+	## 使用缓存的相机位置与屏幕尺寸计算可视区域
+	var camera_pos: Vector2 = _cached_camera.global_position
+	var screen_size: Vector2 = _cached_screen_size
 	## 计算屏幕半尺寸
 	var half_screen: Vector2 = screen_size / 2.0
 	## 获取边界余量
@@ -172,6 +258,9 @@ func _on_body_entered(body: Node2D) -> void:
 	if _owner_group != "" and body.is_in_group(_owner_group):
 		return
 	
+	## 重置保活标记（由ON_HIT特效决定本次命中后是否继续存活，如穿透）
+	_keep_alive = false
+	
 	## 如果有子弹数据，触发命中时的特效（ON_HIT类型）
 	if _bullet_data != null:
 		_bullet_data.trigger_effects(
@@ -181,8 +270,9 @@ func _on_body_entered(body: Node2D) -> void:
 			{"direction": _direction}
 		)
 	
-	## 标记已命中，防止重复伤害
-	_has_hit = true
+	## 穿透等保活特效会保持_has_hit为false，让子弹继续飞行命中下一个目标
+	if not _keep_alive:
+		_has_hit = true
 	
 	## 调用目标的take_damage方法（使用get_final_damage获取最终伤害，支持扩展）
 	var damage_amount: float = _bullet_data.get_final_damage() if _bullet_data else 10.0
@@ -190,8 +280,9 @@ func _on_body_entered(body: Node2D) -> void:
 		body.call("take_damage", damage_amount)
 		hit.emit(self, body)
 	
-	## 销毁子弹
-	_destroy()
+	## 销毁子弹（保活特效生效时跳过）
+	if not _keep_alive:
+		_destroy()
 
 ## 碰撞检测回调：当有区域体进入子弹区域时调用（用于检测玩家Hitbox）
 ## 参数：area - 进入区域的Area2D节点（如玩家Hitbox）
@@ -205,6 +296,9 @@ func _on_area_entered(area: Area2D) -> void:
 		var parent_node: Node = area.get_parent()
 		if parent_node != null and parent_node.is_in_group(_owner_group):
 			return
+	
+	## 重置保活标记（由ON_HIT特效决定本次命中后是否继续存活，如穿透）
+	_keep_alive = false
 	
 	## 如果有子弹数据，触发命中时的特效（ON_HIT类型）
 	if _bullet_data != null:
@@ -220,8 +314,9 @@ func _on_area_entered(area: Area2D) -> void:
 	if target == null:
 		target = area
 	
-	## 标记已命中，防止重复伤害
-	_has_hit = true
+	## 穿透等保活特效会保持_has_hit为false，让子弹继续飞行命中下一个目标
+	if not _keep_alive:
+		_has_hit = true
 	
 	## 调用目标的take_damage方法（使用get_final_damage获取最终伤害，支持扩展）
 	var damage_amount: float = _bullet_data.get_final_damage() if _bullet_data else 10.0
@@ -229,8 +324,9 @@ func _on_area_entered(area: Area2D) -> void:
 		target.call("take_damage", damage_amount)
 		hit.emit(self, target)
 	
-	## 销毁子弹
-	_destroy()
+	## 销毁子弹（保活特效生效时跳过）
+	if not _keep_alive:
+		_destroy()
 
 ## ========== 子弹销毁 ==========
 

@@ -1,0 +1,23 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
+[ext_resource type="BulletData" path="res://data/bullet/enemy_lightning_bullet.tres" id="2"]
+
+[resource type="EnemyData" script_class="EnemyData"]
+script = ExtResource("1")
+enemy_id = "thundermage"
+enemy_name = "Thunder Mage"
+speed = 55.0
+wander_speed = 35.0
+wander_interval = 2.5
+max_health = 8
+damage = 12
+detection_range = 450.0
+attack_range = 320.0
+attack_cooldown = 2.0
+bullet_data = ExtResource("2")
+drop_items = []
+placeholder_color = Color(0.5, 0.6, 1, 1)
+placeholder_size = Vector2(32, 42)
+is_elite = false
+elite_prefix = ""

@@ -1,6 +1,9 @@
 ## PauseMenu.gd - 暂停菜单逻辑脚本
 ## 职责：管理游戏暂停界面，处理继续游戏、打开设置、返回主菜单三种操作
 ## 继承：Control（UI控件基类，作为暂停菜单的根节点）
+## 数据流：按钮点击 / 导航器cancel_pressed(ESC) → 信号(resume_game/open_settings/quit_to_menu) → Main.gd 监听后执行
+## 注意：游戏中按ESC打开暂停菜单由 Main.gd 统一处理，且会被 UpgradeManager.is_choosing 屏蔽
+##      （升级三选一期间禁止再叠加暂停菜单）；暂停菜单打开时按ESC走导航器取消 = 继续游戏
 extends Control
 
 ## 暂停菜单必须在暂停状态下仍能处理输入，需要 ALWAYS 模式

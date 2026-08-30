@@ -1,6 +1,15 @@
 ## Enemy.gd - 敌人角色核心脚本
 ## 职责：管理敌人AI状态机（漫游/追踪/攻击）、移动、射击、血量、掉落等逻辑
 ## 继承：CharacterBody2D（Godot 4的2D物理角色节点）
+## 节点结构：Enemy(CharacterBody2D) → Sprite2D(外观，精英怪含 EliteGlow 发光子节点) / Hitbox(Area2D, 玩家接触判定)
+## 系统交互：
+##   - 组：由 GameWorld 生成时加入"enemy"+"normal_enemy"/"elite_enemy"（阵营判定/特效查询/统计）
+##   - 信号：killed → GameWorld 移除管理列表并计数；drops_generated → GameWorld 生成拾取物；
+##           damaged/attacked 预留给受击/攻击动画
+##   - 数据：enemy_data.tres 由 GameWorld 深拷贝并难度缩放后注入（apply_to_enemy 覆盖下方导出默认值）
+## 碰撞层：本体 layer=2(敌人层)/mask=3；Hitbox layer=2/mask=1（检测玩家层，实现贴身接触伤害）
+## 设计意图：三态状态机(WANDER/CHASE/ATTACK)按与玩家距离驱动；子弹就地生成
+##           （与玩家"只发信号由GameWorld创建"不同——敌人数量多，就地实例化链路最短）
 extends CharacterBody2D
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========
@@ -16,6 +25,27 @@ const BulletFormClass = preload("res://scripts/resources/bullet/BulletForm.gd")
 
 ## 子弹场景预加载，避免运行时重复加载导致性能问题
 const BULLET_SCENE: PackedScene = preload("res://scenes/gameplay/Bullet.tscn")
+
+## 掉落物数据资源类
+const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
+
+## 残影/碎片节点类（对象池管理的高频视觉元素，死亡碎片专用）
+const TrailGhostClass = preload("res://scripts/entities/TrailGhost.gd")
+
+## 角色皮肤资源类（主题系统：皮肤决定外观+动画参数）
+const CharacterSkinClass = preload("res://scripts/resources/skin/CharacterSkin.gd")
+
+## 主题包资源类（ThemeManager.theme_changed 信号的负载类型）
+const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
+
+## 通用角色动画器组件（驱动呼吸/弹跳/攻击/受击动画）
+const CharacterAnimatorClass = preload("res://scripts/components/CharacterAnimator.gd")
+
+## ========== 静态纹理缓存（性能优化） ==========
+## 设计意图：占位纹理按形状逐像素生成（30x30=900次set_pixel）+纹理上传，
+##           每次刷怪都重新生成会在波次刷怪时造成明显hitch；
+##           同"形状|颜色|尺寸"的敌人共享同一张纹理（static缓存，跨实例复用）
+static var _texture_cache: Dictionary = {}
 
 ## ========== 导出变量（编辑器可配置） ==========
 
@@ -62,8 +92,21 @@ const BULLET_SCENE: PackedScene = preload("res://scenes/gameplay/Bullet.tscn")
 ## 玩家引用，用于追踪和攻击
 var _player: CharacterBody2D = null
 
+## 通用角色动画器组件（应用皮肤时创建；null=无主题回退占位时保持原样）
+var animator: CharacterAnimatorClass = null
+
+## 敌人"逻辑色"（死亡碎片颜色/无形态子弹染色都取此色）
+## 初始化自 enemy_data.placeholder_color；应用主题皮肤后跟随皮肤主色
+var _body_color: Color = Color(1, 0.2, 0.2, 1)
+
 ## 敌人原始颜色，用于受伤后恢复显示
 var _original_color: Color = Color.WHITE
+
+## 受击白闪进行中标记（闪烁窗口复用开关）
+## 设计意图：高射速连打时同一敌人每秒可被命中数十次，旧实现每次命中都
+## new一个0.1秒SceneTreeTimer——高频小对象分配churn + 多个恢复回调竞态错乱；
+## 改为"窗口期内复用同一次闪烁"，计时器频率被钳制到最多10次/秒/敌人
+var _flash_active: bool = false
 
 ## 攻击冷却计时器，递减到0时可再次攻击
 var _attack_timer: float = 0.0
@@ -119,25 +162,42 @@ func _ready() -> void:
 	## 获取初始漫游方向
 	_wander_direction = _get_random_direction()
 	
-	## 设置敌人占位纹理（无美术资源时使用）
-	var color: Color = Color(1, 0.2, 0.2, 1)
-	var width: int = 30
-	var height: int = 30
-	## 如果有敌人数据，使用数据中配置的颜色和大小
+	## ========== 外观：主题皮肤（优先）→ 占位纹理（回退） ==========
+	## 逻辑色初始化：死亡碎片颜色/无形态子弹染色都取此色（先取数据占位色作默认）
 	if enemy_data != null:
-		color = enemy_data.placeholder_color
-		width = int(enemy_data.placeholder_size.x)
-		height = int(enemy_data.placeholder_size.y)
-	
-	## 创建占位纹理
-	_create_placeholder_texture(sprite, color, width, height)
-	
-	## 如果是精英怪，添加发光效果
-	if enemy_data != null and enemy_data.is_elite:
-		_create_elite_glow_effect()
-	
+		_body_color = enemy_data.placeholder_color
+
+	## 从 ThemeManager 获取本敌人的皮肤：enemy_id 精确匹配 → 主题兜底皮肤 → null
+	## 数据流：ThemeManager(autoload)已加载主题 → get_enemy_skin(enemy_id) → 应用
+	## 防护：ThemeManager 单例异常（解析失败未实例化）时标识符为 null，
+	##       直接调用会中断 _ready → 占位纹理逻辑被跳过 → 敌人隐形（已发生的线上事故），
+	##       因此必须判空后再调用，保证任何情况下都走到纹理赋值
+	var skin: CharacterSkinClass = null
+	if ThemeManager:
+		skin = ThemeManager.get_enemy_skin(
+			enemy_data.enemy_id if enemy_data != null else "")
+	if skin != null:
+		## 有皮肤：应用皮肤（纹理+动画器+逻辑色跟随皮肤主色）
+		_apply_skin(skin)
+	else:
+		## 无主题回退：按 EnemyData 的占位尺寸生成形状纹理（原有逻辑）
+		var width: int = 30
+		var height: int = 30
+		if enemy_data != null:
+			width = int(enemy_data.placeholder_size.x)
+			height = int(enemy_data.placeholder_size.y)
+		_create_placeholder_texture(sprite, _body_color, width, height)
+		## 精英怪发光（回退路径）
+		if enemy_data != null and enemy_data.is_elite:
+			_create_elite_glow_effect()
+
 	## 保存敌人原始颜色，用于受伤后恢复
 	_original_color = sprite.modulate
+
+	## 监听主题热切换信号：设置界面切主题时全场敌人即时换肤
+	## 数据流：ThemeManager.set_theme → theme_changed信号 → 此回调 → 重新索取皮肤
+	if ThemeManager and not ThemeManager.theme_changed.is_connected(_on_theme_changed):
+		ThemeManager.theme_changed.connect(_on_theme_changed)
 	
 	## 连接碰撞检测信号：当有物体进入hitbox区域时触发回调
 	if hitbox:
@@ -145,26 +205,121 @@ func _ready() -> void:
 
 ## ========== 辅助方法 ==========
 
-## 创建占位纹理（无美术资源时使用）
+## 创建占位纹理（无美术资源时使用，按形状类型生成：方形/圆形/菱形）
+## 性能设计：纹理按"形状|颜色|尺寸"键入静态缓存，同配置敌人共享纹理；
+##           首次生成后不再有逐像素循环和纹理上传开销（波次刷怪不卡顿）
+## 数据流：enemy_data.get_shape_type() → 缓存查询/首次生成 → ImageTexture → sprite
 ## 参数：sprite_node - 要设置纹理的Sprite2D节点
 ##       color - 纹理颜色
 ##       width - 纹理宽度（像素）
 ##       height - 纹理高度（像素）
 func _create_placeholder_texture(sprite_node: Sprite2D, color: Color, width: int, height: int) -> void:
-	## 创建指定尺寸的RGBA8格式图像
+	## 获取实际形状类型（auto时按enemy_id自动推断，无数据时默认方形）
+	var shape: String = "square"
+	if enemy_data != null:
+		shape = enemy_data.get_shape_type()
+
+	## 缓存键：形状|颜色|宽|高（颜色转html保证不同色不串缓存）
+	var cache_key: String = "%s|%s|%d|%d" % [shape, color.to_html(), width, height]
+	## 缓存命中：直接复用已有纹理（零生成开销）
+	if _texture_cache.has(cache_key):
+		sprite_node.texture = _texture_cache[cache_key]
+		return
+
+	## 缓存未命中：首次生成纹理
+	## 创建透明底图（形状外的像素保持透明，形成轮廓）
 	var image: Image = Image.create(width, height, false, Image.FORMAT_RGBA8)
-	## 用指定颜色填充整个图像
-	image.fill(color)
-	## 将图像转换为纹理
+	image.fill(Color(0, 0, 0, 0))
+
+	## 图像中心坐标与判定半径（取宽高较小值的一半，保证形状完整）
+	var cx: float = width / 2.0
+	var cy: float = height / 2.0
+	var radius: float = min(width, height) / 2.0
+
+	## 按形状逐像素填充
+	for y in range(height):
+		for x in range(width):
+			var dx: float = x + 0.5 - cx
+			var dy: float = y + 0.5 - cy
+			var filled: bool = false
+			match shape:
+				"circle":
+					## 圆形判定：像素到中心的欧氏距离不超过半径
+					filled = Vector2(dx, dy).length() <= radius
+				"diamond":
+					## 菱形判定：像素到中心的曼哈顿距离不超过半径
+					filled = absf(dx) + absf(dy) <= radius
+				_:
+					## 方形判定：矩形范围内全部填充
+					filled = true
+			if filled:
+				image.set_pixel(x, y, color)
+
+	## 将图像转换为纹理并存入缓存（下次同配置敌人直接复用）
 	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	_texture_cache[cache_key] = texture
 	## 将纹理设置到Sprite2D节点上
 	sprite_node.texture = texture
+
+## ========== 主题皮肤系统（一键换肤） ==========
+
+## 应用角色皮肤（首次创建 / 主题热切换时调用）
+## 参数：skin - 角色皮肤资源（来自 ThemeManager.get_enemy_skin）
+func _apply_skin(skin: CharacterSkinClass) -> void:
+	## 皮肤为空直接返回（防御）
+	if skin == null:
+		return
+	## PROCEDURAL 模式：把皮肤生成的纹理挂到敌人精灵（皮肤内部缓存，同皮肤共享一张纹理）
+	if not skin.has_frames():
+		sprite.texture = skin.get_texture()
+	## 重置精灵调制色为白色：场景中 Sprite2D 自带红色 modulate（旧占位染色），
+	## 皮肤纹理颜色已经正确，叠加调制会串色；白调制保证皮肤颜色原样显示
+	if not sprite.modulate.is_equal_approx(Color.WHITE):
+		sprite.modulate = Color.WHITE
+	## 创建/更新动画器（FRAMES 模式会在内部创建 AnimatedSprite2D 并隐藏色块精灵）
+	_ensure_animator(skin)
+	## 逻辑色跟随皮肤主色：死亡碎片/无形态子弹染色与外观保持一致
+	_body_color = skin.main_color
+	## 精英怪发光重建（皮肤纹理已变化，光晕必须跟着换）
+	if enemy_data != null and enemy_data.is_elite:
+		_create_elite_glow_effect()
+
+## 获取或创建动画器组件（首次创建，之后复用并重设皮肤）
+func _ensure_animator(skin: CharacterSkinClass) -> void:
+	## 已有动画器：只需重设皮肤（热切换主题场景）
+	if animator != null:
+		animator.setup(skin, sprite)
+		return
+	## 首次：创建动画器组件挂到敌人下（自驱动 _process，不占AI逻辑帧）
+	animator = CharacterAnimatorClass.new()
+	animator.name = "CharacterAnimator"
+	add_child(animator)
+	animator.setup(skin, sprite)
+
+## 主题切换回调（ThemeManager.theme_changed）：全场敌人即时换肤
+func _on_theme_changed(theme: GameThemeClass) -> void:
+	## 按新主题重新索取本敌人的皮肤（enemy_id 匹配 → 兜底皮肤）
+	## 防护：单例异常时标识符为 null，判空避免回调中断（保持当前外观即可）
+	if ThemeManager == null:
+		return
+	var new_skin: CharacterSkinClass = ThemeManager.get_enemy_skin(
+		enemy_data.enemy_id if enemy_data != null else "")
+	## 新主题有可用皮肤才应用（null 时保持当前外观，避免变成隐形）
+	if new_skin != null:
+		_apply_skin(new_skin)
 
 ## 创建精英怪发光效果（使精英怪更加醒目）
 func _create_elite_glow_effect() -> void:
 	if sprite == null:
 		return
-	
+
+	## 移除旧的发光节点（主题热切换会重复调用本方法，防止光晕叠加多层）
+	var old_glow: Node = sprite.get_node_or_null("EliteGlow")
+	if old_glow != null:
+		old_glow.queue_free()
+		## 同帧内 add_child 前旧节点仍在树上会重名，立即改名规避
+		old_glow.name = "EliteGlow_Old"
+
 	## 创建发光精灵作为子节点
 	var glow_sprite: Sprite2D = Sprite2D.new()
 	glow_sprite.name = "EliteGlow"
@@ -172,17 +327,10 @@ func _create_elite_glow_effect() -> void:
 	glow_sprite.modulate = Color(1, 0.5, 0, 0.4)
 	glow_sprite.scale = Vector2(1.5, 1.5)
 	glow_sprite.z_index = -1
-	
-	## 创建发光纹理
-	var image: Image = Image.create(
-		int(sprite.texture.get_size().x),
-		int(sprite.texture.get_size().y),
-		false,
-		Image.FORMAT_RGBA8
-	)
-	image.fill(Color(1, 0.5, 0, 0.6))
-	var texture: ImageTexture = ImageTexture.create_from_image(image)
-	glow_sprite.texture = texture
+
+	## 发光纹理直接复用敌人自身纹理：
+	## 形状（方形/圆形/菱形）与敌人轮廓完全一致，避免方形光晕包裹圆形敌人的违和感
+	glow_sprite.texture = sprite.texture
 	
 	## 将发光精灵添加到敌人节点
 	sprite.add_child(glow_sprite)
@@ -283,11 +431,18 @@ func _handle_wander(delta: float) -> void:
 	if _wander_timer <= 0.0:
 		_wander_direction = _get_random_direction()
 		_wander_timer = wander_interval
-	
+
 	## 设置漫游速度
 	velocity = _wander_direction * wander_speed
 	## 执行移动并处理碰撞
 	move_and_slide()
+
+	## ---------- 动画状态同步（有动画器时） ----------
+	if animator != null:
+		## 漫游=移动中：播放弹跳/摇摆动画
+		animator.set_moving(true)
+		## 朝向跟随漫游方向（左右翻转眼睛朝向）
+		animator.set_facing(_wander_direction.x)
 
 ## 处理追踪状态逻辑
 ## 参数：delta - 帧间隔时间（秒）
@@ -295,7 +450,7 @@ func _handle_chase(delta: float) -> void:
 	## 如果玩家为空，直接返回
 	if _player == null:
 		return
-	
+
 	## 计算从敌人位置指向玩家位置的方向向量并归一化
 	var direction: Vector2 = (_player.global_position - global_position).normalized()
 	## 设置追踪速度
@@ -303,16 +458,31 @@ func _handle_chase(delta: float) -> void:
 	## 执行移动并处理碰撞
 	move_and_slide()
 
+	## ---------- 动画状态同步（有动画器时） ----------
+	if animator != null:
+		## 追踪=移动中
+		animator.set_moving(true)
+		## 朝向跟随追踪方向（面朝玩家）
+		animator.set_facing(direction.x)
+
 ## 处理攻击状态逻辑
 ## 参数：delta - 帧间隔时间（秒）
 func _handle_attack(delta: float) -> void:
 	## 攻击时停止移动
 	velocity = Vector2.ZERO
-	
+
 	## 如果玩家为空，直接返回
 	if _player == null:
 		return
-	
+
+	## ---------- 动画状态同步（有动画器时） ----------
+	if animator != null:
+		## 攻击=静止：切换回待机呼吸动画
+		animator.set_moving(false)
+		## 攻击时保持面朝玩家
+		var face_dir: Vector2 = (_player.global_position - global_position).normalized()
+		animator.set_facing(face_dir.x)
+
 	## 如果攻击冷却完成，执行攻击
 	if _attack_timer <= 0.0:
 		_perform_attack()
@@ -339,6 +509,27 @@ func _perform_attack() -> void:
 		bullet_data = BulletDataClass.new()
 		bullet_data.damage = damage
 		bullet_data.speed = 300.0
+	
+	## 根据enemy_id选择不同的射击音效（默认通用enemy_shoot）
+	var sfx_name: String = "enemy_shoot"
+	if enemy_data != null:
+		match enemy_data.enemy_id:
+			"archer", "sniper": sfx_name = "archer_shot"
+			"rocketeer", "bomber": sfx_name = "rocket_shot"
+			"thundermage": sfx_name = "lightning_cast"
+			"elite_001": sfx_name = "elite_shot"
+			"wraith": sfx_name = "wraith_cast"
+			"tank": sfx_name = "tank_shot"
+			_: sfx_name = "enemy_shoot"
+	## 三元表达式当条件语句用：AudioManager存在才播放（单行完成条件调用，保持此处代码紧凑）
+	AudioManager.play_2d(sfx_name, global_position, 0.75) if AudioManager else null
+
+	## ---------- 动画状态同步（有动画器时） ----------
+	## 播放攻击动画（前倾+放大脉冲，让"开火"有可读的发力感）
+	if animator != null:
+		animator.play_attack()
+		## 攻击瞬间面朝玩家
+		animator.set_facing(direction.x)
 	
 	## 如果子弹场景未加载，直接返回
 	if BULLET_SCENE == null:
@@ -380,8 +571,10 @@ func _perform_attack() -> void:
 			## 应用形态配置到子弹外观
 			form.apply_visual(bullet_sprite)
 		else:
-			## 默认红色子弹
-			bullet_sprite.modulate = Color(1, 0.2, 0.2, 1)
+			## 无形态配置时按敌人"逻辑色"染色子弹：
+			## 让近战敌人（史莱姆/蝙蝠/骷髅等）的攻击弹与其体色一致，视觉上一眼可辨攻击来源
+			## （逻辑色跟随主题皮肤主色，换肤后子弹颜色自动同步）
+			bullet_sprite.modulate = _body_color
 	
 	## 发出攻击信号（用于播放攻击动画等）
 	attacked.emit(direction)
@@ -401,6 +594,10 @@ func take_damage(amount: int) -> void:
 	health = max(health, 0)
 	## 发出受伤信号（用于播放受伤动画等）
 	damaged.emit(amount)
+	
+	## 播放受伤音效（轻微随机音高避免重复感）
+	if AudioManager:
+		AudioManager.play_2d("enemy_hurt", global_position, 0.7, randf_range(0.9, 1.1))
 
 	## 播放受伤闪烁效果
 	_flash_hit()
@@ -410,17 +607,41 @@ func take_damage(amount: int) -> void:
 		_die()
 
 ## 受伤闪烁效果（白色闪烁0.1秒后恢复）
+## 颜色逻辑在本方法内管理（恢复"白闪前状态色"）；运动抖动委托动画器
 func _flash_hit() -> void:
 	## 如果精灵节点为空，直接返回
 	if sprite == null:
 		return
 
-	## 设置为白色闪烁
+	## 运动抖动委托动画器（随机高频位移，打击感；无动画器时跳过——无主题回退路径）
+	if animator != null:
+		animator.play_hit_shake()
+
+	## ---------- 闪烁窗口复用（性能优化 + 竞态修复） ----------
+	## 白闪进行中时直接返回：精灵本就处于WHITE状态，无需重复起计时器；
+	## 高射速下旧实现每次命中都分配一个0.1秒SceneTreeTimer（自动回收但
+	## 高频小对象分配仍有churn），且多个回调按各自到期时间恢复颜色，
+	## 后到的命中闪白会被先到的恢复提前掐灭（视觉抖动）
+	if _flash_active:
+		return
+
+	## 记录白闪前的颜色再变白：可能是燃烧/中毒的染色（状态色）而非本色，
+	## 到点恢复"白闪前"的颜色，避免白闪恢复吞掉状态染色
+	var pre_color: Color = sprite.modulate
 	sprite.modulate = Color.WHITE
-	## 等待0.1秒后恢复原始颜色
-	await get_tree().create_timer(0.1).timeout
+
+	## 标记窗口开启（此后0.1秒内的命中全部复用本次闪烁）
+	_flash_active = true
+
+	## 等待0.1秒后恢复颜色
+	## 第二参数process_always=false：闪烁计时走"游戏时间"——游戏暂停（三选一/暂停菜单）时
+	## 计时冻结，避免暂停期间恢复回调与恢复后的新受击闪烁交错错乱
+	await get_tree().create_timer(0.1, false).timeout
+
+	## 窗口关闭（即使精灵已销毁也无需担心：标记随实例一起回收）
+	_flash_active = false
 	if is_instance_valid(sprite):
-		sprite.modulate = _original_color
+		sprite.modulate = pre_color
 
 ## 应用减速效果（用于冰冻等控制技能）
 ## 参数：duration - 减速持续时间（秒）
@@ -440,7 +661,9 @@ func apply_slowdown(duration: float, speed_multiplier: float, effect_color: Colo
 		sprite.modulate = effect_color
 	
 	## 等待持续时间结束
-	await get_tree().create_timer(duration).timeout
+	## 第二参数process_always=false：减速时长走"游戏时间"——暂停时计时冻结，
+	## 否则三选一面板停留期间减速照样倒计时，恢复游戏时效果已凭空过期
+	await get_tree().create_timer(duration, false).timeout
 	
 	## 恢复原始速度
 	speed = original_speed
@@ -452,10 +675,30 @@ func apply_slowdown(duration: float, speed_multiplier: float, effect_color: Colo
 
 ## 敌人死亡逻辑
 func _die() -> void:
+	## ---------- 死亡音效 ----------
+	if AudioManager:
+		var is_elite: bool = (enemy_data != null and enemy_data.is_elite) or max_health >= 15
+		AudioManager.play_2d("enemy_die", global_position, 0.9, randf_range(0.85, 1.1))
+		## 自爆怪：爆炸音效
+		if enemy_data != null and enemy_data.enemy_id == "bomber":
+			AudioManager.play_2d("bomber_explode", global_position, 1.0)
+			## 自爆怪视觉爆炸
+			var world: Node2D = get_parent()
+			if world != null:
+				_spawn_death_explosion_vfx(world, global_position, Color(1, 0.6, 0.2, 1))
+	
+	## ---------- 死亡视觉：缩放消散 + 碎片 ----------
+	_spawn_death_vfx()
+	
 	## 获取敌人掉落道具列表（根据概率计算）
 	var drop_items: Array = []
 	if enemy_data != null:
 		drop_items = enemy_data.get_drops_to_spawn()
+	
+	## 如果数据中没有配置掉落物，自动生成默认掉落（让普通敌人也会掉碎片）
+	if drop_items.is_empty():
+		drop_items = _generate_default_drops()
+	
 	## 如果有掉落道具，发出信号通知GameWorld生成拾取物
 	if drop_items.size() > 0:
 		drops_generated.emit(global_position, drop_items)
@@ -464,6 +707,104 @@ func _die() -> void:
 	killed.emit()
 	## 使用call_deferred延迟销毁，避免物理回调中修改场景树导致错误
 	call_deferred("queue_free")
+
+## 死亡视觉：缩放消失 + 彩色粒子碎片
+## 性能设计：碎片改用TrailGhost对象池（复用节点+自驱动漂移动画），
+##           替代旧的"ColorRect+3个Tween属性"方案，大量敌人同时死亡时不再卡顿
+func _spawn_death_vfx() -> void:
+	var world: Node2D = get_parent()
+	if world == null:
+		return
+	var pos: Vector2 = global_position
+	## 敌人颜色（用于粒子色）——用"逻辑色"：跟随主题皮肤主色，换肤后碎片颜色自动同步
+	var col: Color = _body_color
+
+	## 碎片：4个小方块飞散（从池中获取，带漂移速度+渐隐）
+	for i in range(4):
+		## 随机飞散方向（扇形均匀+扰动）
+		var angle: float = (i / 4.0) * TAU + randf_range(-0.3, 0.3)
+		## 漂移速度：方向×随机速度（24~48像素/秒，与旧版飞散距离一致）
+		var drift: Vector2 = Vector2(cos(angle), sin(angle)) * randf_range(24.0, 48.0) * 2.5
+		## 从对象池生成碎片（0.4秒寿命后自动回池，与旧版动画时长一致）
+		TrailGhostClass.spawn(world, pos, Color(col.r, col.g, col.b, 0.9), 6.0, 0.4, 1.0, drift)
+
+## 通用爆炸VFX（供自爆怪等使用）
+## 参数：world - VFX挂载节点(通常为GameWorld)，pos - 爆炸中心(全局坐标)，col - 爆炸主色
+## 实现：3层ColorRect方环并行Tween放大+渐隐(0.35秒)，chain回调自动queue_free清理节点
+func _spawn_death_explosion_vfx(world: Node2D, pos: Vector2, col: Color) -> void:
+	for i in range(3):
+		var ring := ColorRect.new()
+		var sz: float = 120.0 * (1.0 + i * 0.15)
+		ring.size = Vector2(sz, sz)
+		ring.position = -ring.size / 2.0
+		ring.color = Color(col.r, col.g, col.b, 0.8 - i * 0.2)
+		ring.global_position = pos
+		world.add_child(ring)
+		var tw: Tween = world.create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(ring, "scale", Vector2(1.5, 1.5), 0.35)
+		tw.tween_property(ring, "modulate:a", 0.0, 0.35)
+		tw.chain().tween_callback(ring.queue_free)
+
+## 根据敌人强度生成默认掉落（无配置数据时的回退机制）
+func _generate_default_drops() -> Array:
+	var drops: Array = []
+	## 根据最大血量判断强度，越高血量概率和品质越高
+	var is_elite: bool = (enemy_data != null and enemy_data.is_elite) or max_health >= 15
+	var is_strong: bool = max_health >= 8
+	
+	## 基础梦境碎片（小）：60%概率普通怪，100%概率精英怪
+	var chance_frag_small: float = 0.6 if not is_elite else 1.0
+	if randf() < chance_frag_small:
+		var d: DropItemClass = DropItemClass.new()
+		d.item_id = "fragment_small"
+		d.item_name = "Small Fragment"
+		d.item_type = DropItemClass.ItemType.DREAM_FRAGMENT
+		d.value = 5 if not is_strong else 8
+		d.drop_chance = 1.0
+		d.is_rare = false
+		d.auto_adsorb = true
+		drops.append(d)
+	
+	## 中型碎片：30%概率（强怪），80%概率精英怪
+	var chance_frag_mid: float = 0.3 if not is_elite else 0.8
+	if randf() < chance_frag_mid and (is_strong or is_elite):
+		var d: DropItemClass = DropItemClass.new()
+		d.item_id = "fragment_medium"
+		d.item_name = "Medium Fragment"
+		d.item_type = DropItemClass.ItemType.DREAM_FRAGMENT
+		d.value = 10 if not is_elite else 20
+		d.drop_chance = 1.0
+		d.is_rare = is_elite
+		d.auto_adsorb = true
+		drops.append(d)
+	
+	## 小血包：15%概率普通怪，40%概率精英怪
+	var chance_health: float = 0.15 if not is_elite else 0.4
+	if randf() < chance_health:
+		var d: DropItemClass = DropItemClass.new()
+		d.item_id = "health_small"
+		d.item_name = "Small Health Pack"
+		d.item_type = DropItemClass.ItemType.HEALTH
+		d.value = 10 if not is_elite else 30
+		d.drop_chance = 1.0
+		d.is_rare = false
+		d.auto_adsorb = true
+		drops.append(d)
+	
+	## BUFF：20%概率精英怪（伤害加成）
+	if is_elite and randf() < 0.2:
+		var d: DropItemClass = DropItemClass.new()
+		d.item_id = "buff_attack"
+		d.item_name = "Power Boost"
+		d.item_type = DropItemClass.ItemType.BUFF
+		d.value = 3
+		d.drop_chance = 1.0
+		d.is_rare = true
+		d.auto_adsorb = false
+		drops.append(d)
+	
+	return drops
 
 ## ========== 碰撞检测 ==========
 

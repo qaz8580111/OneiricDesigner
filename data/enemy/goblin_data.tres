@@ -1,0 +1,22 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
+
+[resource type="EnemyData" script_class="EnemyData"]
+script = ExtResource("1")
+enemy_id = "goblin"
+enemy_name = "Goblin Grunt"
+speed = 140.0
+wander_speed = 90.0
+wander_interval = 1.2
+max_health = 4
+damage = 8
+detection_range = 400.0
+attack_range = 45.0
+attack_cooldown = 0.7
+bullet_data = null
+drop_items = []
+placeholder_color = Color(0.4, 0.7, 0.2, 1)
+placeholder_size = Vector2(24, 28)
+is_elite = false
+elite_prefix = ""

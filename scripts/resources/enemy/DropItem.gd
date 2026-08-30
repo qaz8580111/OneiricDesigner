@@ -2,6 +2,9 @@
 ## 职责：定义敌人死亡时可能掉落的道具数据，实现数据与逻辑分离
 ## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
 ## 使用场景：在编辑器中创建 .tres 文件配置道具属性，或通过词条系统动态修改
+## 被引用方：EnemyData.drop_items（敌人掉落配置）、PickUp（持有并展示/拾取）、
+##           EnemyData.generate_drops()/get_drops_to_spawn()（掉落判定与生成）
+## 数据流：敌人死亡 → 概率判定should_drop() → 生成PickUp挂载DropItem数据 → 拾取时apply()生效
 class_name DropItem
 extends Resource
 

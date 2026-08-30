@@ -2,6 +2,10 @@
 ## 职责：定义子弹的所有配置数据，实现数据与逻辑分离
 ## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
 ## 使用场景：在编辑器中创建 .tres 文件配置子弹属性，支持通过词条系统动态修改伤害、速度、形态、特效
+## 被引用方：Bullet（在生成/飞行/命中/销毁四个生命周期钩子中调用trigger_effects）、
+##           EnemyData.bullet_data（敌人子弹配置）、GameWorld/武器系统（发射子弹时提供配置）
+## 数据流：.tres配置 → Bullet.set_bullet_data() → Bullet钩子调用trigger_effects() →
+##         遍历effects按trigger_type匹配后调用各特效的apply()
 class_name BulletData
 extends Resource
 

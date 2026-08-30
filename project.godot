@@ -22,11 +22,24 @@ InputManager="*res://scripts/autoload/InputManager.gd"
 GameManager="*res://scripts/autoload/GameManager.gd"
 RandomManager="*res://scripts/autoload/RandomManager.gd"
 TranslationManager="*res://scripts/autoload/TranslationManager.gd"
+AudioManager="*res://scripts/autoload/AudioManager.gd"
+RunStats="*res://scripts/autoload/RunStats.gd"
+UpgradeManager="*res://scripts/autoload/UpgradeManager.gd"
+DifficultyManager="*res://scripts/autoload/DifficultyManager.gd"
+ThemeManager="*res://scripts/autoload/ThemeManager.gd"
+StageDirector="*res://scripts/autoload/StageDirector.gd"
 
 [display]
 
-window/size/viewport_width=400
-window/size/viewport_height=240
+; 默认分辨率1920x1280
+window/size/viewport_width=1920
+window/size/viewport_height=1280
+
+[physics]
+
+; 物理插值：2D物理以60Hz运行，开启插值后渲染帧在物理帧之间平滑过渡，
+; 消除移动/旋转的抖动感（尤其在高刷新率显示器上效果显著）
+common/physics_interpolation=true
 
 [input]
 
@@ -133,3 +146,7 @@ game_pause={
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
+; 默认清屏色与游戏背景(GameWorld的BgLayer)同色（深灰蓝）
+; 主场景世界无限大且无边界，清屏色与背景色一致后，
+; 任何分辨率/窗口尺寸下都不会露出默认灰色、看不到背景色分界
+environment/defaults/default_clear_color=Color(0.1, 0.1, 0.15, 1)

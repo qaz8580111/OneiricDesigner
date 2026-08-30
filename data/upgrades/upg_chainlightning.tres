@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+[ext_resource type="Resource" path="res://data/bullet/effect/chainlightning_effect.tres" id="2"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_chainlightning"
+display_name = "雷霆连锁"
+description = "子弹命中时释放闪电链，跳跃攻击附近的敌人"
+rarity = 2
+max_stacks = 1
+bullet_effect = ExtResource("2")

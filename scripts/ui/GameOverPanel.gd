@@ -1,0 +1,157 @@
+## GameOverPanel.gd - 游戏结束结算面板（纯代码构建UI，无需.tscn）
+## 职责：死亡过渡后展示本局统计数据，提供"再来一局"和"返回主菜单"入口
+## 继承：Control（全屏覆盖层，挂在ui_stack下）
+## 设计意图：
+##   1. roguelike的"再来一局"驱动力：结算面板量化展示本局成果，
+##      让玩家直观看到成长（击杀/等级/难度/词条数），激发破纪录欲望
+##   2. 数据来自RunStats单例（每局自动重置），面板只负责展示，不持有状态
+##   3. 支持R键快捷重开，减少重开摩擦
+## 数据流：RunStats单例（各系统上报）→ _build_stats_text() → 结算展示；
+##        restart_requested / back_to_menu_requested → Main.gd 监听后执行重开或切换主菜单
+extends Control
+
+## ========== 信号定义 ==========
+
+## 再来一局信号：玩家点击重开按钮或按R键时发出（Main.gd监听后重启游戏）
+signal restart_requested
+
+## 返回主菜单信号：玩家点击返回按钮时发出（Main.gd监听后切换到主菜单）
+signal back_to_menu_requested
+
+## ========== 成员变量 ==========
+
+## 统计文本标签引用（R键重开时需要判断面板是否已显示）
+var _stats_label: Label = null
+
+## 是否已构建完成（防止R键在面板构建前触发）
+var _is_ready: bool = false
+
+## ========== 生命周期方法 ==========
+
+## _ready() - 构建整个面板UI并填充本局统计
+func _ready() -> void:
+	## 全屏覆盖：set_anchors_and_offsets_preset同时设置锚点与偏移（等价编辑器Layout菜单）
+	## 关键修复：不能用set_anchors_preset——它只改锚点并按"保持当前矩形"重算偏移，
+	## 新建Control的矩形是(0,0,0,0)，结果面板塌缩成左上角0x0的点，
+	## 表现为结算菜单跑到屏幕左上角、盖不住主场景（1920x1280下尤其明显）
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	## 拦截鼠标点击，防止穿透到下层（满足"背景主场景无法点击"需求）
+	mouse_filter = Control.MOUSE_FILTER_STOP
+
+	## ---------- 全屏暗色背景 ----------
+	## 深紫黑色背景：呼应"梦境"主题，营造结算的沉静氛围
+	## 顺序：先add_child挂到面板下，再设全屏锚点偏移（确保相对父矩形计算生效）
+	var bg: ColorRect = ColorRect.new()
+	bg.color = Color(0.05, 0.02, 0.1, 0.92)
+	add_child(bg)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	## 背景IGNORE鼠标事件，否则挡住按钮点击（项目教训）
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	## ---------- 居中容器 ----------
+	## CenterContainer全屏铺满，子节点按最小尺寸永远居中——
+	## 不依赖任何锚点/偏移语义，任意分辨率下都可靠居中（修复左上角问题的兜底保障）
+	var center: CenterContainer = CenterContainer.new()
+	add_child(center)
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	## 容器自身不拦截鼠标（按钮在子级中，事件先命中按钮；未命中的落到面板STOP层）
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	## ---------- 垂直布局容器 ----------
+	## 居中交给CenterContainer，vbox作为普通子节点无需任何锚点配置
+	var vbox: VBoxContainer = VBoxContainer.new()
+	## 紧凑间距（5px），1920x1280下内容居中紧凑显示
+	vbox.add_theme_constant_override("separation", 5)
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(vbox)
+
+	## ---------- 标题 ----------
+	var title: Label = Label.new()
+	title.text = "—— 梦境终结 ——"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	## 红色标题呼应"死亡"主题
+	title.add_theme_color_override("font_color", Color(0.95, 0.35, 0.35))
+	vbox.add_child(title)
+
+	## ---------- 统计文本 ----------
+	## 从RunStats单例读取本局数据，格式化为多行文本
+	## 设计意图：数据全部来自RunStats，面板无状态，天然支持每局刷新
+	var stats: Label = Label.new()
+	stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats.text = _build_stats_text()
+	## 统计文本用浅金色，与标题区分层级
+	stats.add_theme_color_override("font_color", Color(0.95, 0.9, 0.75))
+	vbox.add_child(stats)
+	## 保存引用（供判断构建状态）
+	_stats_label = stats
+
+	## ---------- 按钮水平排列 ----------
+	var hbox: HBoxContainer = HBoxContainer.new()
+	## 按钮间水平间距
+	hbox.add_theme_constant_override("separation", 12)
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(hbox)
+
+	## 再来一局按钮（主要操作，绿色突出）
+	var restart_btn: Button = Button.new()
+	restart_btn.text = "再来一局 (R)"
+	restart_btn.custom_minimum_size = Vector2(120, 28)
+	restart_btn.add_theme_color_override("font_color", Color(0.5, 1.0, 0.5))
+	restart_btn.pressed.connect(_on_restart_pressed)
+	hbox.add_child(restart_btn)
+
+	## 返回主菜单按钮（次要操作，默认色）
+	var menu_btn: Button = Button.new()
+	menu_btn.text = "返回主菜单"
+	menu_btn.custom_minimum_size = Vector2(120, 28)
+	menu_btn.pressed.connect(_on_back_pressed)
+	hbox.add_child(menu_btn)
+
+	## 标记构建完成（R键重开生效前提）
+	_is_ready = true
+
+## _unhandled_input() - R键快捷重开
+## 设计意图：死亡后重开是最高频操作，快捷键减少点击摩擦
+func _unhandled_input(event: InputEvent) -> void:
+	## 面板未构建完成时忽略输入
+	if not _is_ready:
+		return
+	## 非按键按下事件忽略（先做类型检查避免访问不存在属性）
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	## R键触发重开
+	if event.physical_keycode == KEY_R:
+		_on_restart_pressed()
+
+## ========== 内部方法 ==========
+
+## 从RunStats构建本局统计文本
+## 返回：多行统计文本（存活时间/击杀/碎片/等级/难度/词条数）
+func _build_stats_text() -> String:
+	## 数据流：RunStats单例（各系统上报）→ 此方法 → 展示
+	var lines: Array[String] = []
+	lines.append("存活时间：%s" % RunStats.get_formatted_time())
+	lines.append("击杀敌人：%d" % RunStats.kills)
+	lines.append("梦境碎片：%d" % RunStats.fragments_total)
+	lines.append("最终等级：%d    最终难度：%d" % [RunStats.level_reached, RunStats.difficulty_reached])
+	lines.append("获得词条：%d" % RunStats.upgrades_taken)
+	return "\n".join(lines)
+
+## ========== 信号回调 ==========
+
+## 再来一局按钮回调（R键也走这里）
+func _on_restart_pressed() -> void:
+	## 播放UI点击音效
+	if AudioManager:
+		AudioManager.play("ui_click", 0.7)
+	## 发出重开信号（Main.gd负责重启流程）
+	restart_requested.emit()
+
+## 返回主菜单按钮回调
+func _on_back_pressed() -> void:
+	## 播放UI点击音效
+	if AudioManager:
+		AudioManager.play("ui_click", 0.7)
+	## 发出返回信号（Main.gd负责切换场景）
+	back_to_menu_requested.emit()

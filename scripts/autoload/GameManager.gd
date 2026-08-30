@@ -1,6 +1,10 @@
 ## GameManager.gd - 游戏状态管理单例
 ## 职责：管理游戏生命周期（开始/结束/暂停/恢复），统一游戏状态，广播游戏事件
 ## 继承：Node（作为全局单例运行）
+## 架构角色：autoload单例，全局状态机+事件广播中枢；RunStats/UpgradeManager/DifficultyManager
+##           均监听其game_started信号完成每局重置——本类是"一局"概念的权威定义者
+## 暂停实现：直接驱动场景树paused开关（get_tree().paused），配合各UI节点的
+##           PROCESS_MODE_ALWAYS实现"世界冻结、界面照常"的标准Godot暂停方案
 extends Node
 
 ## ========== 信号定义（用于与其他节点通信） ==========
@@ -48,6 +52,7 @@ func start_new_game(seed: int = 0) -> void:
 		game_seed = seed
 	
 	## 将种子设置到随机管理器（确保游戏内所有随机数基于此种子）
+	## 顺序关键：必须先定种子再发game_started——监听者初始化期间产生的随机数也已确定可复现
 	RandomManager.set_seed(game_seed)
 	## 设置当前游戏状态为 PLAYING
 	current_state = GameState.PLAYING

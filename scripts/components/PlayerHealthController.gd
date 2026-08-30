@@ -1,6 +1,12 @@
 ## PlayerHealthController.gd - 玩家健康系统协调器
 ## 职责：串联护盾组件与核心血量组件，对外暴露统一接口，转发子组件信号
 ## 继承：Node（基础节点，作为容器协调两个子组件）
+## 节点结构：HealthController(Node, 挂在Player下) → ShieldComponent(护盾拦截) + CoreHealthComponent(核心血/无敌帧/死亡)
+## 系统交互：
+##   - 对上：Player 调用 apply_damage/heal_shield/heal_core/get_survival_state；HUD 监听 health_changed 等信号
+##   - 对下：_ready 中连接两个子组件的全部信号，逐个转发并合并广播统一的 health_changed 状态字典
+## 设计意图：外观模式(Facade)——伤害入口统一为"护盾先吸收→剩余穿透扣核心血"管线，
+##           调用方无需感知子组件分工；死亡判定/无敌帧由 CoreHealthComponent 全权负责
 extends Node
 
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========

@@ -1,6 +1,11 @@
 ## TranslationManager.gd - 翻译管理单例
 ## 职责：管理游戏多语言翻译，提供翻译查询接口，保存语言设置
 ## 继承：Node（作为全局单例运行）
+## 架构角色：autoload单例，UI脚本统一通过 TranslationManager.t("KEY") 取文本；
+##           切换语言时监听language_changed信号自行刷新界面
+## 设计意图：翻译数据直接内置在字典中（而非Godot的CSV/PO国际化管线），
+##           新增语言/条目只需改这一个文件，便于代码内直接增补维护
+## 数据流：启动读user://settings.cfg恢复上次语言 → set_language切换 → 持久化并广播信号
 extends Node
 
 ## ========== 信号定义（用于与其他节点通信） ==========
@@ -26,28 +31,47 @@ var translations: Dictionary = {
 		"BUTTON_QUIT_GAME": "退出游戏",
 		"VERSION": "版本",
 		
-		## 设置菜单翻译
+		## 设置菜单翻译（主标题 + Tab名）
 		"SETTINGS_TITLE": "设置",
 		"TAB_GAMEPLAY": "游戏性",
 		"TAB_AUDIO": "音频",
 		"TAB_VIDEO": "视频",
 		"TAB_LANGUAGE": "语言",
+
+		## 设置菜单翻译（Tab内分区标题）
+		"TITLE_GAMEPLAY": "游戏玩法设置",
+		"TITLE_AUDIO":    "音频设置",
+		"TITLE_VIDEO":    "视频设置",
+		"TITLE_LANGUAGE": "语言设置",
+
+		## 设置菜单翻译（游戏性 - 行标签）
 		"GAMEPLAY_DIFFICULTY": "难度",
-		"GAMEPLAY_SHOW_FPS": "显示FPS计数器",
+		"GAMEPLAY_SHOW_FPS":   "显示FPS计数器",
+		"GAMEPLAY_AUTO_SHOOT": "自动射击",
+		"GAMEPLAY_THEME":      "外观主题",
+
+		## 设置菜单翻译（音频 - 行标签）
 		"AUDIO_MASTER_VOLUME": "主音量",
-		"AUDIO_MUSIC_VOLUME": "音乐音量",
-		"AUDIO_SFX_VOLUME": "音效音量",
+		"AUDIO_MUSIC_VOLUME":  "音乐音量",
+		"AUDIO_SFX_VOLUME":    "音效音量",
+
+		## 设置菜单翻译（视频 - 行标签）
 		"VIDEO_RESOLUTION": "分辨率",
 		"VIDEO_FULLSCREEN": "全屏",
-		"VIDEO_VSYNC": "垂直同步",
-		"BUTTON_BACK": "返回",
+		"VIDEO_VSYNC":      "垂直同步",
+
+		## 设置菜单翻译（语言 - 行标签）
+		"LANGUAGE_LANGUAGE": "语言",
+
+		## 设置菜单翻译（底部按钮）
+		"BUTTON_BACK":  "返回",
 		"BUTTON_RESET": "重置为默认",
 		"BUTTON_APPLY": "应用",
 		
 		## 难度选项翻译
-		"DIFFICULTY_EASY": "简单",
+		"DIFFICULTY_EASY":   "简单",
 		"DIFFICULTY_NORMAL": "普通",
-		"DIFFICULTY_HARD": "困难",
+		"DIFFICULTY_HARD":   "困难",
 		"DIFFICULTY_EXPERT": "专家",
 		
 		## 暂停菜单翻译
@@ -76,28 +100,47 @@ var translations: Dictionary = {
 		"BUTTON_QUIT_GAME": "Quit Game",
 		"VERSION": "Version",
 		
-		## 设置菜单翻译（英文）
+		## 设置菜单翻译（英文 - 主标题 + Tab名）
 		"SETTINGS_TITLE": "Settings",
 		"TAB_GAMEPLAY": "Gameplay",
 		"TAB_AUDIO": "Audio",
 		"TAB_VIDEO": "Video",
 		"TAB_LANGUAGE": "Language",
+
+		## 设置菜单翻译（英文 - Tab内分区标题）
+		"TITLE_GAMEPLAY": "Gameplay Settings",
+		"TITLE_AUDIO":    "Audio Settings",
+		"TITLE_VIDEO":    "Video Settings",
+		"TITLE_LANGUAGE": "Language Settings",
+
+		## 设置菜单翻译（英文 - 游戏性行标签）
 		"GAMEPLAY_DIFFICULTY": "Difficulty",
-		"GAMEPLAY_SHOW_FPS": "Show FPS Counter",
+		"GAMEPLAY_SHOW_FPS":   "Show FPS Counter",
+		"GAMEPLAY_AUTO_SHOOT": "Auto Shoot",
+		"GAMEPLAY_THEME":      "Appearance Theme",
+
+		## 设置菜单翻译（英文 - 音频行标签）
 		"AUDIO_MASTER_VOLUME": "Master Volume",
-		"AUDIO_MUSIC_VOLUME": "Music Volume",
-		"AUDIO_SFX_VOLUME": "SFX Volume",
+		"AUDIO_MUSIC_VOLUME":  "Music Volume",
+		"AUDIO_SFX_VOLUME":    "SFX Volume",
+
+		## 设置菜单翻译（英文 - 视频行标签）
 		"VIDEO_RESOLUTION": "Resolution",
 		"VIDEO_FULLSCREEN": "Fullscreen",
-		"VIDEO_VSYNC": "V-Sync",
-		"BUTTON_BACK": "Back",
+		"VIDEO_VSYNC":      "V-Sync",
+
+		## 设置菜单翻译（英文 - 语言行标签）
+		"LANGUAGE_LANGUAGE": "Language",
+
+		## 设置菜单翻译（英文 - 底部按钮）
+		"BUTTON_BACK":  "Back",
 		"BUTTON_RESET": "Reset to Default",
 		"BUTTON_APPLY": "Apply",
 		
 		## 难度选项翻译（英文）
-		"DIFFICULTY_EASY": "Easy",
+		"DIFFICULTY_EASY":   "Easy",
 		"DIFFICULTY_NORMAL": "Normal",
-		"DIFFICULTY_HARD": "Hard",
+		"DIFFICULTY_HARD":   "Hard",
 		"DIFFICULTY_EXPERT": "Expert",
 		
 		## 暂停菜单翻译（英文）

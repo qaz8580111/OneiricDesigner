@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/SplitEffect.gd" id="1"]
+
+[resource type="SplitEffect" script_class="SplitEffect"]
+script = ExtResource("1")
+effect_id = "split"
+trigger_type = 1
+split_count = 3
+speed_multiplier = 0.8
+damage_multiplier = 0.6
+lifetime = 1.0
+spread_angle = 120.0

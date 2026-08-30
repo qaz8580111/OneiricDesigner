@@ -1,6 +1,13 @@
 ## ShieldComponent.gd - 护盾组件
 ## 职责：管理护盾段数、再生计时器、伤害拦截
 ## 继承：Node（基础节点，作为护盾逻辑容器）
+## 节点结构：ShieldComponent(Node, 挂在HealthController下) → RegenTimer(逐段恢复计时) + RegenDelayTimer(脱战延迟计时)
+## 系统交互：
+##   - 信号：shield_segment_broken/shield_depleted/shield_regenerated/shield_config_changed
+##           → PlayerHealthController 监听并转发给 UI（本组件不直接与 Player/GameWorld 通信）
+##   - 伤害管线：PlayerHealthController.apply_damage 先调用本组件 take_damage，返回值为穿透到核心血的剩余伤害
+## 双计时器设计意图：RegenDelayTimer 实现"脱战后延迟X秒才开始回盾"（防止战斗中白嫖回盾），
+##                   延迟到点后由 RegenTimer 按固定间隔逐段恢复；受击即双双停止、重新计时
 extends Node
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========

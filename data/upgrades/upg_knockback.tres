@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+[ext_resource type="Resource" path="res://data/bullet/effect/knockback_effect.tres" id="2"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_knockback"
+display_name = "震荡冲击"
+description = "子弹命中击退敌人，拉开安全距离"
+rarity = 0
+max_stacks = 1
+bullet_effect = ExtResource("2")

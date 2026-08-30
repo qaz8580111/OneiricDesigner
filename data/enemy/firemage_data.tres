@@ -1,0 +1,23 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
+[ext_resource type="BulletData" path="res://data/bullet/enemy_firemage_bullet.tres" id="2"]
+
+[resource type="EnemyData" script_class="EnemyData"]
+script = ExtResource("1")
+enemy_id = "firemage"
+enemy_name = "Fire Mage"
+speed = 60.0
+wander_speed = 30.0
+wander_interval = 3.0
+max_health = 7
+damage = 8
+detection_range = 480.0
+attack_range = 350.0
+attack_cooldown = 1.8
+bullet_data = ExtResource("2")
+drop_items = []
+placeholder_color = Color(1, 0.4, 0.1, 1)
+placeholder_size = Vector2(32, 40)
+is_elite = false
+elite_prefix = ""

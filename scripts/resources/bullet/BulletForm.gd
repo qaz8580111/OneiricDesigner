@@ -2,6 +2,8 @@
 ## 职责：定义子弹的外观和物理属性，作为形态系统的扩展基类
 ## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
 ## 使用场景：通过继承此类创建不同形态的子弹（普通弹、霰弹、激光、回旋镖、追踪弹等）
+## 被引用方：BulletData.form（子弹形态配置）、Bullet（初始化时调用apply_visual设置外观）
+## 数据流：BulletData.get_final_form() → Bullet创建精灵 → apply_visual()应用外观
 class_name BulletForm
 extends Resource
 

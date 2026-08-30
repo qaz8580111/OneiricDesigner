@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/HomingEffect.gd" id="1"]
+
+[resource type="HomingEffect" script_class="HomingEffect"]
+script = ExtResource("1")
+effect_id = "homing"
+trigger_type = 3
+homing_range = 300.0
+turn_speed = 0.08
+min_distance = 20.0

@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/LifeStealEffect.gd" id="1"]
+
+[resource type="LifeStealEffect" script_class="LifeStealEffect"]
+script = ExtResource("1")
+effect_id = "lifesteal"
+trigger_type = 0
+steal_percent = 0.3
+min_heal = 1

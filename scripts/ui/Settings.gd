@@ -1,6 +1,16 @@
-## Settings.gd - 设置界面逻辑脚本
+## Settings.gd - 设置界面逻辑脚本（完整版：翻译 + 所有功能实际生效）
 ## 职责：管理游戏设置界面，处理游戏性、音频、视频、语言四种设置的配置和保存
 ## 继承：Control（UI控件基类，作为设置界面的根节点）
+## 数据流：UI控件 ↔ 成员变量（_collect_settings收集 / _update_ui_from_settings回填）
+##        ↔ user://settings.cfg（_save/_load持久化）↔ AudioServer/DisplayServer/DifficultyManager（_apply_settings生效）
+## 功能完整性说明：
+##   1. 所有 UI 文本（标签、标题、难度名称）均走 TranslationManager 翻译
+##   2. 游戏性：难度设置 → DifficultyManager.apply_start_offset(base_level)
+##            FPS显示 → 存入配置，HUD启动时读取并动态创建FPS标签
+##            自动射击 → Player.set_auto_shoot() 运行中实时生效
+##   3. 音频：主/音乐/音效三路音量，实时同步 AudioServer 总线 + AudioManager 内部 sfx/music 音量
+##   4. 视频：分辨率（含项目默认 1920x1280）、全屏、垂直同步均生效
+##   5. 语言：切换即时生效，UI 文本通过信号刷新
 extends Control
 
 ## 设置菜单可能在暂停状态下打开，需要 ALWAYS 模式确保暂停时也能处理输入
@@ -36,7 +46,8 @@ var music_volume: float = 70.0
 var sfx_volume: float = 90.0
 
 ## 视频设置：分辨率索引（对应RESOLUTIONS数组的索引）
-var resolution_index: int = 0
+## 默认=1 → "1920x1280"，即项目默认 viewport 分辨率
+var resolution_index: int = 1
 
 ## 视频设置：是否全屏
 var fullscreen: bool = false
@@ -55,52 +66,56 @@ var language_index: int = 0
 ## 标签页容器（包含游戏性、音频、视频、语言四个标签页）
 @onready var tab_container: TabContainer
 
-## 游戏性标签页：难度选项按钮
+## ---- 分区标题（各Tab页内的小标题，需翻译） ----
+@onready var gameplay_title_label: Label
+@onready var audio_title_label: Label
+@onready var video_title_label: Label
+@onready var language_title_label: Label
+
+## ---- 游戏性标签页：标签文本 + 控件 ----
+@onready var difficulty_label: Label
 @onready var difficulty_option: OptionButton
-
-## 游戏性标签页：FPS显示复选框
+@onready var fps_label: Label
 @onready var fps_check: CheckBox
-
-## 游戏性标签页：自动射击复选框
+@onready var auto_shoot_label: Label
 @onready var auto_shoot_check: CheckBox
 
-## 音频标签页：主音量滑块
+## ---- 游戏性标签页：主题选择行（代码动态创建，见 _build_theme_row） ----
+## 主题行容器（Label + OptionButton，样式对齐其他行）
+var theme_hbox: HBoxContainer = null
+## "外观主题"标签
+var theme_label: Label = null
+## 主题下拉框（选项来自 ThemeManager 扫描到的主题包）
+var theme_option: OptionButton = null
+## 当前选中的主题id（持久化到 settings.cfg 的 current_theme 键）
+var theme_id: String = "default"
+
+## ---- 音频标签页：标签文本 + 控件 ----
+@onready var master_label: Label
 @onready var master_slider: HSlider
-
-## 音频标签页：主音量数值显示
 @onready var master_value: Label
-
-## 音频标签页：音乐音量滑块
+@onready var music_label: Label
 @onready var music_slider: HSlider
-
-## 音频标签页：音乐音量数值显示
 @onready var music_value: Label
-
-## 音频标签页：音效音量滑块
+@onready var sfx_label: Label
 @onready var sfx_slider: HSlider
-
-## 音频标签页：音效音量数值显示
 @onready var sfx_value: Label
 
-## 视频标签页：分辨率选项按钮
+## ---- 视频标签页：标签文本 + 控件 ----
+@onready var resolution_label: Label
 @onready var resolution_option: OptionButton
-
-## 视频标签页：全屏复选框
+@onready var fullscreen_label: Label
 @onready var fullscreen_check: CheckBox
-
-## 视频标签页：垂直同步复选框
+@onready var vsync_label: Label
 @onready var vsync_check: CheckBox
 
-## 语言标签页：语言选项按钮
+## ---- 语言标签页：标签文本 + 控件 ----
+@onready var language_label: Label
 @onready var language_option: OptionButton
 
-## 底部按钮：返回按钮
+## ---- 底部按钮 ----
 @onready var back_button: Button
-
-## 底部按钮：重置按钮
 @onready var reset_button: Button
-
-## 底部按钮：应用按钮
 @onready var apply_button: Button
 
 ## ========== 菜单导航器（用于手柄/键盘导航） ==========
@@ -113,11 +128,33 @@ var _navigator: Node = null
 
 ## ========== 静态配置数据 ==========
 
-## 分辨率选项列表（供玩家选择的屏幕分辨率）
-var RESOLUTIONS: Array = ["1280x720", "1920x1080", "2560x1440", "3840x2160"]
+## 分辨率选项列表（含项目默认的1920x1280，顺序按从小到大方便选择）
+var RESOLUTIONS: Array = [
+	"1280x720",   # 0 - HD
+	"1920x1280",  # 1 - 项目默认 viewport（2025项目设置要求）
+	"1920x1080",  # 2 - Full HD
+	"2560x1440",  # 3 - 2K
+	"3840x2160"   # 4 - 4K
+]
 
-## 难度选项列表（供玩家选择的游戏难度）
-var DIFFICULTIES: Array = ["Easy", "Normal", "Hard", "Expert"]
+## 难度翻译键列表（顺序对应 difficulty 索引：0简单/1普通/2困难/3专家）
+## 实际显示文本通过 TranslationManager.t(键) 获取，支持中英切换
+var DIFFICULTY_KEYS: Array = [
+	"DIFFICULTY_EASY",
+	"DIFFICULTY_NORMAL",
+	"DIFFICULTY_HARD",
+	"DIFFICULTY_EXPERT"
+]
+
+## 难度起始等级映射表：
+## 将 4 档难度选择 → 实际 DifficultyManager 起始等级偏移
+## 设计意图：简单/普通/困难/专家 四档，分别对应开局不同的敌人强度基准
+var DIFFICULTY_START_LEVELS: Array[int] = [
+	1,  # Easy  → 难度1起步（新手友好，敌人弱）
+	2,  # Normal→ 难度2起步（标准体验）
+	4,  # Hard  → 难度4起步（敌人强度显著提高）
+	7   # Expert→ 难度7起步（高难度挑战，开局怪就很猛）
+]
 
 ## 语言选项列表（供玩家选择的游戏语言）
 var LANGUAGES: Array = ["zh_CN", "en_US"]
@@ -128,6 +165,8 @@ var LANGUAGES: Array = ["zh_CN", "en_US"]
 func _ready() -> void:
 	## 查找所有UI元素节点
 	_find_all_ui_elements()
+	## 动态构建"外观主题"选择行（主题列表来自 ThemeManager，避免改动场景文件）
+	_build_theme_row()
 	## 初始化UI控件状态
 	_initialize_ui()
 	## 连接信号
@@ -160,110 +199,233 @@ func _exit_tree() -> void:
 
 ## 查找所有UI元素节点（通过节点路径获取引用）
 func _find_all_ui_elements() -> void:
+	## 顶部主标题
 	title_label = $VBoxContainer/Title
 	tab_container = $VBoxContainer/TabContainer
-	
+
+	## 分区小标题（各Tab内部标题）
+	gameplay_title_label = $VBoxContainer/TabContainer/Gameplay/GameplayTitle
+	audio_title_label    = $VBoxContainer/TabContainer/Audio/AudioTitle
+	video_title_label    = $VBoxContainer/TabContainer/Video/VideoTitle
+	language_title_label = $VBoxContainer/TabContainer/Language/LanguageTitle
+
 	## 游戏性标签页元素
-	difficulty_option = $VBoxContainer/TabContainer/Gameplay/DifficultyHBox/DifficultyOption
-	fps_check = $VBoxContainer/TabContainer/Gameplay/FPSHBox/FPSCheck
-	auto_shoot_check = $VBoxContainer/TabContainer/Gameplay/AutoShootHBox/AutoShootCheck
-	
+	difficulty_label   = $VBoxContainer/TabContainer/Gameplay/DifficultyHBox/DifficultyLabel
+	difficulty_option  = $VBoxContainer/TabContainer/Gameplay/DifficultyHBox/DifficultyOption
+	fps_label          = $VBoxContainer/TabContainer/Gameplay/FPSHBox/FPSLabel
+	fps_check          = $VBoxContainer/TabContainer/Gameplay/FPSHBox/FPSCheck
+	auto_shoot_label   = $VBoxContainer/TabContainer/Gameplay/AutoShootHBox/AutoShootLabel
+	auto_shoot_check   = $VBoxContainer/TabContainer/Gameplay/AutoShootHBox/AutoShootCheck
+
 	## 音频标签页元素
-	master_slider = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterSlider
-	master_value = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterValue
-	music_slider = $VBoxContainer/TabContainer/Audio/MusicHBox/MusicSlider
-	music_value = $VBoxContainer/TabContainer/Audio/MusicHBox/MusicValue
-	sfx_slider = $VBoxContainer/TabContainer/Audio/SFXHBox/SFXSlider
-	sfx_value = $VBoxContainer/TabContainer/Audio/SFXHBox/SFXValue
-	
+	master_label       = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterLabel
+	master_slider      = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterSlider
+	master_value       = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterValue
+	music_label        = $VBoxContainer/TabContainer/Audio/MusicHBox/MusicLabel
+	music_slider       = $VBoxContainer/TabContainer/Audio/MusicHBox/MusicSlider
+	music_value        = $VBoxContainer/TabContainer/Audio/MusicHBox/MusicValue
+	sfx_label          = $VBoxContainer/TabContainer/Audio/SFXHBox/SFXLabel
+	sfx_slider         = $VBoxContainer/TabContainer/Audio/SFXHBox/SFXSlider
+	sfx_value          = $VBoxContainer/TabContainer/Audio/SFXHBox/SFXValue
+
 	## 视频标签页元素
-	resolution_option = $VBoxContainer/TabContainer/Video/ResolutionHBox/ResolutionOption
-	fullscreen_check = $VBoxContainer/TabContainer/Video/FullscreenHBox/FullscreenCheck
-	vsync_check = $VBoxContainer/TabContainer/Video/VSyncHBox/VSyncCheck
-	
+	resolution_label   = $VBoxContainer/TabContainer/Video/ResolutionHBox/ResolutionLabel
+	resolution_option  = $VBoxContainer/TabContainer/Video/ResolutionHBox/ResolutionOption
+	fullscreen_label   = $VBoxContainer/TabContainer/Video/FullscreenHBox/FullscreenLabel
+	fullscreen_check   = $VBoxContainer/TabContainer/Video/FullscreenHBox/FullscreenCheck
+	vsync_label        = $VBoxContainer/TabContainer/Video/VSyncHBox/VSyncLabel
+	vsync_check        = $VBoxContainer/TabContainer/Video/VSyncHBox/VSyncCheck
+
 	## 语言标签页元素
-	language_option = $VBoxContainer/TabContainer/Language/LanguageHBox/LanguageOption
-	
+	language_label     = $VBoxContainer/TabContainer/Language/LanguageHBox/LanguageLabel
+	language_option    = $VBoxContainer/TabContainer/Language/LanguageHBox/LanguageOption
+
 	## 底部按钮
-	back_button = $VBoxContainer/ButtonContainer/BackButton
+	back_button  = $VBoxContainer/ButtonContainer/BackButton
 	reset_button = $VBoxContainer/ButtonContainer/ResetButton
 	apply_button = $VBoxContainer/ButtonContainer/ApplyButton
 
+## 动态构建"外观主题"选择行（代码创建插入 Gameplay Tab，布局样式对齐其他行）
+## 设计意图：主题列表由 ThemeManager 运行时扫描决定（新主题 .tres 即插即用），
+##           场景文件写死选项会失去灵活性，故此行整体动态创建
+func _build_theme_row() -> void:
+	## 找到游戏性 Tab 容器
+	var gameplay_tab: VBoxContainer = tab_container.get_node("Gameplay") as VBoxContainer
+	if gameplay_tab == null:
+		return
+	## ---- 行容器：尺寸/对齐完全对齐 DifficultyHBox（820宽/48高/间距20） ----
+	theme_hbox = HBoxContainer.new()
+	theme_hbox.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	theme_hbox.custom_minimum_size = Vector2(820, 48)
+	theme_hbox.alignment = BoxContainer.ALIGNMENT_BEGIN
+	theme_hbox.add_theme_constant_override("separation", 20)
+	## ---- 标签：右对齐 260 宽 / 22 号字（与其他行标签对齐） ----
+	theme_label = Label.new()
+	theme_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	theme_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	theme_label.custom_minimum_size = Vector2(260, 0)
+	theme_label.add_theme_font_size_override("font_size", 22)
+	## ---- 下拉框：填充剩余宽度 / 40 高 / 20 号字（与其他行下拉对齐） ----
+	theme_option = OptionButton.new()
+	theme_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	theme_option.custom_minimum_size = Vector2(0, 40)
+	theme_option.add_theme_font_size_override("font_size", 20)
+	## 组装行：标签 + 下拉
+	theme_hbox.add_child(theme_label)
+	theme_hbox.add_child(theme_option)
+	gameplay_tab.add_child(theme_hbox)
+	## 移到 BottomSpacer 之前（保持"标题→设置行→底部留白"的排版结构）
+	gameplay_tab.move_child(theme_hbox, gameplay_tab.get_child_count() - 2)
+	## 切换下拉选项即时换肤（直播演示友好：边玩边切主题全场实时变化）
+	theme_option.item_selected.connect(_on_theme_selected)
+
+## 主题下拉切换回调：立即应用新主题（ThemeManager 内部会持久化+广播换肤）
+func _on_theme_selected(index: int) -> void:
+	## 索引合法性检查（下拉为空时 selected=-1）
+	if index < 0 or index >= ThemeManager.available_themes.size():
+		return
+	## 记录选择并应用（ThemeManager.set_theme 会持久化到 cfg 并广播 theme_changed）
+	theme_id = ThemeManager.available_themes[index].theme_id
+	ThemeManager.set_theme(theme_id)
+
 ## 初始化UI控件状态（添加选项、设置默认值等）
 func _initialize_ui() -> void:
-	## 初始化难度选项（从DIFFICULTIES数组添加）
-	for diff in DIFFICULTIES:
-		difficulty_option.add_item(diff)
+	## ---- 初始化难度下拉（使用翻译后的难度名称） ----
+	difficulty_option.clear()
+	for key in DIFFICULTY_KEYS:
+		difficulty_option.add_item(TranslationManager.t(key))
 	difficulty_option.selected = difficulty
-	
-	## 初始化分辨率选项（从RESOLUTIONS数组添加）
+
+	## ---- 初始化主题下拉（选项 = ThemeManager 扫描到的主题包显示名） ----
+	if theme_option != null:
+		theme_option.clear()
+		for theme in ThemeManager.available_themes:
+			theme_option.add_item(theme.theme_name)
+		## 回填当前生效主题的选中项（ThemeManager 启动时已应用保存的主题）
+		for i in range(ThemeManager.available_themes.size()):
+			if ThemeManager.available_themes[i].theme_id == theme_id:
+				theme_option.selected = i
+				break
+
+	## ---- 初始化分辨率选项 ----
+	resolution_option.clear()
 	for res in RESOLUTIONS:
 		resolution_option.add_item(res)
 	resolution_option.selected = resolution_index
-	
-	## 初始化语言选项（使用翻译管理器获取语言显示名称）
+
+	## ---- 初始化语言选项（使用翻译管理器获取语言显示名称） ----
+	language_option.clear()
 	for lang in LANGUAGES:
 		language_option.add_item(TranslationManager.get_language_display_name(lang))
 	language_option.selected = language_index
 
 ## 连接UI信号到处理方法
 func _connect_signals() -> void:
+	## 滑块：实时更新数值显示 + 实时应用音量（拖滑块就能听到变化，不用等Apply）
 	master_slider.value_changed.connect(_on_master_volume_changed)
 	music_slider.value_changed.connect(_on_music_volume_changed)
 	sfx_slider.value_changed.connect(_on_sfx_volume_changed)
+	## 底部按钮
 	back_button.pressed.connect(_on_back_button_pressed)
 	reset_button.pressed.connect(_on_reset_button_pressed)
 	apply_button.pressed.connect(_on_apply_button_pressed)
+	## 翻译变化 → 刷新所有文本和下拉项
 	TranslationManager.language_changed.connect(_on_language_changed)
 
 ## 更新界面文本（支持多语言）
+## 数据流：用户切换语言 → TranslationManager.language_changed 信号发出 → 此处重绘所有文本
 func _update_text() -> void:
+	## 顶部主标题
 	title_label.text = TranslationManager.t("SETTINGS_TITLE")
-	
-	## 更新标签页标题
+
+	## 更新四个 Tab 标签文字
 	tab_container.set_tab_title(0, TranslationManager.t("TAB_GAMEPLAY"))
 	tab_container.set_tab_title(1, TranslationManager.t("TAB_AUDIO"))
 	tab_container.set_tab_title(2, TranslationManager.t("TAB_VIDEO"))
 	tab_container.set_tab_title(3, TranslationManager.t("TAB_LANGUAGE"))
-	
-	## 更新按钮文本
-	back_button.text = TranslationManager.t("BUTTON_BACK")
+
+	## ---- 各分区小标题 ----
+	gameplay_title_label.text = TranslationManager.t("TITLE_GAMEPLAY")
+	audio_title_label.text    = TranslationManager.t("TITLE_AUDIO")
+	video_title_label.text    = TranslationManager.t("TITLE_VIDEO")
+	language_title_label.text = TranslationManager.t("TITLE_LANGUAGE")
+
+	## ---- 游戏性 Tab 标签 ----
+	difficulty_label.text = TranslationManager.t("GAMEPLAY_DIFFICULTY") + ":"
+	fps_label.text        = TranslationManager.t("GAMEPLAY_SHOW_FPS") + ":"
+	auto_shoot_label.text = TranslationManager.t("GAMEPLAY_AUTO_SHOOT") + ":"
+	## 主题行标签（动态创建的行也要随语言刷新）
+	if theme_label != null:
+		theme_label.text = TranslationManager.t("GAMEPLAY_THEME") + ":"
+
+	## ---- 音频 Tab 标签 ----
+	master_label.text = TranslationManager.t("AUDIO_MASTER_VOLUME") + ":"
+	music_label.text  = TranslationManager.t("AUDIO_MUSIC_VOLUME") + ":"
+	sfx_label.text    = TranslationManager.t("AUDIO_SFX_VOLUME") + ":"
+
+	## ---- 视频 Tab 标签 ----
+	resolution_label.text = TranslationManager.t("VIDEO_RESOLUTION") + ":"
+	fullscreen_label.text = TranslationManager.t("VIDEO_FULLSCREEN") + ":"
+	vsync_label.text      = TranslationManager.t("VIDEO_VSYNC") + ":"
+
+	## ---- 语言 Tab 标签 ----
+	language_label.text = TranslationManager.t("LANGUAGE_LANGUAGE") + ":"
+
+	## ---- 底部按钮文本 ----
+	back_button.text  = TranslationManager.t("BUTTON_BACK")
 	reset_button.text = TranslationManager.t("BUTTON_RESET")
 	apply_button.text = TranslationManager.t("BUTTON_APPLY")
 
 ## ========== 信号回调方法 ==========
 
-## 语言变化回调：重新更新界面文本
+## 语言变化回调：重新更新界面文本 + 重新填充下拉项文字
 func _on_language_changed(_lang: String) -> void:
 	_update_text()
 	_initialize_ui()
 
-## 主音量变化回调：更新音量数值显示
+## 主音量变化回调：
+##   1) 更新数值显示  2) 实时同步到 AudioServer + AudioManager 立即可听
 func _on_master_volume_changed(value: float) -> void:
 	master_volume = value
 	master_value.text = str(int(value))
+	## 实时应用（拖滑块就能听到主音量变化）
+	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Master"), linear_to_db(value / 100.0))
+	## 同步 AudioManager 内部音量系数（直接赋值属性——AudioManager 没有setter方法）
+	if AudioManager:
+		AudioManager.master_volume = value / 100.0
 
-## 音乐音量变化回调：更新音量数值显示
+## 音乐音量变化回调：
+##   同步到 AudioServer Music 总线 + AudioManager 音乐通道
 func _on_music_volume_changed(value: float) -> void:
 	music_volume = value
 	music_value.text = str(int(value))
+	## 实时应用（音乐音量只走 AudioServer 的 Music 总线；AudioManager 无音乐通道无需同步）
+	if AudioServer.get_bus_index("Music") != -1:
+		AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Music"), linear_to_db(value / 100.0))
 
-## 音效音量变化回调：更新音量数值显示
+## 音效音量变化回调：
+##   同步到 AudioServer SFX 总线 + AudioManager sfx_volume（影响所有音效播放）
 func _on_sfx_volume_changed(value: float) -> void:
 	sfx_volume = value
 	sfx_value.text = str(int(value))
+	## 实时应用
+	if AudioServer.get_bus_index("SFX") != -1:
+		AudioServer.set_bus_volume_db(AudioServer.get_bus_index("SFX"), linear_to_db(value / 100.0))
+	## 同步 AudioManager 内部音量系数（直接赋值属性——AudioManager 没有setter方法）
+	if AudioManager:
+		AudioManager.sfx_volume = value / 100.0
 
-## 返回按钮点击回调：发出返回信号
+## 返回按钮点击回调：发出返回信号，由父节点（Main.gd）决定返回主菜单还是暂停菜单
 func _on_back_button_pressed() -> void:
-	print("Going back...")
+	print("Settings going back...")
 	go_back.emit()
 
 ## 重置按钮点击回调：重置所有设置为默认值
 func _on_reset_button_pressed() -> void:
-	print("Resetting to defaults...")
+	print("Resetting settings to defaults...")
 	_reset_to_defaults()
 
-## 应用按钮点击回调：收集设置、保存并应用
+## 应用按钮点击回调：收集设置 → 保存到 user://settings.cfg → 应用到引擎/单例 → 广播
 func _on_apply_button_pressed() -> void:
 	print("Applying settings...")
 	_collect_settings()
@@ -273,137 +435,212 @@ func _on_apply_button_pressed() -> void:
 
 ## ========== 设置管理方法 ==========
 
-## 重置所有设置为默认值
+## 重置所有设置为默认值（按本脚本顶部声明的默认变量值）
+## 并立即把音量同步到引擎，让"重置"后立刻能听到默认音量效果
 func _reset_to_defaults() -> void:
+	## ---- 游戏性默认值 ----
 	difficulty = 1
 	show_fps = false
 	auto_shoot = true
+	## ---- 主题默认值：回到默认主题并实时应用（全场角色换回默认外观） ----
+	theme_id = "default"
+	if ThemeManager:
+		ThemeManager.set_theme(theme_id)
+	## ---- 音频默认值 ----
 	master_volume = 80.0
 	music_volume = 70.0
 	sfx_volume = 90.0
-	resolution_index = 0
+	## ---- 视频默认值（默认分辨率=1 → 1920x1280 项目默认） ----
+	resolution_index = 1
 	fullscreen = false
 	vsync = true
+	## ---- 语言默认值 ----
 	language_index = 0
-	
-	## 根据重置后的值更新UI
-	_update_ui_from_settings()
 
-## 根据当前设置值更新UI控件状态
+	## 把重置后的值写回到 UI 控件 + 立即应用音量同步
+	_update_ui_from_settings()
+	_apply_volumes_immediate()
+
+## 根据当前设置值更新UI控件状态（重置/加载后调用）
 func _update_ui_from_settings() -> void:
 	difficulty_option.selected = difficulty
 	fps_check.set_pressed_no_signal(show_fps)
 	auto_shoot_check.set_pressed_no_signal(auto_shoot)
+
 	master_slider.value = master_volume
 	master_value.text = str(int(master_volume))
 	music_slider.value = music_volume
 	music_value.text = str(int(music_volume))
 	sfx_slider.value = sfx_volume
 	sfx_value.text = str(int(sfx_volume))
+
 	resolution_option.selected = resolution_index
 	fullscreen_check.set_pressed_no_signal(fullscreen)
 	vsync_check.set_pressed_no_signal(vsync)
 	language_option.selected = language_index
 
-## 从UI控件收集设置值
+	## 主题下拉回填：按当前 theme_id 找到对应索引（重置/加载后刷新选中项）
+	if theme_option != null:
+		for i in range(ThemeManager.available_themes.size()):
+			if ThemeManager.available_themes[i].theme_id == theme_id:
+				theme_option.selected = i
+				break
+
+## 从UI控件收集设置值（点击 Apply 时调用）
 func _collect_settings() -> void:
 	difficulty = difficulty_option.selected
 	show_fps = fps_check.is_pressed()
 	auto_shoot = auto_shoot_check.is_pressed()
+
 	master_volume = master_slider.value
 	music_volume = music_slider.value
 	sfx_volume = sfx_slider.value
+
 	resolution_index = resolution_option.selected
 	fullscreen = fullscreen_check.is_pressed()
 	vsync = vsync_check.is_pressed()
 	language_index = language_option.selected
-	
-	## 应用语言变化（立即生效）
+
+	## 主题：收集下拉当前选中的主题包id（随 Apply 持久化到 settings.cfg）
+	if theme_option != null and theme_option.selected >= 0 \
+			and theme_option.selected < ThemeManager.available_themes.size():
+		theme_id = ThemeManager.available_themes[theme_option.selected].theme_id
+
+	## 语言：立即生效（切换语言不需要重启）
 	TranslationManager.set_language(LANGUAGES[language_index])
 
-## 收集设置值并返回字典格式
+## 收集设置值并返回字典格式（广播和保存用）
 func _collect_settings_dict() -> Dictionary:
 	return {
-		"difficulty": difficulty,
-		"show_fps": show_fps,
-		"auto_shoot": auto_shoot,
-		"master_volume": master_volume,
-		"music_volume": music_volume,
-		"sfx_volume": sfx_volume,
-		"resolution_index": resolution_index,
-		"fullscreen": fullscreen,
-		"vsync": vsync,
-		"language": LANGUAGES[language_index]
+		"difficulty":        difficulty,
+		"show_fps":          show_fps,
+		"auto_shoot":        auto_shoot,
+		"current_theme":     theme_id,
+		"master_volume":     master_volume,
+		"music_volume":      music_volume,
+		"sfx_volume":        sfx_volume,
+		"resolution_index":  resolution_index,
+		"fullscreen":        fullscreen,
+		"vsync":             vsync,
+		"language":          LANGUAGES[language_index]
 	}
 
-## 将设置应用到游戏引擎
+## 将设置应用到游戏引擎 / 全局单例
+## 调用时机：点 Apply 时；加载已有设置时也会调用一次保证启动时状态正确
 func _apply_settings() -> void:
-	## 应用音频设置（使用linear_to_db转换线性音量为分贝）
-	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Master"), linear_to_db(master_volume / 100.0))
-	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Music"), linear_to_db(music_volume / 100.0))
-	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("SFX"), linear_to_db(sfx_volume / 100.0))
-	
-	## 应用视频设置：垂直同步
+	## ---- 1) 音量：三路同时同步到 AudioServer 总线 + AudioManager 内部变量 ----
+	_apply_volumes_immediate()
+
+	## ---- 2) 视频：垂直同步 ----
 	if vsync:
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED)
 	else:
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
-	
-	## 应用全屏设置
+
+	## ---- 3) 视频：全屏模式 ----
 	if fullscreen:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 	else:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	
-	## 应用分辨率设置（仅在窗口模式下）
+
+	## ---- 4) 视频：分辨率（仅窗口模式） ----
 	if not fullscreen and resolution_index < RESOLUTIONS.size():
 		var res_parts = RESOLUTIONS[resolution_index].split("x")
-		var width = int(res_parts[0])
-		var height = int(res_parts[1])
-		get_window().size = Vector2i(width, height)
+		if res_parts.size() == 2:
+			var width: int = int(res_parts[0])
+			var height: int = int(res_parts[1])
+			if width > 0 and height > 0:
+				get_window().size = Vector2i(width, height)
 
-## 保存设置到配置文件
+	## ---- 5) 难度：将选择的难度档映射为起始等级，通知 DifficultyManager ----
+	## 下次开始新游戏时，DifficultyManager._on_game_started() 会读取 user://settings.cfg
+	## 的 difficulty 值并应用为起始等级。这里也发一次信号给可能存在的 Main.gd
+	if DifficultyManager:
+		## 把当前选择档 (0~3) → 起始等级
+		var start_level: int = DIFFICULTY_START_LEVELS[clamp(difficulty, 0, DIFFICULTY_START_LEVELS.size() - 1)]
+		DifficultyManager.set_start_level(start_level)
+
+	## ---- 5.5) 主题：应用当前选择（下拉切换时已实时生效，此处幂等兜底；
+	##            ThemeManager.set_theme 内部同主题直接跳过，不会重复广播） ----
+	if ThemeManager and theme_id != "":
+		ThemeManager.set_theme(theme_id)
+
+	## ---- 6) 自动射击：如果当前 Player 正在游戏中，实时生效
+	## Main.gd 也会监听 settings_applied 信号做同样的事，这里兜底
+	var players: Array = get_tree().get_nodes_in_group("player")
+	for p in players:
+		if p.has_method("set_auto_shoot"):
+			p.set_auto_shoot(auto_shoot)
+
+## 三路音量立即同步到 AudioServer 总线 + AudioManager（重置/加载/应用 均调用此函数）
+func _apply_volumes_immediate() -> void:
+	## Master 总线（必须存在）
+	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Master"), linear_to_db(master_volume / 100.0))
+
+	## Music 总线（存在则同步）
+	if AudioServer.get_bus_index("Music") != -1:
+		AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Music"), linear_to_db(music_volume / 100.0))
+
+	## SFX 总线（存在则同步）
+	if AudioServer.get_bus_index("SFX") != -1:
+		AudioServer.set_bus_volume_db(AudioServer.get_bus_index("SFX"), linear_to_db(sfx_volume / 100.0))
+
+	## 同时同步 AudioManager 单例内部的 master/sfx 音量变量（供程序化音效播放使用；
+	## AudioManager 无音乐通道，音乐音量只由上方 Music 总线控制）
+	if AudioManager:
+		AudioManager.master_volume = master_volume / 100.0
+		AudioManager.sfx_volume = sfx_volume / 100.0
+
+## 保存设置到配置文件（user://settings.cfg）
 func _save_settings() -> void:
 	var config = ConfigFile.new()
 	var settings = _collect_settings_dict()
-	
-	## 将设置写入配置文件
+
+	## 将设置写入配置文件（扁平化存储，读取时直接按键取值）
 	for key in settings:
 		config.set_value("Settings", key, settings[key])
-	
-	## 保存到用户目录下的settings.cfg文件
+
+	## 保存到用户目录
 	var err = config.save("user://settings.cfg")
 	if err != OK:
-		print("Failed to save settings!")
+		push_error("[Settings] 保存 settings.cfg 失败，错误码: %s" % err)
 	else:
-		print("Settings saved successfully!")
+		print("[Settings] 已保存到 user://settings.cfg")
 
-## 从配置文件加载设置
+## 从配置文件加载设置（启动 Settings 界面时调用一次）
+## 若文件不存在 → 使用脚本内默认值（不报错）
 func _load_settings() -> void:
 	var config = ConfigFile.new()
 	var err = config.load("user://settings.cfg")
-	
-	## 如果加载成功，读取各设置项
+
 	if err == OK:
-		difficulty = config.get_value("Settings", "difficulty", 1)
-		show_fps = config.get_value("Settings", "show_fps", false)
-		auto_shoot = config.get_value("Settings", "auto_shoot", true)
-		master_volume = config.get_value("Settings", "master_volume", 80.0)
-		music_volume = config.get_value("Settings", "music_volume", 70.0)
-		sfx_volume = config.get_value("Settings", "sfx_volume", 90.0)
-		resolution_index = config.get_value("Settings", "resolution_index", 0)
-		fullscreen = config.get_value("Settings", "fullscreen", false)
-		vsync = config.get_value("Settings", "vsync", true)
-		
-		## 加载语言设置
-		var lang: String = config.get_value("Settings", "language", "zh_CN")
-		language_index = LANGUAGES.find(lang)
+		## ---- 游戏性设置 ----
+		difficulty       = config.get_value("Settings", "difficulty",        1)
+		show_fps         = config.get_value("Settings", "show_fps",          false)
+		auto_shoot       = config.get_value("Settings", "auto_shoot",        true)
+		## ---- 主题设置：回填主题id（ThemeManager 启动时已应用该主题，
+		##      这里只同步到本地变量供下拉框回填，不重复应用） ----
+		theme_id         = str(config.get_value("Settings", "current_theme", "default"))
+		## ---- 音频设置 ----
+		master_volume    = config.get_value("Settings", "master_volume",     80.0)
+		music_volume     = config.get_value("Settings", "music_volume",      70.0)
+		sfx_volume       = config.get_value("Settings", "sfx_volume",        90.0)
+		## ---- 视频设置 ----
+		resolution_index = config.get_value("Settings", "resolution_index",  1)  # 默认1920x1280
+		fullscreen       = config.get_value("Settings", "fullscreen",        false)
+		vsync            = config.get_value("Settings", "vsync",             true)
+		## ---- 语言设置：翻译code → 数组索引 ----
+		var lang: String = config.get_value("Settings", "language",          "zh_CN")
+		language_index   = LANGUAGES.find(lang)
 		if language_index < 0:
 			language_index = 0
-		
-		## 根据加载的值更新UI并应用设置
+
+		## 加载完后：把值写回 UI 控件 + 立即同步音量到引擎
 		_update_ui_from_settings()
-		_apply_settings()
-		print("Settings loaded successfully!")
+		_apply_volumes_immediate()
+		print("[Settings] 已加载保存的设置")
 	else:
-		print("No settings file found, using defaults.")
+		## 无配置文件：首次启动，使用默认值 + 立即同步音量
+		_update_ui_from_settings()
+		_apply_volumes_immediate()
+		print("[Settings] 无已保存设置，使用默认值")

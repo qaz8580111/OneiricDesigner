@@ -1,0 +1,137 @@
+[gd_resource type="Resource" script_class="GameTheme" load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/skin/GameTheme.gd" id="1_theme"]
+[ext_resource type="Script" path="res://scripts/resources/skin/CharacterSkin.gd" id="2_skin"]
+
+; ==============================================================================
+; neon_theme.tres - "霓虹梦境"主题包（一键换肤演示主题）
+; 风格：赛博霓虹——深紫夜幕 + 亮青/品红/荧光色系
+; 用途：验证主题系统一键切换效果（设置 → 游戏性 → 外观主题 → 应用）
+;       切换后：全场角色即时换肤 + 世界背景变深紫 + 弹幕/碎片颜色自动跟随
+; 主题结构演示：只需给"想区分"的敌人配专属皮肤，其余敌人自动走兜底皮肤
+;   （本主题配了 9 个专属 + 兜底品红，覆盖全部 18 种敌人）
+; ==============================================================================
+
+; ------------------------------ 玩家皮肤 ------------------------------
+; 亮青圆球+白高光（霓虹主角），弹跳轻快
+[sub_resource type="Resource" id="skin_player"]
+script = ExtResource("2_skin")
+skin_id = "neon_player"
+shape = "circle"
+main_color = Color(0.2, 1, 0.9, 1)
+accent_color = Color(0.85, 1, 1, 1)
+target_size = Vector2(40, 40)
+move_bounce_scale = 0.16
+move_bounce_speed = 13.0
+
+; ------------------------------ 敌人兜底皮肤 ------------------------------
+; 霓虹品红方形（本主题未单独配置的敌人都用它）
+[sub_resource type="Resource" id="skin_enemy_default"]
+script = ExtResource("2_skin")
+skin_id = "neon_enemy"
+shape = "square"
+main_color = Color(1, 0.25, 0.75, 1)
+accent_color = Color(1, 0.65, 0.9, 1)
+target_size = Vector2(30, 30)
+
+; ------------------------------ 代表性敌人专属皮肤 ------------------------------
+; 史莱姆：荧光绿果冻
+[sub_resource type="Resource" id="skin_slime"]
+script = ExtResource("2_skin")
+skin_id = "neon_slime"
+shape = "circle"
+main_color = Color(0.4, 1, 0.3, 1)
+accent_color = Color(0.8, 1, 0.7, 1)
+target_size = Vector2(26, 22)
+move_bounce_scale = 0.2
+move_bounce_speed = 13.0
+
+; 蝙蝠：电光紫小圆
+[sub_resource type="Resource" id="skin_bat"]
+script = ExtResource("2_skin")
+skin_id = "neon_bat"
+shape = "circle"
+main_color = Color(0.65, 0.4, 1, 1)
+accent_color = Color(0.9, 0.8, 1, 1)
+target_size = Vector2(22, 20)
+move_bounce_scale = 0.1
+move_bounce_speed = 16.0
+
+; 夜魇：幽蓝幽灵
+[sub_resource type="Resource" id="skin_wraith"]
+script = ExtResource("2_skin")
+skin_id = "neon_wraith"
+shape = "circle"
+main_color = Color(0.3, 0.5, 1, 1)
+accent_color = Color(0.7, 0.85, 1, 1)
+target_size = Vector2(30, 40)
+move_bounce_scale = 0.1
+move_bounce_speed = 10.0
+
+; 弓手：亮橙菱形
+[sub_resource type="Resource" id="skin_archer"]
+script = ExtResource("2_skin")
+skin_id = "neon_archer"
+shape = "diamond"
+main_color = Color(1, 0.6, 0.1, 1)
+accent_color = Color(1, 0.85, 0.5, 1)
+target_size = Vector2(28, 38)
+
+; 雷法师：电光蓝菱形
+[sub_resource type="Resource" id="skin_thundermage"]
+script = ExtResource("2_skin")
+skin_id = "neon_thundermage"
+shape = "diamond"
+main_color = Color(0.4, 0.8, 1, 1)
+accent_color = Color(0.85, 0.95, 1, 1)
+target_size = Vector2(32, 42)
+
+; 骷髅兵：冷白方形
+[sub_resource type="Resource" id="skin_skeleton"]
+script = ExtResource("2_skin")
+skin_id = "neon_skeleton"
+shape = "square"
+main_color = Color(0.8, 0.95, 1, 1)
+accent_color = Color(1, 1, 1, 1)
+target_size = Vector2(28, 34)
+
+; 石像坦克：深紫蓝方形（沉重）
+[sub_resource type="Resource" id="skin_tank"]
+script = ExtResource("2_skin")
+skin_id = "neon_tank"
+shape = "square"
+main_color = Color(0.45, 0.3, 0.9, 1)
+accent_color = Color(0.75, 0.65, 1, 1)
+target_size = Vector2(52, 56)
+move_bounce_scale = 0.07
+move_bounce_speed = 6.0
+
+; 精英怪：霓虹金方形
+[sub_resource type="Resource" id="skin_elite"]
+script = ExtResource("2_skin")
+skin_id = "neon_elite"
+shape = "square"
+main_color = Color(1, 0.85, 0.2, 1)
+accent_color = Color(1, 1, 0.7, 1)
+target_size = Vector2(36, 36)
+move_bounce_scale = 0.1
+move_bounce_speed = 8.0
+
+; ------------------------------ 主题包本体 ------------------------------
+[resource]
+script = ExtResource("1_theme")
+theme_id = "neon"
+theme_name = "霓虹梦境"
+player_skin = SubResource("skin_player")
+default_enemy_skin = SubResource("skin_enemy_default")
+enemy_skins = {
+"slime": SubResource("skin_slime"),
+"bat": SubResource("skin_bat"),
+"wraith": SubResource("skin_wraith"),
+"archer": SubResource("skin_archer"),
+"thundermage": SubResource("skin_thundermage"),
+"skeleton": SubResource("skin_skeleton"),
+"tank": SubResource("skin_tank"),
+"elite_001": SubResource("skin_elite")
+}
+bg_color = Color(0.07, 0.05, 0.13, 1)

@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_move_speed"
+display_name = "轻灵之靴"
+description = "移动速度 +10%"
+rarity = 0
+max_stacks = 5
+stat_modifiers = {
+"move_speed_mult": 0.1
+}

@@ -44,7 +44,6 @@ groups = PackedStringArray("enemy")
 offset = Vector2(0, 0)
 texture = null
 modulate = Color(1, 0.2, 0.2, 1)
-rect_size = Vector2(30, 30)
 
 ; CollisionShape2D - 敌人物理碰撞体
 ; 使用 CircleShape2D_3（半径16），用于角色移动和物理碰撞检测

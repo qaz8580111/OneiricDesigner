@@ -1,10 +1,13 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/bullet/BulletData.gd" id="1"]
+[ext_resource type="BulletForm" path="res://data/bullet/form/player_bullet_form.tres" id="2"]
+[ext_resource type="SplitEffect" path="res://data/bullet/effect/split_effect.tres" id="3"]
+[ext_resource type="LifeStealEffect" path="res://data/bullet/effect/lifesteal_effect.tres" id="4"]
 
 [resource type="BulletData" script_class="BulletData"]
 script = ExtResource("1")
 damage = 1
 speed = 500.0
-form = null
-effects = []
+form = ExtResource("2")
+effects = [ExtResource("3"), ExtResource("4")]

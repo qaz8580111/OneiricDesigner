@@ -1,0 +1,23 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
+[ext_resource type="BulletData" path="res://data/bullet/enemy_archer_bullet.tres" id="2"]
+
+[resource type="EnemyData" script_class="EnemyData"]
+script = ExtResource("1")
+enemy_id = "archer"
+enemy_name = "Skeleton Archer"
+speed = 80.0
+wander_speed = 40.0
+wander_interval = 2.0
+max_health = 5
+damage = 10
+detection_range = 500.0
+attack_range = 380.0
+attack_cooldown = 1.5
+bullet_data = ExtResource("2")
+drop_items = []
+placeholder_color = Color(0.85, 0.85, 0.7, 1)
+placeholder_size = Vector2(28, 38)
+is_elite = false
+elite_prefix = ""

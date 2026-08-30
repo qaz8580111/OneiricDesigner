@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/PoisonEffect.gd" id="1"]
+
+[resource type="PoisonEffect" script_class="PoisonEffect"]
+script = ExtResource("1")
+effect_id = "poison"
+trigger_type = 0
+duration = 3.0
+damage_per_second = 5
+poison_color = Color(0.2, 0.8, 0.3, 0.7)

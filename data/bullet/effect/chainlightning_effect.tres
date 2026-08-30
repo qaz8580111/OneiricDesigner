@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/ChainLightningEffect.gd" id="1"]
+
+[resource type="ChainLightningEffect" script_class="ChainLightningEffect"]
+script = ExtResource("1")
+effect_id = "chainlightning"
+trigger_type = 0
+max_jumps = 3
+jump_radius = 150.0
+decay = 0.7

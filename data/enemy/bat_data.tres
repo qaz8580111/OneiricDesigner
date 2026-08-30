@@ -1,0 +1,22 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
+
+[resource type="EnemyData" script_class="EnemyData"]
+script = ExtResource("1")
+enemy_id = "bat"
+enemy_name = "Shadow Bat"
+speed = 160.0
+wander_speed = 120.0
+wander_interval = 1.0
+max_health = 2
+damage = 6
+detection_range = 400.0
+attack_range = 40.0
+attack_cooldown = 0.6
+bullet_data = null
+drop_items = []
+placeholder_color = Color(0.3, 0.3, 0.5, 1)
+placeholder_size = Vector2(22, 20)
+is_elite = false
+elite_prefix = ""

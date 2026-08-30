@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/RicochetEffect.gd" id="1"]
+
+[resource type="RicochetEffect" script_class="RicochetEffect"]
+script = ExtResource("1")
+effect_id = "ricochet"
+trigger_type = 0
+bounce_count = 2
+bounce_radius = 200.0
+damage_decay = 0.8

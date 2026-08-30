@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+[ext_resource type="Resource" path="res://data/bullet/effect/frozen_effect.tres" id="2"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_frozen"
+display_name = "凝霜之触"
+description = "子弹命中冻结敌人，使其短暂停止行动"
+rarity = 1
+max_stacks = 1
+bullet_effect = ExtResource("2")

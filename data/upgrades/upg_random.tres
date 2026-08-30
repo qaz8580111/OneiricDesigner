@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+[ext_resource type="Resource" path="res://data/bullet/effect/random_effect.tres" id="2"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_random"
+display_name = "混沌弹幕"
+description = "命中触发随机方向的弹幕风暴（子弹伤害减半）"
+rarity = 1
+max_stacks = 1
+bullet_effect = ExtResource("2")

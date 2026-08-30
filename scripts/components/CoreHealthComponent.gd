@@ -35,6 +35,8 @@ var _is_dead: bool = false
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
+## 信号注册说明：用 add_user_signal 运行时注册用户信号（等价于 signal 关键字静态声明），
+##               参数以名字数组形式声明，集中此处便于一览组件全部对外信号
 func _ready() -> void:
 	## ========== 注册用户信号（用于外部监听） ==========
 	
@@ -101,7 +103,8 @@ func take_damage(amount: float) -> bool:
 	if _current_hp <= 0.0:
 		## 标记死亡状态
 		_is_dead = true
-		## 暂停游戏（防止死亡后继续受击）
+		## 暂停游戏（防止死亡后继续受击）——Main._update_death_fade 在 PROCESS_MODE_ALWAYS
+		## 下仍每帧运行，负责黑屏渐隐后解除暂停(get_tree().paused=false)并弹出结算面板
 		get_tree().paused = true
 		## 发出玩家死亡信号
 		emit_signal("player_died")
@@ -204,6 +207,31 @@ func apply_core_mod(new_data: CoreHealthDataClass) -> void:
 	
 	## 发出配置变化信号
 	emit_signal("core_config_changed", new_data)
+
+## 扩展核心血量上限（升级词条/道具使用）
+## 数据流：UpgradeManager属性词条 → Player.apply_max_hp_bonus → 此方法 → 扩容+治疗
+## 关键保护：core_health_data可能是场景共享的.tres资源，
+##          直接修改会污染所有实例（跨局残留），因此首次修改前先duplicate私有化
+## 参数：bonus - 上限增加值
+## 返回：true表示扩展成功，false表示失败（死亡/数据空/非法增量）
+func expand_max_hp(bonus: float) -> bool:
+	## 非法输入直接拒绝（死亡后扩容无意义，增量必须为正）
+	if _is_dead or core_health_data == null or bonus <= 0.0:
+		return false
+
+	## 资源私有化保护：首次修改前复制一份私有配置
+	## 设计意图：Resource默认全局共享，duplicate后本组件独享此配置，
+	##          后续修改不会影响其他玩家实例或下一局游戏
+	core_health_data = core_health_data.duplicate()
+
+	## 扩展血量上限
+	core_health_data.max_hp += bonus
+	## 同步治疗等量血量（上限扩展即时受益，符合词条"立即生效"的预期）
+	_current_hp = minf(_current_hp + bonus, core_health_data.max_hp)
+
+	## 广播核心血量变化（HUD更新血条）
+	emit_signal("core_health_changed", _current_hp, core_health_data.max_hp)
+	return true
 
 ## ========== 计时器回调 ==========
 

@@ -2,6 +2,10 @@
 ## 职责：定义子弹特效的触发时机和接口，作为特效系统的扩展基类
 ## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
 ## 使用场景：通过继承此类创建不同特效（穿透、爆炸、中毒、冰冻、弹射、分裂等）
+## 设计意图：策略模式——每个特效是独立的Resource子类，挂载在BulletData.effects数组中，
+##           由Bullet生命周期钩子（生成/飞行/命中/销毁）按TriggerType触发对应策略
+## 被引用方：BulletData.effects（子弹特效列表）、UpgradeData.bullet_effect（特效升级词条）、
+##           data/bullet/effect/下的16种特效.tres资源
 class_name BulletEffect
 extends Resource
 

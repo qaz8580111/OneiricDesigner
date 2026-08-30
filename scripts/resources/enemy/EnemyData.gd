@@ -2,6 +2,10 @@
 ## 职责：定义敌人的所有配置数据，实现数据与逻辑分离
 ## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
 ## 使用场景：在编辑器中创建 .tres 文件配置不同类型敌人，支持扩展不同敌人属性、掉落、射击配置
+## 被引用方：GameWorld（波次刷怪池_enemy_pool_data/精英怪elite_enemy_data）、
+##           Enemy（apply_to_enemy应用属性、get_bullet_data取子弹配置）
+## 数据流：.tres配置 → GameWorld刷怪传入Enemy → apply_to_enemy()写入敌人节点 →
+##         死亡时经generate_drops()/get_drops_to_spawn()处理掉落
 class_name EnemyData
 extends Resource
 
@@ -67,6 +71,10 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 ## 敌人占位纹理大小（无美术资源时使用，默认30x30像素）
 @export var placeholder_size: Vector2 = Vector2(30, 30)
 
+## 敌人占位形状类型（无美术资源时使用）
+## 可选值："auto"=按enemy_id自动推断 / "square"=方形(重装近战) / "circle"=圆形(柔软飞行) / "diamond"=菱形(敏捷远程)
+@export var shape_type: String = "auto"
+
 ## ========== 精英怪配置 ==========
 
 ## 是否为精英怪（精英怪具有更高属性和特殊外观）
@@ -88,6 +96,34 @@ func get_bullet_data() -> BulletDataClass:
 	default_bullet.damage = damage
 	default_bullet.speed = 300.0
 	return default_bullet
+
+## 获取实际使用的占位形状类型
+## 数据流：Enemy._create_placeholder_texture() → 此方法 → 决定敌人外观轮廓
+## 返回："square"（方形）/ "circle"（圆形）/ "diamond"（菱形）
+func get_shape_type() -> String:
+	## 手动指定了具体形状则直接使用（非auto且非空）
+	if shape_type != "auto" and shape_type != "":
+		return shape_type
+	## 未指定时按enemy_id关键词自动推断
+	return _infer_shape_from_id()
+
+## 按enemy_id关键词自动推断形状类型
+## 设计意图：让敌人类型在视觉上一眼可辨——
+##   圆形=柔软/飞行/液体类（史莱姆、蝙蝠、幽魂等）
+##   菱形=敏捷/远程/魔法类（弓手、狙击手、法师等）
+##   方形=重装/近战类（坦克、骑士、骷髅兵等）
+func _infer_shape_from_id() -> String:
+	var id: String = enemy_id.to_lower()
+	## 圆形关键词：柔软、飞行、不定形体
+	for key in ["slime", "bat", "goblin", "ghoul", "wraith", "spider"]:
+		if id.contains(key):
+			return "circle"
+	## 菱形关键词：敏捷、远程、魔法施法者
+	for key in ["scout", "archer", "sniper", "hunter", "firemage", "thundermage"]:
+		if id.contains(key):
+			return "diamond"
+	## 默认方形：重装、近战、机械类（tank/knight/skeleton/bomber/rocketeer等）
+	return "square"
 
 ## 生成死亡掉落物（直接应用效果到目标）
 ## 参数：target - 掉落物应用目标（通常是玩家）

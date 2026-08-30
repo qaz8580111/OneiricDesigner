@@ -1,6 +1,7 @@
 ## MainMenu.gd - 主菜单逻辑脚本
 ## 职责：管理游戏主菜单界面，处理开始游戏、打开设置、退出游戏三种操作
 ## 继承：Control（UI控件基类，作为主菜单的根节点）
+## 数据流：按钮点击（或MenuController键盘/手柄导航）→ 信号(start_game/open_settings/quit_game) → Main.gd 监听后执行场景切换/退出
 extends Control
 
 ## ========== 信号定义（用于与其他节点通信） ==========

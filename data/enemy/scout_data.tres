@@ -1,0 +1,22 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
+
+[resource type="EnemyData" script_class="EnemyData"]
+script = ExtResource("1")
+enemy_id = "scout"
+enemy_name = "Swift Scout"
+speed = 220.0
+wander_speed = 160.0
+wander_interval = 0.8
+max_health = 3
+damage = 7
+detection_range = 420.0
+attack_range = 40.0
+attack_cooldown = 0.5
+bullet_data = null
+drop_items = []
+placeholder_color = Color(0.8, 0.7, 0.2, 1)
+placeholder_size = Vector2(22, 28)
+is_elite = false
+elite_prefix = ""

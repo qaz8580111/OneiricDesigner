@@ -1,6 +1,15 @@
 ## Main.gd - 游戏主控制脚本
 ## 职责：管理游戏状态切换（主菜单/游戏/暂停/设置/游戏结束）、场景加载、UI管理
 ## 继承：Node2D（Godot 4的2D节点，作为游戏根节点）
+## 节点结构：Main(Node2D, 场景根) → CanvasLayer → UIStack(菜单/HUD的UI栈) + DeathOverlay(死亡黑屏遮罩)；GameWorld(游戏元素容器)
+## 系统交互：
+##   - 信号：GameManager 的 game_started/game_ended/game_paused/game_resumed → 驱动界面切换
+##   - 连接：玩家 shot → GameWorld 创建子弹；HealthController.player_died → GameWorld 结束游戏
+##   - 输入：_process 全局监听 ui_cancel(ESC) 暂停；process_mode=ALWAYS 保证暂停中仍能响应与更新死亡动画
+## 数据流：主菜单 → 开始游戏 → GameManager.start_new_game → game_started → 生成世界+玩家+HUD →
+##         玩家死亡 → game_ended → 黑屏渐隐2秒+停1秒 → 解除场景树暂停 → 结算面板 → 再来一局/回主菜单
+## 设计意图：Main是唯一的场景级屏幕状态机(Screen枚举)，UI生命周期/切换集中于此；
+##           游戏逻辑下放给 GameWorld 与 GameManager，UI场景只做展示与信号转发
 extends Node2D
 
 ## ========== 游戏屏幕状态枚举 ==========
@@ -60,6 +69,9 @@ var PAUSE_MENU_SCENE: PackedScene = preload("res://scenes/ui/PauseMenu.tscn")
 
 ## 游戏HUD场景（显示血量、碎片等）
 var GAME_HUD_SCENE: PackedScene = preload("res://scenes/ui/GameHUD.tscn")
+
+## 结算面板脚本（纯代码构建UI，死亡后展示本局统计与重开入口）
+var GAME_OVER_PANEL_SCRIPT: GDScript = preload("res://scripts/ui/GameOverPanel.gd")
 
 ## 玩家场景
 var PLAYER_SCENE: PackedScene = preload("res://scenes/gameplay/Player.tscn")
@@ -157,9 +169,29 @@ func _show_pause_menu() -> void:
 	## 将暂停菜单添加到UI栈
 	ui_stack.add_child(active_ui)
 	## 等待一帧（确保UI已添加到场景树）
+	## 原因：下一帧再暂停，避免当帧UI信号连接/布局未完成即被暂停冻结
 	await get_tree().process_frame
 	## 调用GameManager暂停游戏
 	GameManager.pause_game()
+
+## 显示游戏结束结算面板（死亡黑屏过渡完成后调用）
+## 设计意图：roguelike的"再来一局"驱动力——结算面板量化展示本局成果
+func _show_game_over_panel() -> void:
+	## 清除当前所有UI界面（HUD已在玩家死亡时自行隐藏，会随_clear_ui保留但不可见）
+	_clear_ui()
+	## 设置当前屏幕状态为GAME_OVER
+	current_screen = Screen.GAME_OVER
+	## 切换输入上下文到UI操作模式（允许按钮点击）
+	InputManager.reset_context("SETTINGS")
+	## 用脚本创建结算面板（纯代码UI，无.tscn）
+	active_ui = GAME_OVER_PANEL_SCRIPT.new()
+	## 面板必须ALWAYS处理模式（死亡瞬间场景树可能仍处于暂停）
+	active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	## 连接结算面板信号：再来一局 / 返回主菜单
+	active_ui.restart_requested.connect(_on_restart_from_game_over)
+	active_ui.back_to_menu_requested.connect(_on_back_to_menu_from_game_over)
+	## 添加到UI栈显示
+	ui_stack.add_child(active_ui)
 
 ## ========== 游戏控制方法 ==========
 
@@ -167,6 +199,11 @@ func _show_pause_menu() -> void:
 func _start_game() -> void:
 	## 清除当前所有UI界面（保留HUD）
 	_clear_ui()
+	## 清除上一局残留的游戏元素（旧玩家/旧游戏世界/旧HUD）
+	## 修复bug：从结算面板"再来一局"时不经过主菜单（主菜单路径才会调用_clear_game），
+	## 若不在此清理，已死亡（血量0）的旧玩家仍留在"player"组中，新HUD按组查找玩家
+	## 会错误绑定旧玩家，导致左上角血量显示0，同时旧GameWorld还会继续生成敌人
+	_clear_game()
 	## 设置当前屏幕状态为GAME
 	current_screen = Screen.GAME
 	## 强制重置输入上下文到GAMEPLAY，避免菜单残留的PAUSE_MENU阻塞游戏输入
@@ -215,18 +252,23 @@ func _spawn_game_elements() -> void:
 	ui_stack.add_child(game_hud)
 
 ## 清除游戏元素（玩家、游戏世界、HUD）
+## 注意：必须用free()立即销毁而非queue_free()延迟销毁——
+## queue_free要等当前帧结束才真正移除节点，而_start_game的调用链是同步的
+## （清理后立刻start_new_game→game_started→生成新玩家），若延迟销毁，
+## 同帧内"player"组中仍存在旧死亡玩家，新HUD按组查找会绑定到旧玩家（血量显示0）
+## 调用时机均为UI输入回调（按钮点击/R键），不在物理回调中，free()是安全的
 func _clear_game() -> void:
-	## 遍历游戏世界容器的所有子节点并销毁
+	## 遍历游戏世界容器的所有子节点并销毁（立即生效，同步移出"player"等组）
 	for child in game_world_container.get_children():
-		child.queue_free()
+		child.free()
 	## 清空玩家引用
 	player = null
 	## 清空游戏世界引用
 	game_world = null
 
-	## 如果HUD存在，销毁HUD
+	## 如果HUD存在，销毁HUD（旧HUD在死亡时已隐藏，直接free避免残留在UI栈中）
 	if game_hud != null:
-		game_hud.queue_free()
+		game_hud.free()
 		game_hud = null
 
 ## 清除UI界面（保留HUD）
@@ -274,6 +316,16 @@ func _on_quit_to_menu() -> void:
 	## 显示主菜单
 	_show_main_menu()
 
+## 结算面板"再来一局"回调（响应GameOverPanel.restart_requested，R键同效）
+func _on_restart_from_game_over() -> void:
+	## 直接重启新局（死亡流程已解除暂停，_start_game内部会重置状态并重新生成元素）
+	_start_game()
+
+## 结算面板"返回主菜单"回调（响应GameOverPanel.back_to_menu_requested）
+func _on_back_to_menu_from_game_over() -> void:
+	## 显示主菜单（游戏树已解除暂停，GameManager状态由start_new_game/菜单流程接管）
+	_show_main_menu()
+
 ## 设置返回按钮回调
 func _on_settings_back() -> void:
 	## 如果从暂停界面打开设置，返回暂停界面
@@ -298,6 +350,9 @@ func _on_game_started() -> void:
 func _on_game_ended() -> void:
 	## 设置当前屏幕状态为GAME_OVER
 	current_screen = Screen.GAME_OVER
+	## 播放游戏结束音效（全局播放，宣告死亡）
+	if AudioManager:
+		AudioManager.play("game_over", 0.9)
 	## 开始死亡黑屏过渡动画
 	_start_death_fade()
 
@@ -367,16 +422,16 @@ func _update_death_fade() -> void:
 	if elapsed >= fade_duration:
 		## 设置透明度为1（完全不透明）
 		death_overlay.color.a = 1.0
-		## 等待1秒后返回主菜单
+		## 等待1秒后显示结算面板
 		if elapsed >= fade_duration + 1.0:
 			## 重置死亡动画状态
 			_is_death_fading = false
-			## 恢复游戏（取消暂停状态）
+			## 恢复游戏（取消暂停状态——玩家死亡时CoreHealthComponent暂停了场景树）
 			get_tree().paused = false
-			## 重置死亡遮罩透明度（否则主菜单会被黑屏挡住）
+			## 重置死亡遮罩透明度（否则结算面板会被黑屏挡住）
 			death_overlay.color.a = 0.0
-			## 返回主菜单
-			_show_main_menu()
+			## 显示结算面板（展示本局统计 + 再来一局/返回主菜单）
+			_show_game_over_panel()
 		return
 	
 	## 计算当前透明度（使用线性插值）
@@ -391,6 +446,10 @@ func _process(_delta: float) -> void:
 	
 	## 检测取消/暂停按钮（如ESC键）
 	if InputManager.is_action_just_pressed_safe("ui_cancel"):
+		## 升级三选一进行中屏蔽ESC（防止暂停菜单叠加在选择面板上造成UI冲突）
+		## 数据流：升级触发 → UpgradeManager.is_choosing=true → 此处拦截ESC
+		if UpgradeManager and UpgradeManager.is_choosing:
+			return
 		## 如果当前在游戏中，显示暂停菜单
 		if current_screen == Screen.GAME:
 			_show_pause_menu()

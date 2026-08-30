@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/enemy/DropItem.gd" id="1"]
+
+[resource type="DropItem" script_class="DropItem"]
+script = ExtResource("1")
+item_id = "fragment_medium"
+item_name = "Medium Fragment"
+item_type = 0
+value = 10
+drop_chance = 0.35
+is_rare = false
+auto_adsorb = true

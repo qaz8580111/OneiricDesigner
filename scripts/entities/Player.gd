@@ -1,12 +1,30 @@
 ## Player.gd - 玩家角色核心脚本
 ## 职责：管理玩家移动、射击、血量、梦境碎片等核心逻辑
 ## 继承：CharacterBody2D（Godot 4的2D物理角色节点）
+## 节点结构：Player(CharacterBody2D) → Sprite2D(外观) / Hitbox(Area2D, 敌人贴身接触判定) / HealthController(Node)
+##           HealthController → ShieldComponent(护盾拦截) + CoreHealthComponent(核心血/无敌帧/死亡判定)
+## 系统交互：
+##   - 组：加入"player"组，供敌人追踪、拾取物吸附、GameWorld/Main 查找玩家
+##   - 信号：shot → GameWorld._on_player_shot 创建子弹（Main._spawn_game_elements 也会连接一份）；
+##           health_changed/critical_state_active/player_died 由 HealthController 转发后再次广播给 UI
+##   - 单例：InputManager(输入) / AudioManager(音效) / UpgradeManager(词条) / RunStats(统计) 均为自动加载全局
+## 碰撞层：本体 layer=1(玩家层)/mask=3；Hitbox layer=1/mask=8（检测敌方子弹层）——敌人子弹 mask=1 即打玩家
+## 设计意图：玩家只负责移动/射击/成长，子弹创建外包给 GameWorld（只发信号），伤害结算外包给 HealthController
 extends CharacterBody2D
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========
 
 ## 子弹数据资源类，用于配置子弹属性（伤害、速度、形态、特效等）
 const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
+
+## 角色皮肤资源类（主题系统：皮肤决定外观+动画参数）
+const CharacterSkinClass = preload("res://scripts/resources/skin/CharacterSkin.gd")
+
+## 主题包资源类（ThemeManager.theme_changed 信号的负载类型）
+const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
+
+## 通用角色动画器组件（驱动呼吸/弹跳/攻击/受击动画）
+const CharacterAnimatorClass = preload("res://scripts/components/CharacterAnimator.gd")
 
 ## ========== 导出变量（编辑器可配置） ==========
 
@@ -32,6 +50,9 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
 ## ========== 成员变量（运行时数据） ==========
 
+## 通用角色动画器组件（应用皮肤时创建；null=未启用动画——无皮肤回退占位时保持原样）
+var animator: CharacterAnimatorClass = null
+
 ## 玩家当前拥有的梦境碎片数量
 var dream_fragment: int = 0
 
@@ -49,6 +70,24 @@ var _blink_count: int = 0
 
 ## 无敌闪烁计时器，控制闪烁频率
 var _blink_timer: Timer = null
+
+## ========== 升级词条系统（roguelike成长集成） ==========
+
+## 基础移速（词条乘算前的原始值，speed会被词条动态修改）
+var _base_speed: float = 0.0
+
+## 基础射击冷却（词条乘算前的原始值，shoot_cooldown会被词条动态修改）
+var _base_shoot_cooldown: float = 0.0
+
+## 私有子弹数据副本（关键设计：导出的bullet_data是全局共享的.tres资源，
+## 词条追加特效/修改伤害必须作用于私有副本，否则会污染所有子弹配置和下一局游戏）
+var _private_bullet_data: BulletDataClass = null
+
+## 基础子弹伤害（词条乘算基准，词条只修改私有副本的damage）
+var _base_bullet_damage: int = 0
+
+## 基础子弹速度（词条乘算基准，词条只修改私有副本的speed）
+var _base_bullet_speed: float = 0.0
 
 ## ========== 信号定义（用于与其他节点通信） ==========
 
@@ -71,8 +110,25 @@ func _ready() -> void:
 	## 初始化梦境碎片为0
 	dream_fragment = 0
 	
-	## 创建玩家占位纹理（蓝色方块），宽40像素，高40像素
-	_create_placeholder_texture(sprite, Color(0, 0.5, 1, 1), 40, 40)
+	## ========== 外观：主题皮肤（优先）→ 占位方块（回退） ==========
+	## 数据流：ThemeManager(autoload) 启动时已加载主题 → 此处按需索取玩家皮肤
+	## 有皮肤：皮肤生成纹理（内部缓存）+ 创建动画器（呼吸/弹跳/攻击/受击动画）
+	## 无皮肤：回退原有蓝色占位方块，保证任何情况下玩家都可显示
+	## 防护：ThemeManager 单例异常（解析失败未实例化）时标识符为 null，
+	##       直接调用会中断 _ready → 占位纹理逻辑被跳过 → 玩家隐形（已发生的线上事故），
+	##       因此必须判空后再调用，保证任何情况下都走到纹理赋值
+	var player_skin: CharacterSkinClass = null
+	if ThemeManager:
+		player_skin = ThemeManager.get_player_skin()
+	if player_skin != null:
+		_apply_skin(player_skin)
+	else:
+		_create_placeholder_texture(sprite, Color(0, 0.5, 1, 1), 40, 40)
+
+	## 监听主题热切换信号：设置界面切主题时全场玩家即时换肤（无需重开局）
+	## 数据流：ThemeManager.set_theme → theme_changed信号 → 此回调 → 重新应用皮肤
+	if ThemeManager and not ThemeManager.theme_changed.is_connected(_on_theme_changed):
+		ThemeManager.theme_changed.connect(_on_theme_changed)
 	
 	## 将玩家添加到"player"组，方便其他节点通过组查找玩家
 	if not is_in_group("player"):
@@ -94,6 +150,23 @@ func _ready() -> void:
 		if health_controller.has_signal("player_died"):
 			health_controller.connect("player_died", _on_player_died)
 
+	## ========== 升级词条系统初始化 ==========
+
+	## 记录基础属性（词条乘算基于这些原始值，避免反复乘算导致数值漂移）
+	_base_speed = speed
+	_base_shoot_cooldown = shoot_cooldown
+
+	## 创建私有子弹数据副本（词条特效/伤害修改的作用对象）
+	_init_private_bullet_data()
+
+	## 监听升级词条应用信号：任何词条应用后重新同步属性到自身
+	## 数据流：UpgradeManager.apply_upgrade → upgrade_applied信号 → 此回调 → 同步移速/射速/弹属性
+	if UpgradeManager:
+		UpgradeManager.upgrade_applied.connect(_on_upgrade_applied)
+
+	## 初始同步一次（兜底：若词条在玩家实例化之前已应用，也能拿到正确属性）
+	_sync_upgrade_stats()
+
 ## ========== 辅助方法 ==========
 
 ## 创建占位纹理（无美术资源时使用）
@@ -111,9 +184,145 @@ func _create_placeholder_texture(sprite_node: Sprite2D, color: Color, width: int
 	## 将纹理设置到Sprite2D节点上
 	sprite_node.texture = texture
 
+## ========== 主题皮肤系统（一键换肤） ==========
+
+## 应用角色皮肤（首次创建 / 主题热切换时调用）
+## 参数：skin - 角色皮肤资源（来自 ThemeManager.get_player_skin()）
+func _apply_skin(skin: CharacterSkinClass) -> void:
+	## 皮肤为空直接返回（防御）
+	if skin == null:
+		return
+	## PROCEDURAL 模式：把皮肤生成的纹理挂到玩家精灵（皮肤内部缓存，同皮肤共享一张纹理）
+	if not skin.has_frames():
+		sprite.texture = skin.get_texture()
+	## 重置精灵调制色为白色：场景中 Sprite2D 自带蓝色 modulate（旧占位染色），
+	## 皮肤纹理颜色已经正确，叠加调制会串色；白调制保证皮肤颜色原样显示
+	if not sprite.modulate.is_equal_approx(Color.WHITE):
+		sprite.modulate = Color.WHITE
+	## 创建/更新动画器（FRAMES 模式会在内部创建 AnimatedSprite2D 并隐藏色块精灵）
+	_ensure_animator(skin)
+	## 皮肤应用后刷新"原始颜色"基准（受伤闪烁/红血恢复都回到这个颜色）
+	_original_color = sprite.modulate
+
+## 获取或创建动画器组件（首次创建，之后复用并重设皮肤）
+func _ensure_animator(skin: CharacterSkinClass) -> void:
+	## 已有动画器：只需重设皮肤（热切换主题场景）
+	if animator != null:
+		animator.setup(skin, sprite)
+		return
+	## 首次：创建动画器组件挂到玩家下（自驱动 _process，不占玩家逻辑帧）
+	animator = CharacterAnimatorClass.new()
+	animator.name = "CharacterAnimator"
+	add_child(animator)
+	animator.setup(skin, sprite)
+
+## 主题切换回调（ThemeManager.theme_changed）：全场即时换肤
+func _on_theme_changed(theme: GameThemeClass) -> void:
+	## 新主题有玩家皮肤才应用（null 时保持当前外观，避免变成隐形）
+	if theme != null and theme.player_skin != null:
+		_apply_skin(theme.player_skin)
+
+## ========== 升级词条系统集成（roguelike成长核心） ==========
+
+## 创建私有子弹数据副本（_ready时调用一次）
+## 设计意图：导出的bullet_data.tres是全局共享资源，duplicate(true)深拷贝出
+##          本局私有副本，词条追加特效/修改数值都只作用于副本，局结束自动丢弃
+func _init_private_bullet_data() -> void:
+	## 有配置时深拷贝（true=递归复制子资源：form/effects都会独立）
+	if bullet_data != null:
+		_private_bullet_data = bullet_data.duplicate(true)
+	else:
+		## 无配置时创建默认子弹数据（兜底，保证游戏可玩）
+		_private_bullet_data = BulletDataClass.new()
+	## 记录基础伤害/速度（词条乘算的基准值，每次同步都从基准算起）
+	_base_bullet_damage = _private_bullet_data.damage
+	_base_bullet_speed = _private_bullet_data.speed
+
+## 从UpgradeManager同步词条属性到玩家自身
+## 数据流：UpgradeManager.player_stats（词条累积）→ 此方法 → 移速/射速/子弹副本
+## 同步时机：词条应用信号回调 + _ready兜底
+func _sync_upgrade_stats() -> void:
+	## 防御：私有副本未初始化时直接返回（_ready顺序保证一般不会发生）
+	if _private_bullet_data == null:
+		return
+	## 读取UpgradeManager累积的玩家属性字典
+	var stats: Dictionary = UpgradeManager.player_stats
+
+	## 移速 = 基础移速 × 移速乘算
+	speed = _base_speed * float(stats.get("move_speed_mult", 1.0))
+
+	## 射速乘算 → 冷却缩短：冷却 = 基础冷却 / 射速乘算
+	## 保底0.05秒：防止极端叠层后冷却趋近0导致每帧都在发射
+	var fire_rate_mult: float = float(stats.get("fire_rate_mult", 1.0))
+	shoot_cooldown = maxf(_base_shoot_cooldown / maxf(fire_rate_mult, 0.1), 0.05)
+
+	## 子弹伤害乘算（保底1点伤害，防止0伤害废弹）
+	_private_bullet_data.damage = maxi(
+		int(round(float(_base_bullet_damage) * float(stats.get("damage_mult", 1.0)))), 1)
+	## 子弹速度乘算
+	_private_bullet_data.speed = _base_bullet_speed * float(stats.get("bullet_speed_mult", 1.0))
+
+## 词条应用信号回调（响应UpgradeManager.upgrade_applied）
+## 参数：upgrade - 被应用的词条（特效词条已由UpgradeManager直接调用apply_bullet_effect，
+##        此处只需同步属性词条带来的数值变化）
+func _on_upgrade_applied(_upgrade: Resource) -> void:
+	## 重新同步全部属性（同步成本低，统一处理最简单可靠）
+	_sync_upgrade_stats()
+
+## 追加子弹特效（词条特效/BUFF的统一入口，由UpgradeManager调用）
+## 数据流：UpgradeManager.apply_upgrade(特效词条) → 此方法 → 追加到私有子弹副本
+## 参数：effect - 子弹特效资源（data/bullet/effect/下的.tres）
+func apply_bullet_effect(effect: Resource) -> void:
+	## 空特效或副本未初始化时拒绝
+	if effect == null or _private_bullet_data == null:
+		return
+	## 按effect_id去重：同一特效只能拥有一次（重复追加会多次触发）
+	if has_bullet_effect(effect.effect_id if "effect_id" in effect else ""):
+		return
+	## 追加到私有子弹副本的特效列表（每发子弹都会携带）
+	_private_bullet_data.effects.append(effect)
+	## 播放获得特效音效（区别于普通拾取的强化感）
+	if AudioManager:
+		AudioManager.play("buff_pickup", 0.8)
+
+## 查询是否已拥有某子弹特效（UpgradeManager三选一去重过滤用）
+## 参数：effect_id - 特效唯一标识（如"explosion"）
+## 返回：true表示已拥有
+func has_bullet_effect(effect_id: String) -> bool:
+	## 副本未初始化或空id时视为未拥有
+	if _private_bullet_data == null or effect_id == "":
+		return false
+	## 遍历特效列表比对effect_id
+	for effect in _private_bullet_data.effects:
+		if effect != null and effect.effect_id == effect_id:
+			return true
+	return false
+
+## 应用核心血量上限加值（UpgradeManager血量词条调用）
+## 数据流：UpgradeManager.apply_upgrade(max_hp_bonus词条) → 此方法 → 血量组件扩容
+## 参数：amount - 上限增加值（同时立即治疗等量血量）
+func apply_max_hp_bonus(amount: int) -> void:
+	## 非法增量或控制器缺失时拒绝
+	if amount <= 0 or health_controller == null:
+		return
+	## 查找核心血量组件并调用扩容方法（has_method检查保证健壮性）
+	var core_comp: Node = health_controller.get_node_or_null("CoreHealthComponent")
+	if core_comp != null and core_comp.has_method("expand_max_hp"):
+		core_comp.expand_max_hp(float(amount))
+
+## 添加增益BUFF（BUFF道具拾取时由DropItem.apply调用）
+## 数据流：敌人掉落BUFF → 玩家手动拾取 → DropItem.apply → 此方法
+## 设计意图：BUFF=随机直接获得一个可用词条（即时奖励，不走三选一面板）
+## 参数：item_id - 道具id（预留：未来可区分不同BUFF类型），value - 数值（预留扩展）
+func add_buff(item_id: String, value: int) -> void:
+	## 委托UpgradeManager随机发放一个可用词条（内部已处理应用与音效）
+	if UpgradeManager:
+		UpgradeManager.grant_random_upgrade()
+
 ## ========== 物理帧更新方法 ==========
 
 ## _physics_process() - 每物理帧调用一次（默认60次/秒），用于处理物理相关逻辑
+## 为什么不用 _process：move_and_slide 依赖物理步进，物理帧固定步长可保证碰撞检测稳定不穿模
 func _physics_process(delta: float) -> void:
 	## 处理玩家移动
 	_move(delta)
@@ -134,6 +343,15 @@ func _move(delta: float) -> void:
 	velocity = input_dir * speed
 	## 执行移动并处理碰撞（Godot内置的物理移动方法）
 	move_and_slide()
+
+	## ---------- 动画状态同步（有动画器时） ----------
+	if animator != null:
+		## 移动/待机切换：有输入即弹跳，无输入回呼吸
+		animator.set_moving(input_dir != Vector2.ZERO)
+		## 朝向跟随鼠标瞄准方向（射击游戏的瞄准感：角色面向准星侧）
+		var aim_vec: Vector2 = get_global_mouse_position() - global_position
+		if absf(aim_vec.x) > 1.0:
+			animator.set_facing(aim_vec.x)
 
 ## 处理玩家射击逻辑
 ## 参数：delta - 帧间隔时间（秒）
@@ -167,8 +385,19 @@ func _shoot() -> void:
 	var mouse_pos: Vector2 = get_global_mouse_position()
 	## 计算从玩家位置指向鼠标位置的方向向量并归一化
 	var direction: Vector2 = (mouse_pos - global_position).normalized()
+	
+	## 播放射击音效（带随机音高避免重复）
+	if AudioManager:
+		AudioManager.play_2d("player_shoot", global_position, 0.75, randf_range(0.95, 1.08))
+
+	## 播放攻击动画（射击后坐脉冲：前倾+放大回弹，强化开火手感）
+	if animator != null:
+		animator.play_attack()
+	
 	## 发出shot信号，通知GameWorld创建子弹（包含子弹配置数据）
-	shot.emit(global_position, direction, bullet_data)
+	## 关键：传递私有子弹副本（词条修改的伤害/速度/特效都在副本上），
+	##       GameWorld会再duplicate一份给子弹实例，共享.tres永远不会被修改
+	shot.emit(global_position, direction, _private_bullet_data)
 
 ## ========== 血量与伤害系统 ==========
 
@@ -179,6 +408,7 @@ func take_damage(amount: float) -> void:
 		## 记录受伤前的状态，用于检测是否刚进入无敌状态
 		var state_before: Dictionary = health_controller.get_survival_state()
 		var was_invincible: bool = state_before.get("is_invincible", false)
+		var hp_before: float = state_before.get("core_hp", 0)
 		
 		## 调用健康控制器处理伤害（先扣护盾，再扣核心血）
 		health_controller.apply_damage(amount, "unknown")
@@ -186,6 +416,17 @@ func take_damage(amount: float) -> void:
 		## 记录受伤后的状态
 		var state_after: Dictionary = health_controller.get_survival_state()
 		var is_invincible: bool = state_after.get("is_invincible", false)
+		var shield_after: int = state_after.get("shield_segments", 0)
+		var hp_after: float = state_after.get("core_hp", 0)
+		
+		## 护盾破碎音效
+		if shield_after == 0 and state_before.get("shield_segments", 0) > 0:
+			if AudioManager:
+				AudioManager.play_2d("shield_break", global_position, 0.95)
+		## 玩家扣血音效（核心血量变化）
+		elif hp_after < hp_before:
+			if AudioManager:
+				AudioManager.play_2d("player_hurt", global_position, 0.9)
 		
 		## 如果刚进入无敌状态，启动闪烁效果
 		if is_invincible and not was_invincible:
@@ -196,6 +437,9 @@ func take_damage(amount: float) -> void:
 func heal(amount: float) -> void:
 	if health_controller:
 		health_controller.heal_core(amount)
+		## 治疗音效
+		if AudioManager:
+			AudioManager.play_2d("player_heal", global_position, 0.7)
 
 ## 恢复护盾段数（对外接口）
 ## 参数：segments - 要恢复的护盾段数
@@ -215,6 +459,13 @@ func add_dream_fragment(amount: int) -> void:
 	dream_fragment += amount
 	## 发出信号通知UI更新显示
 	dream_fragment_changed.emit(dream_fragment)
+
+	## 上报统计（结算面板展示的碎片总数）
+	RunStats.add_fragment(amount)
+	## 碎片即经验：转发给UpgradeManager（达到阈值自动触发升级三选一）
+	## 数据流：碎片拾取 → 此方法 → UpgradeManager.add_exp → level_up → 三选一面板
+	if UpgradeManager:
+		UpgradeManager.add_exp(amount)
 
 ## 获取玩家当前生存状态（对外接口）
 ## 返回：包含护盾、核心血、无敌状态等信息的字典

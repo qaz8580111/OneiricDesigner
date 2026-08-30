@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/AccelerateEffect.gd" id="1"]
+
+[resource type="AccelerateEffect" script_class="AccelerateEffect"]
+script = ExtResource("1")
+effect_id = "accelerate"
+trigger_type = 3
+acceleration = 60.0
+max_speed_mult = 3.0

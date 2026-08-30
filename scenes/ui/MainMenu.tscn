@@ -38,7 +38,8 @@ script = ExtResource("1_mainmenu")
 
 ; ------------------------------ 背景 ------------------------------
 ; Background (ColorRect) - 菜单背景
-; 颜色：深蓝灰 (0.1, 0.12, 0.2, 1)，营造神秘氛围
+; 颜色：深蓝灰 (0.13, 0.16, 0.26, 1)——比纯黑亮、带蓝调，与设置界面背景保持一致，
+;       营造神秘氛围的同时避免控件沉入近黑色背景
 ; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到按钮
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
@@ -48,7 +49,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.1, 0.12, 0.2, 1)
+color = Color(0.13, 0.16, 0.26, 1)
 
 ; ------------------------------ 菜单内容 ------------------------------
 ; VBoxContainer - 垂直布局容器

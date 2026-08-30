@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+[ext_resource type="Resource" path="res://data/bullet/effect/explosion_effect.tres" id="2"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_explosion"
+display_name = "爆裂星核"
+description = "子弹命中时爆炸，对范围内敌人造成120%范围伤害"
+rarity = 2
+max_stacks = 1
+bullet_effect = ExtResource("2")

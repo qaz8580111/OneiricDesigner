@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/BulletForm.gd" id="1"]
+
+[resource type="BulletForm" script_class="BulletForm"]
+script = ExtResource("1")
+form_id = "player_energy"
+collision_radius = 5.0
+placeholder_color = Color(0.4, 0.9, 1, 1)
+placeholder_size = Vector2(10, 14)

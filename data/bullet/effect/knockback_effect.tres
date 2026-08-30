@@ -1,0 +1,10 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/KnockbackEffect.gd" id="1"]
+
+[resource type="KnockbackEffect" script_class="KnockbackEffect"]
+script = ExtResource("1")
+effect_id = "knockback"
+trigger_type = 0
+knockback_force = 300.0
+knockback_duration = 0.2

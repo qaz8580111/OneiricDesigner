@@ -1,0 +1,9 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/effects/ArmorBreakEffect.gd" id="1"]
+
+[resource type="ArmorBreakEffect" script_class="ArmorBreakEffect"]
+script = ExtResource("1")
+effect_id = "armorbreak"
+trigger_type = 0
+ignore_shield = 1.0

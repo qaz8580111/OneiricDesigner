@@ -40,7 +40,6 @@ monitorable = true
 offset = Vector2(0, 0)
 texture = null
 modulate = Color(0.2, 0.8, 1, 1)
-rect_size = Vector2(16, 16)
 
 ; CollisionShape2D - 子弹碰撞体
 ; 使用 RectangleShape2D_2（16x16），用于检测与敌人/玩家的碰撞

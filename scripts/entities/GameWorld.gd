@@ -1,6 +1,15 @@
 ## GameWorld.gd - 游戏世界管理脚本
 ## 职责：管理敌人生成、子弹创建、道具掉落、玩家交互等核心游戏逻辑
 ## 继承：Node2D（Godot 4的2D节点，作为游戏世界容器）
+## 节点结构：GameWorld(Node2D, 由Main._spawn_game_elements实例化) → 运行时动态挂载 Player/Enemy/Bullet/PickUp
+## 系统交互：
+##   - 信号：player.shot → 创建子弹；enemy.killed/drops_generated → 移除计数/生成拾取物；
+##           bullet.destroyed → 管理列表移除；DifficultyManager.wave_started → 敌潮批量刷怪
+##   - 组：从"player"组查找玩家；给敌人加"enemy"/"normal_enemy"/"elite_enemy"组
+##   - 单例：DifficultyManager(难度缩放/动态上限)、InputManager(E键拾取)、RandomManager(随机)、RunStats(统计)
+## 数据流：_process计时刷怪(屏幕四边外随机点) → 敌人AI移动/射击 → 子弹命中 → 死亡掉落 → PickUp吸附/手动拾取 → 玩家成长
+## 设计意图：实体管理中枢——持有全部实体列表(_enemies/_bullets/_pickups)负责生成、信号路由与清理；
+##           实体间不互相持有引用，靠组与信号松耦合通信
 extends Node2D
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========
@@ -13,6 +22,36 @@ const EnemyDataClass = preload("res://scripts/resources/enemy/EnemyData.gd")
 
 ## 掉落道具数据资源类，用于配置道具属性和效果
 const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
+
+## 主题包资源类（ThemeManager.theme_changed 信号的负载类型）
+const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
+
+## ========== 敌人数据池预加载（18种敌人，带权重） ==========
+## 键：敌人数据资源路径，值：生成权重（权重越大越常见）
+const ENEMY_POOL: Dictionary = {
+	"res://data/enemy/slime_data.tres":      15,  # 史莱姆 - 最常见
+	"res://data/enemy/goblin_data.tres":     14,  # 哥布林 - 常见
+	"res://data/enemy/bat_data.tres":        13,  # 蝙蝠 - 常见
+	"res://data/enemy/scout_data.tres":      10,  # 快速斥候
+	"res://data/enemy/skeleton_data.tres":   10,  # 骷髅
+	"res://data/enemy/spider_data.tres":      8,  # 毒蜘蛛
+	"res://data/enemy/archer_data.tres":      7,  # 骷髅弓手
+	"res://data/enemy/ghoul_data.tres":       6,  # 食尸鬼
+	"res://data/enemy/wraith_data.tres":      5,  # 幽灵
+	"res://data/enemy/firemage_data.tres":    4,  # 火焰法师
+	"res://data/enemy/bomber_data.tres":      4,  # 自爆僵尸
+	"res://data/enemy/thundermage_data.tres": 3,  # 闪电法师
+	"res://data/enemy/hunter_data.tres":      3,  # 虚空猎人
+	"res://data/enemy/sniper_data.tres":      2,  # 长弓狙击手
+	"res://data/enemy/rocketeer_data.tres":   2,  # 火箭兵
+	"res://data/enemy/knight_data.tres":      2,  # 黑暗骑士
+	"res://data/enemy/tank_data.tres":        1,  # 石头傀儡 - 最稀有
+}
+
+## ========== 运行时缓存的敌人数据 ==========
+var _enemy_pool_data: Array[EnemyDataClass] = []
+var _enemy_pool_weights: Array[float] = []
+var _enemy_pool_total_weight: float = 0.0
 
 ## ========== 导出变量（编辑器可配置） ==========
 
@@ -95,8 +134,74 @@ func _ready() -> void:
 	## 初始化精英怪数据（如果配置了精英怪但没有数据，创建默认精英怪数据）
 	_initialize_elite_enemy_data()
 	
+	## 初始化敌人池（加载所有敌人数据，为随机生成做准备）
+	_initialize_enemy_pool()
+	
 	## 查找玩家并连接信号
 	_find_player()
+
+	## ========== 主题系统接入（背景色随主题切换） ==========
+	## 启动时应用当前主题的世界背景色（无主题时保持场景默认深灰蓝）
+	if ThemeManager and ThemeManager.current_theme != null:
+		_apply_theme_background(ThemeManager.current_theme)
+	## 监听主题热切换：设置界面换主题时背景即时跟随（无需重开局）
+	if ThemeManager and not ThemeManager.theme_changed.is_connected(_on_theme_changed):
+		ThemeManager.theme_changed.connect(_on_theme_changed)
+
+	## 监听难度波次信号：敌潮事件触发时批量刷怪（趣味性/高压时刻）
+	## 数据流：DifficultyManager难度升级 → wave_started信号 → 此回调 → 波次刷怪
+	if DifficultyManager:
+		DifficultyManager.wave_started.connect(_on_wave_started)
+
+## ========== 主题背景应用 ==========
+
+## 应用主题的世界背景色（启动/主题切换时调用）
+## 数据流：GameTheme.bg_color → BgLayer/Background(ColorRect) → 全屏氛围随主题变化
+## 参数：theme - 主题包资源（含 bg_color 字段）
+func _apply_theme_background(theme: GameThemeClass) -> void:
+	## 主题或背景色节点缺失时静默跳过（保持默认色，绝不因主题系统崩溃）
+	if theme == null:
+		return
+	var bg_rect: ColorRect = get_node_or_null("BgLayer/Background")
+	if bg_rect != null:
+		## 同步背景色（引擎清屏色已由 ThemeManager 统一设置，双重保险不露灰底）
+		bg_rect.color = theme.bg_color
+
+## 主题切换回调（ThemeManager.theme_changed）：背景即时跟随新主题
+func _on_theme_changed(theme: GameThemeClass) -> void:
+	_apply_theme_background(theme)
+
+## ========== 敌人池初始化 ==========
+
+## 初始化敌人池：加载所有敌人的tres数据，缓存权重
+func _initialize_enemy_pool() -> void:
+	_enemy_pool_data.clear()
+	_enemy_pool_weights.clear()
+	_enemy_pool_total_weight = 0.0
+	
+	for path in ENEMY_POOL.keys():
+		var weight: float = float(ENEMY_POOL[path])
+		if weight <= 0:
+			continue
+		## 加载资源
+		var enemy_data: EnemyDataClass = load(path)
+		if enemy_data != null:
+			_enemy_pool_data.append(enemy_data)
+			_enemy_pool_total_weight += weight
+			_enemy_pool_weights.append(_enemy_pool_total_weight)
+
+## 从敌人池中按权重随机选择一种敌人数据
+## 算法：权重前缀和——_enemy_pool_weights[i]存前i+1项累积权重，r∈[0,总权重)落在哪段即选哪种
+##       （权重大的敌人占区间更宽，被选概率更高）；池容量小，O(n)线性扫描即可
+## 返回：随机选择的EnemyData；池子为空则返回null
+func _pick_random_enemy_data() -> EnemyDataClass:
+	if _enemy_pool_data.is_empty() or _enemy_pool_total_weight <= 0:
+		return null
+	var r: float = randf() * _enemy_pool_total_weight
+	for i in range(_enemy_pool_weights.size()):
+		if r <= _enemy_pool_weights[i]:
+			return _enemy_pool_data[i]
+	return _enemy_pool_data[_enemy_pool_data.size() - 1]
 
 ## ========== 玩家查找与信号连接 ==========
 
@@ -201,8 +306,11 @@ func _process(delta: float) -> void:
 ## 处理敌人生成逻辑
 ## 参数：delta - 帧间隔时间（秒）
 func _spawn_enemies(delta: float) -> void:
+	## 动态上限：同屏敌人上限随难度等级增长（DifficultyManager内部有硬上限保护）
+	var dynamic_max: int = DifficultyManager.get_max_enemies(max_enemies)
+
 	## 如果当前敌人数量已达上限，不生成新敌人
-	if _enemy_count >= max_enemies:
+	if _enemy_count >= dynamic_max:
 		return
 
 	## 递减敌人生成计时器
@@ -211,8 +319,8 @@ func _spawn_enemies(delta: float) -> void:
 	## 如果计时器归零，生成新敌人
 	if _spawn_timer <= 0.0:
 		_spawn_enemy()
-		## 重置生成计时器
-		_spawn_timer = enemy_spawn_interval
+		## 动态间隔：刷新间隔随难度等级压缩（越打越快，下限0.35秒）
+		_spawn_timer = DifficultyManager.get_spawn_interval(enemy_spawn_interval)
 
 ## 生成单个敌人
 ## 参数：is_elite - 是否为精英怪
@@ -242,12 +350,30 @@ func _spawn_enemy(is_elite: bool = false) -> void:
 
 	## 如果是精英怪且有精英怪数据配置，应用精英怪数据
 	if is_elite and elite_enemy_data != null:
-		enemy.enemy_data = elite_enemy_data
+		## 关键：deep duplicate私有副本后再难度缩放
+		## elite_enemy_data是共享资源，直接缩放会污染后续所有精英怪
+		var elite_copy: EnemyDataClass = elite_enemy_data.duplicate(true)
+		## 应用当前难度缩放（is_elite=true使用温和缩放，避免双重量叠秒杀玩家）
+		DifficultyManager.apply_to_enemy_data(elite_copy, true)
+		enemy.enemy_data = elite_copy
 		## 添加精英怪组标记
 		enemy.add_to_group("elite_enemy")
 	else:
+		## 普通敌人：从池中随机选择敌人数据（让敌人种类丰富）
+		var rand_data: EnemyDataClass = _pick_random_enemy_data()
+		if rand_data != null:
+			## 关键：deep duplicate私有副本后再难度缩放
+			## duplicate(true)递归复制子弹数据/掉落物等子资源，
+			## 缩放修改（血量/伤害/子弹/掉落价值）不会污染共享.tres
+			var data_copy: EnemyDataClass = rand_data.duplicate(true)
+			## 应用当前难度缩放（血量/伤害/移速/子弹/掉落价值）
+			DifficultyManager.apply_to_enemy_data(data_copy, false)
+			enemy.enemy_data = data_copy
 		## 添加普通敌人组标记
 		enemy.add_to_group("normal_enemy")
+	
+	## 通用敌人组（供特效、查找、阵营判定等使用）
+	enemy.add_to_group("enemy")
 
 	## 将敌人添加到场景树中
 	add_child(enemy)
@@ -274,7 +400,7 @@ func _spawn_elite_enemies(delta: float) -> void:
 	if elite_enemy_data == null:
 		return
 	
-	## 如果当前精英怪数量已达上限，不生成新精英怪
+	## 如果当前精英怪数量已达上限，不生成新精英怪（上限也随难度小幅放宽）
 	if _elite_enemy_count >= max_elite_enemies:
 		return
 
@@ -284,8 +410,8 @@ func _spawn_elite_enemies(delta: float) -> void:
 	## 如果计时器归零，生成新精英怪
 	if _elite_spawn_timer <= 0.0:
 		_spawn_enemy(true)
-		## 重置精英怪生成计时器
-		_elite_spawn_timer = elite_spawn_interval
+		## 动态间隔：精英怪刷新随难度等级压缩（下限6秒）
+		_elite_spawn_timer = DifficultyManager.get_elite_spawn_interval(elite_spawn_interval)
 
 ## ========== 道具拾取系统 ==========
 
@@ -319,6 +445,10 @@ func _on_player_shot(position: Vector2, direction: Vector2, bullet_data: BulletD
 	add_child(bullet)
 	## 设置子弹发射位置
 	bullet.global_position = position
+	## 重置物理插值：物理插值开启后，add_child后传送必须重置，
+	## 否则子弹会从原点(0,0)平滑滑向发射位置（视觉bug）
+	if bullet.has_method("reset_physics_interpolation"):
+		bullet.reset_physics_interpolation()
 
 	## 使用玩家传递的子弹数据，如果为空则使用默认子弹数据
 	var bullet_data_to_use: BulletDataClass = bullet_data
@@ -370,6 +500,25 @@ func _on_enemy_killed(enemy: CharacterBody2D, is_elite: bool = false) -> void:
 			_elite_enemy_count -= 1
 		else:
 			_enemy_count -= 1
+	
+	## 上报击杀统计（结算面板展示本局击杀数）
+	RunStats.add_kill()
+
+## 波次事件回调（响应DifficultyManager.wave_started）
+## 数据流：难度每到5的整数倍 → wave_started信号 → 此回调 → 瞬间涌入一批敌人
+## 设计意图：规律性的高压时刻——玩家可预期敌潮，提前走位/清场，制造爽点
+## 参数：_wave_number - 波次序号（第几波，预留：可用于波次递增强度），spawn_count - 本波刷怪数
+func _on_wave_started(_wave_number: int, spawn_count: int) -> void:
+	## 播放敌潮警报音效（全局播放，提示玩家敌潮来袭）
+	if AudioManager:
+		AudioManager.play("wave_start", 0.8)
+	## 批量生成敌人（受同屏上限保护，超出的数量自动跳过）
+	for i in range(spawn_count):
+		## 动态上限检查：已达上限时停止刷怪（防止瞬时数量爆炸）
+		if _enemy_count >= DifficultyManager.get_max_enemies(max_enemies):
+			break
+		## 生成普通敌人（波次不加精英，精英保持独立节奏）
+		_spawn_enemy()
 
 ## 敌人掉落道具时的回调（响应enemy.drops_generated信号）
 ## 参数：position - 掉落位置，drops - 掉落道具列表
@@ -392,6 +541,9 @@ func _spawn_pickup(position: Vector2, drop_item: Resource) -> void:
 		RandomManager.randf_range(-20, 20),
 		RandomManager.randf_range(-20, 20)
 	)
+	## 重置物理插值：避免拾取物从原点滑向掉落位置（物理插值开启后的传送必需）
+	if pickup.has_method("reset_physics_interpolation"):
+		pickup.reset_physics_interpolation()
 	
 	## 设置拾取物的道具数据
 	if pickup.has_method("set_drop_item"):

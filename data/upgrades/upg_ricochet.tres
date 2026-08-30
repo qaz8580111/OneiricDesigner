@@ -1,0 +1,13 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+[ext_resource type="Resource" path="res://data/bullet/effect/ricochet_effect.tres" id="2"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_ricochet"
+display_name = "回旋弹射"
+description = "子弹可弹射2次，飞向其他敌人（弹射伤害-20%）"
+rarity = 1
+max_stacks = 1
+bullet_effect = ExtResource("2")

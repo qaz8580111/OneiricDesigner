@@ -1,198 +1,168 @@
-# OneiricDesigner - 直播驱动型弹幕射击游戏
+# OneiricDesigner - 梦境设计师
 
-基于 Godot 4.6.3 开发的直播驱动型轻量弹幕射击游戏，支持实时弹幕互动。
+基于 **Godot 4.6.3** 的 2D 弹幕射击 Roguelike 游戏，以直播场景为设计导向：轻量白模快速迭代、视觉反馈强烈、核心循环完整（碎片 → 升级三选一 → 难度攀升 → 死亡结算）。
 
-## 项目特点
+## 核心玩法循环
 
-- **直播驱动**: 支持弹幕指令控制游戏内元素
-- **弹幕射击**: 类似吸血鬼幸存者的弹幕射击玩法
-- **快速迭代**: 轻量级代码，便于快速开发
+```
+移动躲避 ──射击──> 击杀敌人 ──掉落──> 梦境碎片(经验)
+    ▲                                    │
+    │                                    ▼
+ 难度攀升 ◄──每40秒/敌潮── 升级三选一(全屏暂停)
+    │                                    │
+    └──────── 死亡结算(RunStats统计) ◄───┘
+```
+
+- **升级三选一**：收集足够碎片后全屏暂停弹出面板，21 种词条（属性增幅 / 解锁子弹特效）
+- **难度攀升**：DifficultyManager 每 40 秒缩放敌人属性，每 5 级触发敌潮
+- **死亡结算**：黑屏淡出 → 结算面板展示本局统计 → 重开 / 回主菜单
 
 ## 项目结构
 
 ```
 OneiricDesigner/
-├── project.godot          # Godot 项目配置文件
-├── icon.svg               # 游戏图标
-├── scenes/                # 场景文件
-│   ├── core/              # 核心场景
-│   │   └── Main.tscn      # 主场景
-│   ├── gameplay/          # 游戏玩法场景
-│   │   ├── Player.tscn    # 玩家角色
-│   │   ├── Enemy.tscn     # 敌人
-│   │   ├── Bullet.tscn    # 子弹
-│   │   ├── PickUp.tscn    # 拾取物
-│   │   └── GameWorld.tscn # 游戏世界
-│   └── ui/                # UI 场景
-│       ├── MainMenu.tscn  # 主菜单
-│       ├── PauseMenu.tscn # 暂停菜单
-│       ├── Settings.tscn  # 设置菜单
-│       └── GameHUD.tscn   # 游戏 HUD
-├── scripts/               # GDScript 脚本
-│   ├── autoload/          # 全局单例
-│   │   ├── InputManager.gd       # 输入管理
-│   │   ├── GameManager.gd        # 游戏状态管理
-│   │   ├── RandomManager.gd      # 随机数管理
-│   │   ├── TranslationManager.gd # 多语言翻译
-│   │   └── MenuController.gd     # 菜单导航
-│   ├── components/        # 组件系统
-│   │   ├── PlayerHealthController.gd  # 玩家健康控制器
-│   │   ├── ShieldComponent.gd         # 护盾组件
-│   │   └── CoreHealthComponent.gd     # 核心血量组件
-│   ├── entities/          # 游戏实体
-│   │   ├── Main.gd       # 主场景逻辑
-│   │   ├── Player.gd     # 玩家控制器
-│   │   ├── Enemy.gd      # 敌人工智能
-│   │   ├── Bullet.gd     # 子弹逻辑
-│   │   ├── PickUp.gd     # 拾取物逻辑
-│   │   └── GameWorld.gd  # 游戏世界管理
-│   ├── resources/         # 资源数据类
-│   │   ├── bullet/       # 子弹资源
-│   │   │   ├── BulletData.gd    # 子弹数据配置
-│   │   │   ├── BulletForm.gd    # 子弹形态定义
-│   │   │   └── BulletEffect.gd  # 子弹特效定义
-│   │   ├── enemy/        # 敌人资源
-│   │   │   ├── EnemyData.gd     # 敌人数据配置
-│   │   │   └── DropItem.gd      # 掉落道具数据
-│   │   └── player/       # 玩家资源
-│   │       ├── ShieldData.gd    # 护盾数据配置
-│   │       └── CoreHealthData.gd # 核心血量数据配置
-│   └── ui/               # UI 脚本
-│       ├── MainMenu.gd   # 主菜单
-│       ├── PauseMenu.gd  # 暂停菜单
-│       ├── Settings.gd   # 设置菜单
-│       └── GameHUD.gd    # 游戏 HUD
-└── data/                 # 数据配置文件
-    ├── enemy/            # 敌人配置
-    │   └── elite_enemy_data.tres # 精英怪数据
-    ├── items/            # 道具配置
-    │   ├── drop_elite_fragment.tres # 精英碎片
-    │   ├── drop_elite_health.tres   # 精英回血
-    │   └── drop_elite_buff.tres     # 精英BUFF
-    ├── localization/     # 本地化配置
-    │   ├── zh_CN.po      # 中文翻译
-    │   └── en_US.po      # 英文翻译
-    └── player/           # 玩家配置
-        ├── default_shield_data.tres    # 默认护盾配置
-        └── default_core_health_data.tres # 默认核心血量配置
+├── project.godot              # 项目配置：分辨率1920x1280、物理插值、输入映射、autoload注册
+├── scenes/                    # 场景文件（均有 ; 注释说明节点结构）
+│   ├── core/Main.tscn         # 主场景：屏幕状态机(MENU/GAME/OVER) + UIStack + 死亡淡出
+│   ├── gameplay/
+│   │   ├── Player.tscn        # 玩家：CharacterBody2D + Hitbox + 相机跟随
+│   │   ├── Enemy.tscn         # 敌人：CharacterBody2D + 碰撞体 + 发光层
+│   │   ├── Bullet.tscn        # 子弹：Area2D，玩家/敌人子弹共用同一场景
+│   │   ├── PickUp.tscn        # 拾取物：主碰撞体 + MagnetArea 双层区域
+│   │   └── GameWorld.tscn     # 游戏世界：实体容器 + 刷怪计时 + 背景层
+│   └── ui/
+│       ├── MainMenu.tscn      # 主菜单
+│       ├── GameHUD.tscn       # HUD：血量碎片/经验条/等级/难度显示
+│       ├── PauseMenu.tscn     # 暂停菜单（ESC，升级选卡时被屏蔽）
+│       ├── Settings.tscn      # 设置：音量/画质/语言/难度
+│       └── (LevelUp/GameOver 面板由脚本动态创建)
+├── scripts/
+│   ├── autoload/              # 全局单例（注册顺序见下表）
+│   ├── entities/              # 游戏实体：Player/Enemy/Bullet/PickUp/GameWorld/Main/TrailGhost
+│   ├── components/            # 血量组件：PlayerHealthController/ShieldComponent/CoreHealthComponent
+│   ├── resources/             # 数据资源类（.tres 的脚本定义）
+│   │   ├── bullet/            # BulletData/BulletForm/BulletEffect + effects/ 16种特效
+│   │   ├── enemy/             # EnemyData/DropItem
+│   │   ├── player/            # CoreHealthData/ShieldData
+│   │   └── upgrade/           # UpgradeData
+│   └── ui/                    # UI 脚本：HUD/升级面板/结算面板/菜单/设置
+└── data/                      # 数据配置（.tres 驱动，改数据不改代码）
+    ├── bullet/                # 子弹配置（玩家默认/敌人各职业）+ form/外观 + effect/特效实例
+    ├── enemy/                 # 18 种敌人配置（哥布林/史莱姆/弓手/炮手/幽魂/石像等）
+    ├── items/                 # 掉落物配置（碎片/回血/BUFF，区分小怪与精英）
+    ├── upgrades/              # 21 个升级词条（UpgradeManager 启动时自动扫描）
+    ├── player/                # 玩家默认核心血量/护盾配置
+    └── localization/          # 多语言：zh_CN.po / en_US.po
 ```
+
+## 全局单例（autoload 注册顺序）
+
+| 单例 | 职责 |
+|------|------|
+| `InputManager` | 输入管理：捕获-消费模型、上下文栈（GAMEPLAY/MENU 允许表）、设备自动识别 |
+| `GameManager` | 游戏状态机：MENU/PLAYING/PAUSED/GAME_OVER，事件广播中枢 |
+| `RandomManager` | 单一种子源随机数：每局开始定种子，保证一局可复现（重播/调试） |
+| `TranslationManager` | 多语言：内置字典翻译、配置持久化（user://settings.cfg） |
+| `AudioManager` | 音效：全程序化合成 21 种音效（零音频文件），16 路 round-robin 语音池 |
+| `RunStats` | 本局统计：击杀数/存活时间/碎片/等级等（纯被动收集器） |
+| `UpgradeManager` | 升级系统：扫描 data/upgrades/ 入池、加权三选一、应用词条 |
+| `DifficultyManager` | 难度系统：每 40 秒缩放敌人属性，每 5 级触发敌潮 |
+
+> 约定：单例直接按名称访问（`AudioManager.play(...)`），不通过 `Engine.has_singleton()`。
 
 ## 核心系统
 
-### 1. 输入系统 (InputManager)
-统一处理键盘和手柄输入，支持上下文管理。
+### 子弹特效（策略模式，16 种）
 
-**功能特性**:
-- 键盘 WASD 移动
-- 手柄摇杆支持
-- 空格键射击
-- ESC 暂停
+`BulletEffect` 为基类，每种特效是独立的 Resource 子类，由 `Bullet` 的生命周期钩子按 `TriggerType` 触发（ON_SPAWN / ON_TRAVEL / ON_HIT / ON_DESTROY）：
 
-**公开 API**:
-- `get_movement()` - 获取移动向量
-- `is_action_just_pressed_safe(action)` - 安全检测动作按下
-- `push_context()` / `pop_context()` - 上下文切换
+| 已实装 | 说明 |
+|--------|------|
+| 分裂 Split | 子弹销毁时身后分裂 3 发扇形小子弹（80%速度/60%伤害） |
+| 吸血 LifeSteal | 命中吸血 30%，红血球飞向玩家，护盾优先回充 |
+| 冻结 Frozen / 减速 Slow | 冻结目标 / 50% 减速 1.5s |
+| 爆炸 Explosion | 命中范围伤害 + 扩散光环 |
+| 追踪 Homing | 每 0.12s 节流重定向最近目标 + 青色魔法拖尾 |
+| 加速 Accelerate | 飞行加速 + 橙红高温拖尾 |
+| 连锁闪电 ChainLightning | 就近传递多目标（同帧结算整条链） |
+| 中毒 Poison / 燃烧 Burning | 周期 DoT 协程结算 |
+| 穿透 Piercing / 弹射 Ricochet | 穿透计数 / 转向最近目标 |
+| 击退 Knockback / 诅咒 Curse / 破甲 ArmorBreak | 位移干扰 / 受伤加深 / 无视护盾直扣核心血 |
 
-### 2. 游戏状态 (GameManager)
-管理游戏生命周期和状态切换。
+### 数据驱动设计
 
-**游戏状态**:
-- `MENU` - 主菜单
-- `PLAYING` - 游戏进行中
-- `PAUSED` - 暂停状态
-- `GAME_OVER` - 游戏结束
+- **BulletData**：伤害/速度/穿透数 + `form`（BulletForm 外观）+ `effects[]`（特效列表），玩家子弹持私有深拷贝，升级只改副本不动共享 .tres
+- **EnemyData**：血量/速度/AI 三态参数（游荡→追击→攻击的切换距离）、掉落表、子弹配置；难度缩放作用于深拷贝副本
+- **UpgradeData**：词条类型（属性增幅 / 解锁特效 / BUFF），.tres 放入 data/upgrades/ 即自动入池，无需改代码
+- **DropItem**：掉落概率 + 拾取类型（梦境碎片/回血自动吸附；武器/道具/BUFF 按 E 手动拾取）
 
-**公开 API**:
-- `start_new_game()` - 开始新游戏
-- `pause_game()` / `resume_game()` - 暂停/恢复
-- `is_playing()` - 检查游戏状态
+### 碰撞层约定
 
-### 3. 随机数 (RandomManager)
-提供随机数生成，支持种子复现。
+| 层 | 用途 |
+|----|------|
+| 1 | 玩家本体 |
+| 2 | 敌人本体 |
+| 4 | 玩家子弹（mask=2 检测敌人） |
+| 8 | 敌人子弹 / 拾取物（mask=1 检测玩家） |
 
-**公开 API**:
-- `randi_range(from, to)` - 整数随机
-- `randf_range(from, to)` - 浮点随机
-- `rand_element(array)` - 随机选择
-- `chance(probability)` - 概率判断
+子弹通过 `owner_group`（player/enemy）双保险防友伤；实体间距离计算统一使用 `global_position`。
 
-### 4. 菜单导航 (MenuController)
-统一处理菜单的手柄/键盘导航。
+## 操作说明
 
-**功能特性**:
-- 自动焦点管理
-- 摇杆/方向键导航
-- A 键确认、B 键取消
-
-## 游戏玩法
-
-### 角色
-- **玩家**: 蓝色方块，使用 WASD/摇杆移动，空格射击
-
-### 敌人
-- **普通敌人**: 红色方块，会追踪玩家
-
-### 战斗循环
-1. 玩家移动躲避敌人
-2. 空格键发射子弹
-3. 子弹击中敌人造成伤害
-4. 敌人死亡掉落道具（梦境碎片、回血等）
-
-## 控制说明
-
-### 键盘
 | 按键 | 功能 |
 |------|------|
-| WASD | 移动 |
-| 空格 | 射击 |
-| ESC | 暂停 |
+| WASD / 方向键 / 左摇杆 | 移动 |
+| 鼠标左键 / 手柄 X | 射击 |
+| E / 空格 / Enter / 手柄 A | 交互（拾取非自动吸附道具） |
+| ESC / START | 暂停（升级三选一时屏蔽） |
 
-### 手柄
-| 按键 | 功能 |
-|------|------|
-| 左摇杆 | 移动 |
-| A | 射击 |
-| START | 暂停 |
-| B | 取消 |
+## 性能设计（平滑度保障）
+
+- **TrailGhost 对象池**：拖尾/死亡碎片等高频视觉元素复用节点（静态池，上限 96），零 Tween 分配
+- **16 路音频池**：round-robin 抢占式发声，杜绝每秒几十个 AudioStreamPlayer 的节点 churn
+- **静态纹理缓存**：敌人/拾取物占位纹理按配置缓存，逐像素生成仅执行一次
+- **节流与缓存**：追踪特效 0.12s 重定向、子弹边界检测缓存相机引用（0.5s 刷新）
+- **物理插值**：project.godot 开启 `physics_interpolation`，传送后调用 `reset_physics_interpolation()` 防视觉滑移
+
+## 注释规范
+
+本项目代码遵循详细注释约定（便于学习与交接）：
+
+| 文件类型 | 注释符 | 要求 |
+|----------|--------|------|
+| `.gd` | `#` / `##` | 文件头注明职责与数据流；函数注明用途/参数/设计意图；特殊技巧（对象池、call_deferred、节流等）必须解释原因 |
+| `.tscn` | `;` | 文件头说明场景用途与节点结构；重要节点上方注明角色（碰撞层用途、鼠标过滤等） |
+| `.tres` | `;` | 不使用 `#`（会导致颜色解析错误）；资源文件头使用 `[gd_resource type='Resource']` 标准格式 |
 
 ## 运行项目
 
-1. 使用 Godot 4.6.3 打开项目
-2. 点击 "Play" 按钮或按 F5
-3. 在主菜单点击 "开始游戏"
+1. 使用 **Godot 4.6.3** 打开项目根目录
+2. 按 **F5** 或点击 "Play" 运行（主场景：`scenes/core/Main.tscn`）
+3. 主菜单 → 开始游戏
 
 ## 开发计划
 
-### 第一阶段: 能玩的白模
-- [x] 角色控制器 (CharacterBody2D)
-- [x] 8 方向移动
-- [x] 敌人追踪 AI
-- [x] 子弹射击
-- [x] 碰撞检测
-- [x] 道具掉落与拾取系统
-- [x] 菜单导航
-- [x] 暂停功能
+### 第一阶段：能玩的白模 ✅
+- [x] 角色控制器 / 8 方向移动 / 敌人追踪 AI / 子弹射击 / 碰撞检测
+- [x] 道具掉落与拾取系统 / 菜单导航 / 暂停功能
 
-### 第二阶段: 弹幕系统
-- [ ] StreamManager 单例
-- [ ] 弹幕指令接口
-- [ ] 本地调试面板
-- [ ] 指令解析器
+### 第二阶段：Roguelike 核心循环 ✅
+- [x] 经验碎片 → 升级三选一（21 词条）→ 难度攀升 → 死亡结算
+- [x] 18 种敌人 / 精英怪机制 / 敌潮系统
 
-### 第三阶段: 视觉包装
-- [ ] 道具/词缀系统
-- [ ] 伤害数字
-- [ ] 屏幕震动
-- [ ] 音效系统
+### 第三阶段：视听包装 ✅
+- [x] 16 种子弹特效视觉 + 21 种程序合成音效
+- [x] 敌人形状/颜色区分、拖尾系统、死亡碎片、屏幕反馈
 
-### 第四阶段: 直播集成
-- [ ] B站/Twitch API
-- [ ] 防刷机制
-- [ ] OBS 推流测试
+### 第四阶段：弹幕互动（规划中）
+- [ ] StreamManager 单例 / 弹幕指令接口 / 指令解析器 / 本地调试面板
+
+### 第五阶段：直播集成（规划中）
+- [ ] B站/Twitch API 接入 / 防刷机制 / OBS 推流测试
 
 ## 技术栈
 
-- **引擎**: Godot 4.6.3
-- **语言**: GDScript 2.0
-- **架构**: 组件化设计
-- **输入**: InputManager 单例统一管理
+- **引擎**：Godot 4.6.3
+- **语言**：GDScript 2.0
+- **架构**：数据驱动（.tres 配置）+ 组件化（血量/护盾组件）+ 策略模式（子弹特效）+ 单例管理（8 个 autoload）
+- **默认分辨率**：1920x1280

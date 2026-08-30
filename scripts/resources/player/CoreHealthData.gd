@@ -2,6 +2,9 @@
 ## 职责：定义核心血量的所有配置数据，实现数据与逻辑分离
 ## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
 ## 使用场景：在编辑器中创建 .tres 文件配置核心血量属性，或通过词条系统动态修改
+## 被引用方：CoreHealthComponent（@export core_health_data，扣血/无敌帧/红血判断的实际执行者）、
+##           词条系统经apply_core_mod()调用apply_mod()动态修改配置
+## 数据流：.tres配置 → CoreHealthComponent初始化 → 词条修改时apply_mod()覆盖数值
 class_name CoreHealthData
 extends Resource
 
