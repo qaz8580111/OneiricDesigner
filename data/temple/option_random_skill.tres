@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="RandomSkillTempleOption" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/temple/RandomSkillTempleOption.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+option_id = "random_skill"
+display_name = "随机技能"
+description = "从全部词条池中完全随机抽取一条词条——可能抽到史诗神词条（血赚），也可能抽到已满层的普通词条（血亏）。勇气与运气，任选其一。"
+option_color = Color(0.9, 0.55, 0.25, 1)
+is_gamble = true

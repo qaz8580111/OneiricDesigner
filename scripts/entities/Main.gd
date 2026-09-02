@@ -45,6 +45,16 @@ var _is_death_fading: bool = false
 ## 死亡动画开始时间（毫秒）
 var _death_fade_start_time: int = 0
 
+## ---------- 死亡慢动作计时器（直播增强：死亡瞬间0.5s慢动作） ----------
+## 是否正在执行死亡慢动作
+var _is_death_slowmo: bool = false
+## 死亡慢动作开始的墙钟时间戳（毫秒，用 Time.get_ticks_msec() 不受 time_scale 影响）
+var _slowmo_start_msec: int = 0
+## 慢动作时的时间缩放（0.2 = 20%速度，兼顾画面清晰度和音效可闻）
+const DEATH_SLOWMO_SCALE: float = 0.2
+## 慢动作持续时间（秒，按真实时间计算而非 delta）
+const DEATH_SLOWMO_DURATION: float = 0.5
+
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
 ## UI栈容器，用于显示菜单、设置、HUD等UI界面
@@ -156,6 +166,11 @@ func _show_pause_menu() -> void:
 	_clear_ui()
 	## 设置当前屏幕状态为PAUSED
 	current_screen = Screen.PAUSED
+	## 立即暂停（同步，不等UI）——关键修复：
+	## 原实现 await 一帧后才暂停，该帧内"菜单已显示但游戏仍在运行"，
+	## 帧率波动时（大量敌人/直播推流）窗口拉长到肉眼可见；
+	## 菜单节点为 PROCESS_MODE_ALWAYS，先暂停完全不影响其构建与交互
+	GameManager.pause_game()
 	## 实例化暂停菜单场景
 	active_ui = PAUSE_MENU_SCENE.instantiate()
 	## 连接暂停菜单按钮信号
@@ -166,13 +181,8 @@ func _show_pause_menu() -> void:
 	## 设置暂停菜单为PROCESS_MODE_ALWAYS（暂停状态下仍可交互）
 	active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
 
-	## 将暂停菜单添加到UI栈
+	## 将暂停菜单添加到UI栈（暂停中 _ready 照常执行，导航器下帧激活）
 	ui_stack.add_child(active_ui)
-	## 等待一帧（确保UI已添加到场景树）
-	## 原因：下一帧再暂停，避免当帧UI信号连接/布局未完成即被暂停冻结
-	await get_tree().process_frame
-	## 调用GameManager暂停游戏
-	GameManager.pause_game()
 
 ## 显示游戏结束结算面板（死亡黑屏过渡完成后调用）
 ## 设计意图：roguelike的"再来一局"驱动力——结算面板量化展示本局成果
@@ -197,6 +207,12 @@ func _show_game_over_panel() -> void:
 
 ## 开始游戏
 func _start_game() -> void:
+	## ---------- 全局状态重置 ----------
+	## 确保死亡慢动作残留不会影响新一局
+	_is_death_slowmo = false
+	_slowmo_start_msec = 0
+	Engine.time_scale = 1.0
+
 	## 清除当前所有UI界面（保留HUD）
 	_clear_ui()
 	## 清除上一局残留的游戏元素（旧玩家/旧游戏世界/旧HUD）
@@ -347,14 +363,22 @@ func _on_game_started() -> void:
 	_spawn_game_elements()
 
 ## 游戏结束信号回调（响应GameManager.game_ended）
+## 直播增强：死亡瞬间先0.5秒慢动作让观众看清"怎么死的"，再进入黑屏渐隐
 func _on_game_ended() -> void:
 	## 设置当前屏幕状态为GAME_OVER
 	current_screen = Screen.GAME_OVER
 	## 播放游戏结束音效（全局播放，宣告死亡）
 	if AudioManager:
 		AudioManager.play("game_over", 0.9)
-	## 开始死亡黑屏过渡动画
-	_start_death_fade()
+
+	## ---------- 死亡慢动作启动 ----------
+	## 场景树已在 CoreHealthComponent.take_damage 中暂停（get_tree().paused = true），
+	## 但 Main.gd 是 PROCESS_MODE_ALWAYS，_process 仍在跑。
+	## 慢动作效果：Engine.time_scale = 0.1，画面以 10% 速度播放死亡瞬间
+	Engine.time_scale = DEATH_SLOWMO_SCALE
+	_is_death_slowmo = true
+	_slowmo_start_msec = Time.get_ticks_msec()
+	## 先不启动死亡渐隐，等慢动作结束后再启动
 
 ## 游戏暂停信号回调（响应GameManager.game_paused）
 func _on_game_paused() -> void:
@@ -440,7 +464,18 @@ func _update_death_fade() -> void:
 	death_overlay.color.a = alpha
 
 ## _process() - 每帧调用一次，用于处理全局输入和死亡动画
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	## ---------- 死亡慢动作计时（用墙钟时间，不受 time_scale 缩放影响） ----------
+	if _is_death_slowmo:
+		var elapsed: float = (Time.get_ticks_msec() - _slowmo_start_msec) / 1000.0
+		if elapsed >= DEATH_SLOWMO_DURATION:
+			## 慢动作结束：恢复正常时间缩放 → 启动死亡渐隐
+			_is_death_slowmo = false
+			Engine.time_scale = 1.0
+			_start_death_fade()
+		## 慢动作期间不执行死亡渐隐（等慢动作结束再开始）
+		return
+
 	## 处理死亡黑屏过渡动画
 	_update_death_fade()
 	

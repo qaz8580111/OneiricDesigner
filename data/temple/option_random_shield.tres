@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="RandomShieldTempleOption" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/temple/RandomShieldTempleOption.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+option_id = "random_shield"
+display_name = "随机护盾"
+description = "随机获得一件护盾并替换当前护盾——可能是毒雾/冰霜/反击等强力特效护盾（血赚），也可能是普通基础护盾（血亏）。当前护盾越强，风险越大。"
+option_color = Color(0.35, 0.65, 1.0, 1)
+is_gamble = true

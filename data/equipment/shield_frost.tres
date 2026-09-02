@@ -1,0 +1,25 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/equipment/ShieldEquipmentData.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/resources/equipment/FrostShieldEffect.gd" id="2"]
+
+[resource type="ShieldEquipmentData" script_class="ShieldEquipmentData"]
+script = ExtResource("1")
+shield_id = "shield_frost"
+display_name = "冰霜护盾"
+shield_color = Color(0.4, 0.7, 1.0, 0.8)
+max_hp = 25.0
+absorb_per_hit = 25.0
+regen_delay = 10.0
+regen_rate = 8.0
+is_special = true
+shield_effect = SubResource("ShieldEffect_1")
+visual_radius = 36.0
+visual_thickness = 3.0
+
+[sub_resource type="Resource" id="ShieldEffect_1"]
+script = ExtResource("2")
+duration = 3.0
+speed_multiplier = 0.4
+frost_color = Color(0.4, 0.7, 1.0, 0.8)
+effect_radius = 200.0

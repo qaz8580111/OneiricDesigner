@@ -27,7 +27,9 @@ RunStats="*res://scripts/autoload/RunStats.gd"
 UpgradeManager="*res://scripts/autoload/UpgradeManager.gd"
 DifficultyManager="*res://scripts/autoload/DifficultyManager.gd"
 ThemeManager="*res://scripts/autoload/ThemeManager.gd"
+ComboManager="*res://scripts/autoload/ComboManager.gd"
 StageDirector="*res://scripts/autoload/StageDirector.gd"
+LiveBridgeManager="*res://scripts/autoload/LiveBridgeManager.gd"
 
 [display]
 

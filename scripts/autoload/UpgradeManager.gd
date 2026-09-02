@@ -71,6 +71,12 @@ var _upgrade_pool: Array = []
 ## 三选一面板实例（选择期间存在，选择后销毁）
 var _panel: Control = null
 
+## 面板专用 CanvasLayer（隔离 Camera2D 的 canvas_transform，保证面板不受相机偏移影响）
+var _overlay_layer: CanvasLayer = null
+
+## 排队等待的升级次数（面板显示期间又触发升级时，排队等待当前面板关闭后再展示）
+var _pending_upgrades: int = 0
+
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 进入场景树时初始化
@@ -87,6 +93,7 @@ func _on_game_started() -> void:
 	exp_total = 0
 	next_level_cost = 10
 	is_choosing = false
+	_pending_upgrades = 0
 	player_stats = {
 		"damage_mult": 1.0,
 		"bullet_speed_mult": 1.0,
@@ -127,6 +134,15 @@ func _load_upgrade_pool() -> void:
 	dir.list_dir_end()
 	print("UpgradeManager: 已加载 %d 条升级词条" % _upgrade_pool.size())
 
+## 获取一条随机词条（神庙"随机技能"选项使用）
+## 与三选一不同：本方法不做可用性过滤（不检查满层/已拥有特效），
+## 完全随机——这正是神庙赌博性的来源（可能抽到已满层的"废"词条）
+## 返回：随机词条资源，词条池为空时返回null
+func get_random_upgrade() -> Resource:
+	if _upgrade_pool.is_empty():
+		return null
+	return _upgrade_pool[RandomManager.randi_range(0, _upgrade_pool.size() - 1)]
+
 ## ========== 经验与等级系统 ==========
 
 ## 添加经验（碎片）——由Player.add_dream_fragment转发调用
@@ -160,12 +176,13 @@ func get_exp_progress() -> float:
 ## ========== 三选一抽取与选择流程 ==========
 
 ## 打开三选一选择面板（升级触发入口）
-## 流程：暂停游戏 → 随机抽3个可用词条 → 显示面板 → 玩家选择 → 应用 → 恢复游戏
-## 健壮性设计：本方法可能从物理回调链路触发（碎片拾取→add_exp→此方法），
-## 直接修改场景树/暂停会触发"flushing queries"错误，因此实际操作延迟一帧执行
+## 流程：抽取3个可用词条 → 显示紧凑底栏面板（不暂停游戏）→ 玩家选择 → 应用 → 关闭
+## 队列设计：面板显示期间又触发升级（玩家边战斗边拾取碎片）时，排队等待，
+##           当前面板关闭后自动展示下一组选项，避免连续弹出多个面板
 func open_level_up_choice() -> void:
-	## 防止重复打开（连升时会多次触发）
+	## 正在选择中：排队等待，不重复打开
 	if is_choosing:
+		_pending_upgrades += 1
 		return
 	## 立即上锁（防止同帧多次触发），实际打开延迟到帧末
 	is_choosing = true
@@ -179,6 +196,7 @@ func _do_open_level_up_choice() -> void:
 	## 延迟期间游戏可能已结束（玩家死亡）：取消本次升级选择
 	if GameManager.current_state == GameManager.GameState.GAME_OVER:
 		is_choosing = false
+		_pending_upgrades = 0
 		return
 
 	## 从词条池抽取3个可用词条
@@ -186,15 +204,24 @@ func _do_open_level_up_choice() -> void:
 	## 池子耗尽时跳过选择（直接放行，不做任何暂停）
 	if choices.is_empty():
 		is_choosing = false
+		_process_pending()
 		return
 
-	## 暂停游戏（复用GameManager的暂停系统，世界停止但UI可交互）
-	GameManager.pause_game()
+	## 不暂停游戏：玩家可边战斗边选择，紧凑底栏面板不影响游戏画面
 
-	## 创建三选一面板（纯代码构建，挂到根节点保证在暂停时可见可交互）
+	## 创建专用 CanvasLayer 作为面板父节点
+	## CanvasLayer 有独立 transform，不受 Camera2D 影响 → 面板始终位于屏幕底部
+	_overlay_layer = CanvasLayer.new()
+	_overlay_layer.name = "LevelUpOverlay"
+	## CanvasLayer layer 越大越在上层显示
+	## 层级参考：默认 Main/HUD=0，StageDirector切面UI=10，Boss狂暴金边=100
+	## 升级/神庙面板是用户即时交互，必须最显眼 → 设 layer=50（在 HUD 和 StageDirector 之上）
+	_overlay_layer.layer = 50
+	get_tree().root.add_child(_overlay_layer)
+
+	## 创建三选一面板（挂到 CanvasLayer 下）
 	_panel = LEVEL_UP_PANEL_SCRIPT.new()
-	_panel.process_mode = Node.PROCESS_MODE_ALWAYS
-	get_tree().root.add_child(_panel)
+	_overlay_layer.add_child(_panel)
 	## 连接选择信号：玩家选定词条后应用并关闭
 	_panel.upgrade_chosen.connect(_on_upgrade_chosen)
 
@@ -254,19 +281,32 @@ func _roll_three_upgrades() -> Array:
 func _on_upgrade_chosen(upgrade: Resource) -> void:
 	## 应用词条
 	apply_upgrade(upgrade)
-	## 关闭面板并恢复游戏
+	## 关闭面板
 	_close_panel()
-	is_choosing = false
-	GameManager.resume_game()
-	## 恢复后检查：碎片可能已跨过下一级阈值（连升），再次触发选择
-	if exp_total >= next_level_cost:
-		add_exp(0)
+	## 处理排队中的升级或检查连升
+	_process_pending()
 
-## 关闭并销毁选择面板
+## 处理排队升级：有排队则展示下一组选项，无排队则解锁并检查碎片是否够再升
+func _process_pending() -> void:
+	if _pending_upgrades > 0:
+		## 还有排队的升级，展示下一组选项（is_choosing保持true）
+		_pending_upgrades -= 1
+		_do_open_level_up_choice.call_deferred()
+	else:
+		## 无排队，解锁选择状态
+		is_choosing = false
+		## 检查碎片可能已跨过下一级阈值（连升/战斗中又拾取了碎片），再次触发选择
+		if exp_total >= next_level_cost:
+			add_exp(0)
+
+## 关闭并销毁选择面板（连同 CanvasLayer 一起清理）
 func _close_panel() -> void:
 	if _panel != null and is_instance_valid(_panel):
 		_panel.queue_free()
 	_panel = null
+	if _overlay_layer != null and is_instance_valid(_overlay_layer):
+		_overlay_layer.queue_free()
+	_overlay_layer = null
 
 ## ========== 词条应用 ==========
 

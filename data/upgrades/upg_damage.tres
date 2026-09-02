@@ -6,9 +6,9 @@
 script = ExtResource("1")
 upgrade_id = "upg_damage"
 display_name = "梦境锋刃"
-description = "子弹伤害 +15%"
+description = "子弹伤害 +20%"
 rarity = 0
 max_stacks = 5
 stat_modifiers = {
-"damage_mult": 0.15
+"damage_mult": 0.2
 }

@@ -1,7 +1,26 @@
-[gd_resource type="Resource" load_steps=3 format=3]
+[gd_resource type="Resource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
 [ext_resource type="BulletData" path="res://data/bullet/enemy_archer_bullet.tres" id="2"]
+[ext_resource type="Script" path="res://scripts/resources/enemy/MonsterSkill.gd" id="3"]
+
+[sub_resource type="Resource" id="MonsterSkill_archer"]
+script = ExtResource("3")
+skill_id = "archer_rain"
+display_name = "Arrow Rain"
+skill_type = 0
+effect_color = Color(0.85, 0.85, 0.5, 1)
+projectile_count = 5
+spread_angle = 60.0
+projectile_speed = 300.0
+barrage_interval = 0.15
+aoe_radius = 80.0
+charge_speed = 400.0
+charge_duration = 0.4
+teleport_distance = 80.0
+homing_duration = 3.0
+piercing_speed = 600.0
+bomb_fuse = 1.0
 
 [resource type="EnemyData" script_class="EnemyData"]
 script = ExtResource("1")
@@ -11,11 +30,14 @@ speed = 80.0
 wander_speed = 40.0
 wander_interval = 2.0
 max_health = 5
-damage = 10
+damage = 6
 detection_range = 500.0
 attack_range = 380.0
-attack_cooldown = 1.5
+attack_cooldown = 2.0
 bullet_data = ExtResource("2")
+monster_skill = SubResource("MonsterSkill_archer")
+skill_cooldown = 9.0
+skill_damage = 4
 drop_items = []
 placeholder_color = Color(0.85, 0.85, 0.7, 1)
 placeholder_size = Vector2(28, 38)

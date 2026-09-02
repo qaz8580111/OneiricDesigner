@@ -1,7 +1,26 @@
-[gd_resource type="Resource" load_steps=3 format=3]
+[gd_resource type="Resource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
 [ext_resource type="BulletData" path="res://data/bullet/enemy_archer_bullet.tres" id="2"]
+[ext_resource type="Script" path="res://scripts/resources/enemy/MonsterSkill.gd" id="3"]
+
+[sub_resource type="Resource" id="MonsterSkill_sniper"]
+script = ExtResource("3")
+skill_id = "sniper_pierce"
+display_name = "Piercing Shot"
+skill_type = 7
+effect_color = Color(1.0, 0.9, 0.3, 1)
+projectile_count = 3
+spread_angle = 45.0
+projectile_speed = 250.0
+barrage_interval = 0.15
+aoe_radius = 80.0
+charge_speed = 400.0
+charge_duration = 0.4
+teleport_distance = 80.0
+homing_duration = 3.0
+piercing_speed = 700.0
+bomb_fuse = 1.0
 
 [resource type="EnemyData" script_class="EnemyData"]
 script = ExtResource("1")
@@ -11,11 +30,14 @@ speed = 45.0
 wander_speed = 25.0
 wander_interval = 4.0
 max_health = 4
-damage = 20
+damage = 12
 detection_range = 650.0
 attack_range = 600.0
 attack_cooldown = 2.8
 bullet_data = ExtResource("2")
+monster_skill = SubResource("MonsterSkill_sniper")
+skill_cooldown = 9.0
+skill_damage = 8
 drop_items = []
 placeholder_color = Color(0.4, 0.3, 0.2, 1)
 placeholder_size = Vector2(28, 40)

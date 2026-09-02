@@ -22,8 +22,9 @@ signal wave_started(wave_number: int, spawn_count: int)
 
 ## ========== 调参常量（难度曲线的核心配置，集中管理便于平衡调整） ==========
 
-## 每提升1级难度所需时间（秒）：40秒一级，10分钟可达16级
-const LEVEL_INTERVAL: float = 40.0
+## 每提升1级难度所需时间（秒）：70秒一级，让前期节奏更舒缓，玩家有充分时间成长
+## 旧值40s→70s：原节奏下10分钟到16级，现在约17分钟，循序渐进感更强
+const LEVEL_INTERVAL: float = 70.0
 
 ## 敌人血量成长系数：每级+18%（乘算叠加）
 const HEALTH_MULT_PER_LEVEL: float = 0.18
@@ -40,15 +41,15 @@ const SPEED_MULT_PER_LEVEL: float = 0.04
 ## 敌人移速成长上限：最高1.6倍
 const SPEED_MULT_MAX: float = 1.6
 
-## 刷怪间隔压缩系数：每级-7%（刷得越来越快）
-const SPAWN_ACCEL_PER_LEVEL: float = 0.07
-## 刷怪间隔下限（秒）：再快也不低于0.35秒一只（性能保护）
-const SPAWN_INTERVAL_MIN: float = 0.35
+## 刷怪间隔压缩系数：每级-5%（旧值-7%，放缓让前期刷怪不会太快变密集）
+const SPAWN_ACCEL_PER_LEVEL: float = 0.05
+## 刷怪间隔下限（秒）：再快也不低于0.4秒一只（性能保护）
+const SPAWN_INTERVAL_MIN: float = 0.4
 
-## 同屏敌人上限成长：每级+3只
-const MAX_ENEMIES_PER_LEVEL: int = 3
+## 同屏敌人上限成长：每级+2只（旧值+3，放缓前期同屏数量增长）
+const MAX_ENEMIES_PER_LEVEL: int = 2
 ## 同屏敌人硬上限：性能保护的绝对天花板
-const MAX_ENEMIES_HARD_CAP: int = 160
+const MAX_ENEMIES_HARD_CAP: int = 140
 
 ## 精英怪刷新间隔压缩系数：每级-5%（精英怪越出越频繁）
 const ELITE_ACCEL_PER_LEVEL: float = 0.05
@@ -301,3 +302,47 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 		for drop_item in enemy_data.drop_items:
 			if drop_item != null and "value" in drop_item:
 				drop_item.value = maxi(int(ceil(drop_item.value * drop_mult)), 1)
+
+## ========== 神庙掉落系统 ==========
+
+## 神庙基础掉率（0.1%，初始状态）
+const TEMPLE_BASE_CHANCE: float = 0.001
+## 神庙掉率上限（10%，游戏后期）
+const TEMPLE_CHANCE_CAP: float = 0.10
+## 品级因子：敌人每点血量增加的掉率（35血坦克→+2.1%）
+const TEMPLE_HEALTH_FACTOR: float = 0.0006
+## 品级因子上限（+2%，防止高血怪单独就把掉率推满）
+const TEMPLE_HEALTH_CAP: float = 0.02
+## 难度等级因子：每级难度+0.5%（16级→+7.5%）
+const TEMPLE_LEVEL_FACTOR: float = 0.005
+## 精英怪额外加成（+1.5%）
+const TEMPLE_ELITE_BONUS: float = 0.015
+## 小怪名单（击杀不掉神庙）：slime/bat/goblin/scout/spider
+## 扩展说明：新增敌人默认按"高级怪"处理（有神庙掉率），若属于小怪需加入此名单
+const TEMPLE_BASIC_MOB_IDS: Array[String] = ["slime", "bat", "goblin", "scout", "spider"]
+
+## 计算击杀指定敌人后神庙的出现概率
+## 公式：基础0.1% + 品级(血量)因子 + 难度等级因子 + 精英加成，夹在0.1%~10%之间
+## 参数：enemy_data - 被击杀敌人的数据资源
+## 返回：神庙出现概率（0.0~0.1），小怪返回0.0
+func get_temple_spawn_chance(enemy_data: Resource) -> float:
+	if enemy_data == null:
+		return 0.0
+	## 小怪不掉神庙（用户规则：只有高级怪物才有几率出现神庙）
+	if "enemy_id" in enemy_data and enemy_data.enemy_id in TEMPLE_BASIC_MOB_IDS:
+		return 0.0
+
+	## 品级因子：血量越高品级越高（夹在0~2%之间）
+	var health_factor: float = 0.0
+	if "max_health" in enemy_data:
+		health_factor = minf(float(enemy_data.max_health) * TEMPLE_HEALTH_FACTOR, TEMPLE_HEALTH_CAP)
+
+	## 难度等级因子：等级越高概率越高
+	var level_factor: float = float(maxi(level - 1, 0)) * TEMPLE_LEVEL_FACTOR
+
+	## 精英加成
+	var elite_bonus: float = TEMPLE_ELITE_BONUS if ("is_elite" in enemy_data and enemy_data.is_elite) else 0.0
+
+	## 总概率：夹在基础值与上限之间
+	return clampf(TEMPLE_BASE_CHANCE + health_factor + level_factor + elite_bonus, \
+		TEMPLE_BASE_CHANCE, TEMPLE_CHANCE_CAP)

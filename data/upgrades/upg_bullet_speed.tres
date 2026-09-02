@@ -6,9 +6,9 @@
 script = ExtResource("1")
 upgrade_id = "upg_bullet_speed"
 display_name = "疾风弹道"
-description = "子弹飞行速度 +15%"
+description = "子弹飞行速度 +20%"
 rarity = 0
 max_stacks = 5
 stat_modifiers = {
-"bullet_speed_mult": 0.15
+"bullet_speed_mult": 0.2
 }

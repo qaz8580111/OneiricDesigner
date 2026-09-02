@@ -6,7 +6,7 @@
 
 [resource type="BulletData" script_class="BulletData"]
 script = ExtResource("1")
-damage = 25
+damage = 8
 speed = 250.0
 form = ExtResource("2")
 effects = [ExtResource("3")]

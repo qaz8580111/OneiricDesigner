@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="StatBoostTempleOption" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/temple/StatBoostTempleOption.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+option_id = "damage_boost"
+display_name = "强化伤害"
+description = "子弹伤害永久提升5%。神庙的古老祝福，稳妥可靠。"
+option_color = Color(1.0, 0.42, 0.42, 1)
+is_gamble = false
+stat_modifiers = {
+"damage_mult": 0.05
+}

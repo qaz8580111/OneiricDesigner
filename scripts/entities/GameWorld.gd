@@ -26,6 +26,9 @@ const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
 ## 主题包资源类（ThemeManager.theme_changed 信号的负载类型）
 const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
 
+## 神庙场景预加载（高级怪死亡后概率生成）
+const TEMPLE_SCENE: PackedScene = preload("res://scenes/gameplay/Temple.tscn")
+
 ## ========== 敌人数据池预加载（18种敌人，带权重） ==========
 ## 键：敌人数据资源路径，值：生成权重（权重越大越常见）
 const ENEMY_POOL: Dictionary = {
@@ -110,6 +113,9 @@ var _bullets: Array[Area2D] = []
 ## 场景中所有拾取物的管理列表
 var _pickups: Array[Area2D] = []
 
+## 场景中所有神庙的管理列表（高级怪死亡概率生成，交互后消失）
+var _temples: Array[Area2D] = []
+
 ## ========== 精英怪成员变量 ==========
 
 ## 精英怪生成计时器，递减到0时生成新精英怪
@@ -152,6 +158,20 @@ func _ready() -> void:
 	## 数据流：DifficultyManager难度升级 → wave_started信号 → 此回调 → 波次刷怪
 	if DifficultyManager:
 		DifficultyManager.wave_started.connect(_on_wave_started)
+
+	## ========== 直播互动系统接入 ==========
+	## 连接 LiveBridgeManager 信号：直播事件（进房/弹幕/礼物）→ 生成敌人
+	## 数据流：B站WSS → 桥接进程(Node.js) → LiveBridgeManager(autoload) → 信号 → 此回调 → 刷怪
+	## 判空保护：LiveBridgeManager 可能未注册或被禁用，此时游戏照常运行（纯离线模式）
+	if LiveBridgeManager:
+		## 游客进入直播间 → 生成弱敌（默认史莱姆）
+		LiveBridgeManager.viewer_entered.connect(_on_live_viewer_entered)
+		## 收到弹幕 → 仅通知（默认不生成敌人，可扩展为弹幕显示/关键词触发）
+		LiveBridgeManager.danmu_received.connect(_on_live_danmu)
+		## 收到礼物 → 按礼物价值/名称生成对应强度的敌人
+		LiveBridgeManager.gift_received.connect(_on_live_gift)
+		## 清空上一局残留的事件队列（防止重开局时旧事件涌入）
+		LiveBridgeManager.clear_queue()
 
 ## ========== 主题背景应用 ==========
 
@@ -219,10 +239,10 @@ func _initialize_elite_enemy_data() -> void:
 	elite_enemy_data.wander_speed = 100.0
 	elite_enemy_data.wander_interval = 3.0
 	elite_enemy_data.max_health = 20
-	elite_enemy_data.damage = 25
+	elite_enemy_data.damage = 12
 	elite_enemy_data.detection_range = 500.0
 	elite_enemy_data.attack_range = 200.0
-	elite_enemy_data.attack_cooldown = 0.8
+	elite_enemy_data.attack_cooldown = 1.5
 	elite_enemy_data.placeholder_color = Color(1, 0.5, 0, 1)
 	elite_enemy_data.placeholder_size = Vector2(36, 36)
 	elite_enemy_data.is_elite = true
@@ -236,35 +256,35 @@ func _add_elite_drops() -> void:
 	if elite_enemy_data == null:
 		return
 	
-	## 创建大型梦境碎片掉落（80%概率掉落，手动拾取）
+	## 创建大型梦境碎片掉落（50%概率掉落，手动拾取）
 	var fragment_drop: DropItemClass = DropItemClass.new()
 	fragment_drop.item_id = "elite_fragment"
 	fragment_drop.item_name = "Large Dream Fragment"
 	fragment_drop.item_type = DropItemClass.ItemType.DREAM_FRAGMENT
 	fragment_drop.value = 20
-	fragment_drop.drop_chance = 0.8
+	fragment_drop.drop_chance = 0.5
 	fragment_drop.is_rare = false
 	fragment_drop.auto_adsorb = false
 	elite_enemy_data.drop_items.append(fragment_drop)
-	
-	## 创建大型回血道具掉落（60%概率掉落，手动拾取）
+
+	## 创建大型回血道具掉落（30%概率掉落，手动拾取）
 	var health_drop: DropItemClass = DropItemClass.new()
 	health_drop.item_id = "elite_health"
 	health_drop.item_name = "Large Health Pack"
 	health_drop.item_type = DropItemClass.ItemType.HEALTH
 	health_drop.value = 30
-	health_drop.drop_chance = 0.6
+	health_drop.drop_chance = 0.3
 	health_drop.is_rare = false
 	health_drop.auto_adsorb = false
 	elite_enemy_data.drop_items.append(health_drop)
-	
-	## 创建攻击增益道具掉落（30%概率掉落，稀有，手动拾取）
+
+	## 创建攻击增益道具掉落（15%概率掉落，稀有，手动拾取）
 	var buff_drop: DropItemClass = DropItemClass.new()
 	buff_drop.item_id = "elite_buff_attack"
 	buff_drop.item_name = "Power Boost"
 	buff_drop.item_type = DropItemClass.ItemType.BUFF
 	buff_drop.value = 5
-	buff_drop.drop_chance = 0.3
+	buff_drop.drop_chance = 0.15
 	buff_drop.is_rare = true
 	buff_drop.auto_adsorb = false
 	elite_enemy_data.drop_items.append(buff_drop)
@@ -323,8 +343,8 @@ func _spawn_enemies(delta: float) -> void:
 		_spawn_timer = DifficultyManager.get_spawn_interval(enemy_spawn_interval)
 
 ## 生成单个敌人
-## 参数：is_elite - 是否为精英怪
-func _spawn_enemy(is_elite: bool = false) -> void:
+## 参数：is_elite - 是否为精英怪, override_data - 外部指定的敌人数据（直播事件用，null=随机/精英池）
+func _spawn_enemy(is_elite: bool = false, override_data: EnemyDataClass = null) -> void:
 	## 实例化敌人节点
 	var enemy: CharacterBody2D = ENEMY_SCENE.instantiate()
 
@@ -348,8 +368,20 @@ func _spawn_enemy(is_elite: bool = false) -> void:
 			## 左边：X在屏幕左方，随机Y位置
 			enemy.position = Vector2(-margin, RandomManager.randf_range(0, screen_size.y))
 
+	## 直播事件/外部指定敌人数据优先：用 override_data 覆盖随机池
+	## 数据流：LiveBridgeManager 信号 → spawn_live_enemy(path) → _spawn_enemy(false, data) → 此分支
+	if override_data != null:
+		## 同样 deep duplicate + 难度缩放（保证直播敌人与当前难度同步，不会太弱或太强）
+		var live_copy: EnemyDataClass = override_data.duplicate(true)
+		DifficultyManager.apply_to_enemy_data(live_copy, is_elite)
+		enemy.enemy_data = live_copy
+		## 组标记：按 is_elite 分组，与业务敌人同标准
+		if is_elite:
+			enemy.add_to_group("elite_enemy")
+		else:
+			enemy.add_to_group("normal_enemy")
 	## 如果是精英怪且有精英怪数据配置，应用精英怪数据
-	if is_elite and elite_enemy_data != null:
+	elif is_elite and elite_enemy_data != null:
 		## 关键：deep duplicate私有副本后再难度缩放
 		## elite_enemy_data是共享资源，直接缩放会污染后续所有精英怪
 		var elite_copy: EnemyDataClass = elite_enemy_data.duplicate(true)
@@ -415,17 +447,26 @@ func _spawn_elite_enemies(delta: float) -> void:
 
 ## ========== 道具拾取系统 ==========
 
-## 处理手动拾取输入（玩家按E键拾取道具）
+## 处理手动拾取输入（玩家按E键：优先与神庙交互，其次拾取道具）
 func _handle_manual_pickup() -> void:
 	## 如果没有按下交互键，直接返回
 	if not InputManager.is_action_just_pressed_safe("game_interact"):
 		return
-	
+
 	## 如果玩家为空，直接返回
 	if player == null:
 		return
-	
-	## 遍历所有拾取物，查找玩家附近可手动拾取的道具
+
+	## 优先级1：检查神庙（玩家在范围内时优先与神庙交互）
+	for temple in _temples:
+		## 检查神庙是否有必要的方法
+		if temple.has_method("is_player_in_range") and temple.has_method("interact"):
+			## 如果玩家在神庙交互范围内，打开神庙选项面板
+			if temple.is_player_in_range():
+				temple.interact(player)
+				return
+
+	## 优先级2：遍历所有拾取物，查找玩家附近可手动拾取的道具
 	for pickup in _pickups:
 		## 检查拾取物是否有必要的方法
 		if pickup.has_method("is_player_in_range") and pickup.has_method("pickup"):
@@ -433,6 +474,39 @@ func _handle_manual_pickup() -> void:
 			if pickup.is_player_in_range():
 				pickup.pickup(player)
 				break
+
+## ========== 神庙系统 ==========
+
+## 生成神庙（高级怪死亡掷骰命中后由Enemy调用）
+## 参数：position - 神庙生成位置（敌人死亡位置）
+func spawn_temple(position: Vector2) -> void:
+	## 只在游戏中生效
+	if not GameManager.is_playing():
+		return
+
+	## 实例化神庙节点
+	var temple: Area2D = TEMPLE_SCENE.instantiate()
+	## 添加到场景树
+	add_child(temple)
+	## 设置神庙位置（敌人死亡位置，添加少量随机偏移避免重叠）
+	temple.global_position = position + Vector2(
+		RandomManager.randf_range(-15, 15),
+		RandomManager.randf_range(-15, 15)
+	)
+	## 重置物理插值（避免神庙从原点滑向生成位置）
+	if temple.has_method("reset_physics_interpolation"):
+		temple.reset_physics_interpolation()
+
+	## 加入管理列表
+	_temples.append(temple)
+	## 连接移除信号：神庙从场景树移除时自动清理列表
+	temple.tree_exiting.connect(_on_temple_tree_exiting.bind(temple))
+
+## 神庙被移除时的回调（响应temple.tree_exiting信号）
+## 参数：temple - 被移除的神庙实例
+func _on_temple_tree_exiting(temple: Area2D) -> void:
+	if temple in _temples:
+		_temples.erase(temple)
 
 ## ========== 子弹系统 ==========
 
@@ -503,6 +577,9 @@ func _on_enemy_killed(enemy: CharacterBody2D, is_elite: bool = false) -> void:
 	
 	## 上报击杀统计（结算面板展示本局击杀数）
 	RunStats.add_kill()
+	## 上报连击系统（里程碑触发大字+音效 + 精英/Boss击杀时停）
+	var is_big_kill: bool = is_elite or enemy.is_in_group("boss")
+	ComboManager.add_kill(enemy.global_position, is_big_kill)
 
 ## 波次事件回调（响应DifficultyManager.wave_started）
 ## 数据流：难度每到5的整数倍 → wave_started信号 → 此回调 → 瞬间涌入一批敌人
@@ -569,6 +646,53 @@ func _on_player_killed() -> void:
 	## 调用GameManager结束游戏（触发game_ended信号，通知Main.gd处理死亡流程）
 	GameManager.end_game()
 
+## ========== 直播互动系统：直播事件→生成敌人 ==========
+
+## 生成直播事件敌人（公开接口，供 LiveBridgeManager 信号链路调用）
+## 参数：enemy_data_path — EnemyData .tres 资源路径, count — 生成数量,
+##       is_elite — 是否精英, display_name — 来源标签（如"辣条怪"，预留日志/UI用）
+## 设计意图：复用 _spawn_enemy 的位置/分组/信号/计数逻辑，仅替换数据来源
+func spawn_live_enemy(enemy_data_path: String, count: int = 1, \
+		is_elite: bool = false, display_name: String = "") -> void:
+	## 加载敌人数据资源（路径无效时静默返回，不影响游戏）
+	var enemy_data: EnemyDataClass = load(enemy_data_path)
+	if enemy_data == null:
+		return
+	## 按数量循环生成（每次生成前检查同屏上限，防止直播热流刷爆屏幕）
+	for i in range(count):
+		if is_elite:
+			## 精英怪受独立的同屏上限保护
+			if _elite_enemy_count >= max_elite_enemies:
+				break
+		else:
+			## 普通敌人受动态上限保护（随难度等级增长）
+			if _enemy_count >= DifficultyManager.get_max_enemies(max_enemies):
+				break
+		## 复用核心刷怪链路：传入 override_data 走直播分支
+		_spawn_enemy(is_elite, enemy_data)
+
+## 游客进入直播间回调（响应 LiveBridgeManager.viewer_entered 信号）
+## 数据流：B站用户进房 → 桥接 → LiveBridgeManager → viewer_entered 信号 → 此回调
+## 参数：uname — 用户名, enemy_path — 敌人数据路径, count — 生成数量, is_elite — 是否精英
+func _on_live_viewer_entered(uname: String, enemy_path: String, \
+		count: int, is_elite: bool) -> void:
+	spawn_live_enemy(enemy_path, count, is_elite, "观众:%s" % uname)
+
+## 弹幕回调（响应 LiveBridgeManager.danmu_received 信号）
+## 当前为占位：仅记录日志，不生成敌人（弹幕量大，生成敌人会刷屏）
+## 可扩展：弹幕关键词触发特殊事件/弹幕显示在屏幕上方
+func _on_live_danmu(_uname: String, _text: String) -> void:
+	pass
+
+## 礼物回调（响应 LiveBridgeManager.gift_received 信号）
+## 数据流：B站用户送礼 → 桥接解析礼物名/价值 → LiveGiftBinding.resolve() 映射 →
+##         gift_received 信号 → 此回调 → 按映射生成对应强度敌人
+## 参数：uname — 送礼用户, gift_name — 礼物名, value — 礼物价值(元),
+##       enemy_path — 映射的敌人路径, count — 生成数量, is_elite — 是否精英, display_name — 标签
+func _on_live_gift(_uname: String, _gift_name: String, _value: float, \
+		enemy_path: String, count: int, is_elite: bool, display_name: String) -> void:
+	spawn_live_enemy(enemy_path, count, is_elite, display_name)
+
 ## ========== 清理方法 ==========
 
 ## 清理所有游戏对象（用于场景切换或游戏结束）
@@ -591,3 +715,9 @@ func clear_all() -> void:
 		if pickup.is_inside_tree():
 			pickup.queue_free()
 	_pickups.clear()
+
+	## 清理所有神庙
+	for temple in _temples:
+		if is_instance_valid(temple) and temple.is_inside_tree():
+			temple.queue_free()
+	_temples.clear()

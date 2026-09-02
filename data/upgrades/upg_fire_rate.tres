@@ -6,9 +6,9 @@
 script = ExtResource("1")
 upgrade_id = "upg_fire_rate"
 display_name = "急速扳机"
-description = "射击速度 +12%"
+description = "射击速度 +15%"
 rarity = 0
 max_stacks = 5
 stat_modifiers = {
-"fire_rate_mult": 0.12
+"fire_rate_mult": 0.15
 }

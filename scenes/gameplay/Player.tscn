@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 ; ==============================================================================
 ; Player.tscn - 玩家角色场景
@@ -33,6 +33,7 @@
 [ext_resource type="Script" path="res://scripts/components/ShieldComponent.gd" id="3_shield"]
 [ext_resource type="Script" path="res://scripts/components/CoreHealthComponent.gd" id="4_core"]
 [ext_resource type="BulletData" path="res://data/bullet/player_default_bullet.tres" id="5_bullet"]
+[ext_resource type="Script" path="res://scripts/components/EquipmentShieldComponent.gd" id="6_eq_shield"]
 
 ; 物理碰撞体形状 - 用于角色移动和碰撞检测（半径20像素）
 [sub_resource type="CircleShape2D" id="CircleShape2D_1"]
@@ -87,6 +88,13 @@ current = true
 smooth_enabled = true
 smooth_follow = true
 smooth_speed = 0.1
+
+; ------------------------------ 装备护盾组件 ------------------------------
+; EquipmentShieldComponent (Node2D) - 装备护盾组件
+; 独立于分段护盾(ShieldComponent)，额外吸收伤害+特效触发
+; 可见性：有装备护盾且耐久>0时通过_draw()绘制护盾环
+[node name="EquipmentShieldComponent" type="Node2D" parent="."]
+script = ExtResource("6_eq_shield")
 
 ; ------------------------------ 健康系统 ------------------------------
 ; HealthController (Node) - 健康系统容器

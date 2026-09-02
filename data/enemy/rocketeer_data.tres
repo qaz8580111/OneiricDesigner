@@ -1,7 +1,26 @@
-[gd_resource type="Resource" load_steps=3 format=3]
+[gd_resource type="Resource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
 [ext_resource type="BulletData" path="res://data/bullet/enemy_rocket_bullet.tres" id="2"]
+[ext_resource type="Script" path="res://scripts/resources/enemy/MonsterSkill.gd" id="3"]
+
+[sub_resource type="Resource" id="MonsterSkill_rocketeer"]
+script = ExtResource("3")
+skill_id = "rocketeer_barrage"
+display_name = "Rocket Barrage"
+skill_type = 5
+effect_color = Color(1.0, 0.3, 0.2, 1)
+projectile_count = 3
+spread_angle = 30.0
+projectile_speed = 280.0
+barrage_interval = 0.2
+aoe_radius = 80.0
+charge_speed = 400.0
+charge_duration = 0.4
+teleport_distance = 80.0
+homing_duration = 3.0
+piercing_speed = 600.0
+bomb_fuse = 1.0
 
 [resource type="EnemyData" script_class="EnemyData"]
 script = ExtResource("1")
@@ -11,11 +30,14 @@ speed = 70.0
 wander_speed = 40.0
 wander_interval = 2.5
 max_health = 8
-damage = 15
+damage = 8
 detection_range = 480.0
 attack_range = 400.0
-attack_cooldown = 2.5
+attack_cooldown = 3.5
 bullet_data = ExtResource("2")
+monster_skill = SubResource("MonsterSkill_rocketeer")
+skill_cooldown = 10.0
+skill_damage = 6
 drop_items = []
 placeholder_color = Color(0.9, 0.2, 0.2, 1)
 placeholder_size = Vector2(34, 40)

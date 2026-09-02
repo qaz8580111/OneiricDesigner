@@ -49,13 +49,29 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 @export var attack_range: float = 150.0
 
 ## 敌人攻击冷却时间（秒）
-@export var attack_cooldown: float = 1.0
+## 初始1.5秒，前期敌人攻击偏慢；后续可通过难度系统/DifficultyManager动态提速
+@export var attack_cooldown: float = 1.5
 
 ## ========== 敌人射击配置 ==========
 
 ## 敌人射击子弹配置（决定子弹伤害、速度、形态、特效等）
 ## 通过此配置可创建不同射击风格的敌人（快枪手、重炮手等）
 @export var bullet_data: BulletDataClass = null
+
+## ========== 怪物技能配置（高级怪物专属） ==========
+
+## 怪物技能资源（null=无技能，仅普通攻击；高级怪物配置对应MonsterSkill）
+## 技能类型、参数、伤害均在此资源配置，Enemy._perform_skill()负责执行
+## 扩展：新增技能类型只需在MonsterSkill.SkillType加枚举+Enemy._perform_skill加分支
+@export var monster_skill: Resource = null
+
+## 技能冷却时间（秒，独立于attack_cooldown，控制技能释放频率）
+## 越高级的怪物冷却越短，技能更频繁
+@export var skill_cooldown: float = 8.0
+
+## 技能伤害（独立于碰撞伤害damage，技能子弹/AOE使用此值）
+## 越高级的怪物技能伤害越高，与品级直接挂钩
+@export var skill_damage: int = 5
 
 ## ========== 敌人掉落配置 ==========
 
@@ -186,3 +202,8 @@ func apply_to_enemy(enemy_node: CharacterBody2D) -> void:
 		enemy_node.attack_range = attack_range
 	if "attack_cooldown" in enemy_node:
 		enemy_node.attack_cooldown = attack_cooldown
+	## 技能配置（高级怪物）
+	if "skill_cooldown" in enemy_node:
+		enemy_node.skill_cooldown = skill_cooldown
+	if "skill_damage" in enemy_node:
+		enemy_node.skill_damage = skill_damage

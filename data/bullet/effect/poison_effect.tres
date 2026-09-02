@@ -7,5 +7,5 @@ script = ExtResource("1")
 effect_id = "poison"
 trigger_type = 0
 duration = 3.0
-damage_per_second = 5
+damage_per_second = 3
 poison_color = Color(0.2, 0.8, 0.3, 0.7)

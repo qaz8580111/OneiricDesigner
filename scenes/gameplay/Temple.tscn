@@ -1,0 +1,20 @@
+[gd_scene load_steps=3 format=3 uid="uid://temple0000001"]
+
+[ext_resource type="Script" path="res://scripts/entities/Temple.gd" id="1_temple"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_temple"]
+radius = 56.0
+
+; ------------------------------ 远古神庙 ------------------------------
+; Temple (Area2D) - 高级怪死亡后概率生成的神庙世界物体
+; 交互：玩家靠近后按E打开选项面板（GameWorld统一路由E键）
+; 视觉：脚本内 _draw() 程序化绘制（石台/双柱/顶盖/发光宝石）
+; 消失：玩家完成一次选项交互后消散动画销毁
+[node name="Temple" type="Area2D"]
+monitoring = false
+monitorable = false
+script = ExtResource("1_temple")
+
+; CollisionShape2D - 交互范围判定形状（radius=56与脚本INTERACT_RANGE=64近似）
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_temple")

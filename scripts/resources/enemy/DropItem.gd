@@ -15,7 +15,8 @@ enum ItemType {
 	HEALTH,          ## 回血道具（自动吸附，恢复玩家核心血量）
 	WEAPON,          ## 武器（需要手动拾取，切换武器类型）
 	ITEM,            ## 普通物品（需要手动拾取，用于合成或任务）
-	BUFF             ## 增益效果（需要手动拾取，临时或永久提升属性）
+	BUFF,            ## 增益效果（需要手动拾取，临时或永久提升属性）
+	EQUIPMENT        ## 装备（需要手动拾取，护盾等装备类型）
 }
 
 ## ========== 道具基础属性 ==========
@@ -41,6 +42,10 @@ enum ItemType {
 ## 是否自动吸附（默认false，根据类型自动判断）
 @export var auto_adsorb: bool = false
 
+## 装备数据引用（ItemType.EQUIPMENT 时使用，指向 ShieldEquipmentData 等装备资源）
+## 扩展：未来新增武器/饰品等装备类型时，可增加对应的装备数据字段
+@export var shield_equipment: Resource = null
+
 ## ========== 核心方法 ==========
 
 ## 获取是否自动吸附（考虑类型默认值）
@@ -55,8 +60,8 @@ func get_auto_adsorb() -> bool:
 		ItemType.DREAM_FRAGMENT, ItemType.HEALTH:
 			## 碎片和回血：自动吸附
 			return true
-		ItemType.WEAPON, ItemType.ITEM, ItemType.BUFF:
-			## 武器、物品、BUFF：需要手动拾取
+		ItemType.WEAPON, ItemType.ITEM, ItemType.BUFF, ItemType.EQUIPMENT:
+			## 武器、物品、BUFF、装备：需要手动拾取
 			return false
 	return false
 
@@ -83,6 +88,11 @@ func apply(target: Node2D) -> bool:
 			## 添加增益效果（调用玩家的add_buff方法）
 			if target.has_method("add_buff"):
 				target.add_buff(item_id, value)
+				return true
+		ItemType.EQUIPMENT:
+			## 装备护盾（调用玩家的equip_shield方法，传入护盾数据）
+			if shield_equipment != null and target.has_method("equip_shield"):
+				target.equip_shield(shield_equipment)
 				return true
 	
 	## 未知类型或目标无对应方法，应用失败

@@ -41,6 +41,9 @@ const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
 ## 通用角色动画器组件（驱动呼吸/弹跳/攻击/受击动画）
 const CharacterAnimatorClass = preload("res://scripts/components/CharacterAnimator.gd")
 
+## 浮动伤害数字组件（每次命中弹出伤害数字，直播增强）
+const DamageNumberClass = preload("res://scripts/components/DamageNumber.gd")
+
 ## ========== 静态纹理缓存（性能优化） ==========
 ## 设计意图：占位纹理按形状逐像素生成（30x30=900次set_pixel）+纹理上传，
 ##           每次刷怪都重新生成会在波次刷怪时造成明显hitch；
@@ -79,6 +82,12 @@ static var _texture_cache: Dictionary = {}
 ## 敌人攻击冷却时间（秒）
 @export var attack_cooldown: float = 1.0
 
+## 技能冷却时间（秒，独立于攻击冷却，控制技能释放频率）
+@export var skill_cooldown: float = 8.0
+
+## 技能伤害（独立于碰撞伤害，技能子弹/AOE使用此值）
+@export var skill_damage: int = 5
+
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
 ## 敌人精灵节点，用于显示敌人外观
@@ -110,6 +119,26 @@ var _flash_active: bool = false
 
 ## 攻击冷却计时器，递减到0时可再次攻击
 var _attack_timer: float = 0.0
+
+## 技能冷却计时器，递减到0时可释放技能（独立于攻击冷却）
+var _skill_timer: float = 0.0
+
+## 技能释放中标记（冲锋/传送/自爆等技能执行期间为true，暂停普通AI）
+var _skill_active: bool = false
+
+## ========== 技能HUD（头顶技能名称+冷却进度条） ==========
+
+## 技能名称标签（显示在敌人头顶）
+var _skill_name_label: Label = null
+
+## 冷却进度条背景（深色底条）
+var _skill_bar_bg: ColorRect = null
+
+## 冷却进度条前景（随冷却递减从右向左缩短）
+var _skill_bar_fg: ColorRect = null
+
+## 技能HUD容器（控制整体显隐）
+var _skill_hud: Control = null
 
 ## 漫游方向切换计时器，递减到0时切换漫游方向
 var _wander_timer: float = 0.0
@@ -157,6 +186,8 @@ func _ready() -> void:
 	health = max_health
 	## 初始化攻击冷却计时器为0（立即可以攻击）
 	_attack_timer = 0.0
+	## 初始化技能冷却计时器为满值（避免敌人一出现就放技能，首回合需等完整冷却）
+	_skill_timer = skill_cooldown
 	## 初始化漫游计时器为0（立即开始漫游）
 	_wander_timer = 0.0
 	## 获取初始漫游方向
@@ -202,6 +233,85 @@ func _ready() -> void:
 	## 连接碰撞检测信号：当有物体进入hitbox区域时触发回调
 	if hitbox:
 		hitbox.body_entered.connect(_on_hitbox_body_entered)
+
+	## 构建技能HUD（头顶技能名称+冷却进度条，仅有技能的高级怪才创建）
+	_create_skill_hud()
+
+	## 开启_process驱动HUD更新
+	set_process(true)
+
+## ========== 技能HUD构建与更新 ==========
+
+## _create_skill_hud() - 在敌人头顶创建技能名称+冷却进度条
+## 只有配置了monster_skill的高级怪才创建HUD，小怪无技能则跳过
+func _create_skill_hud() -> void:
+	## 无技能配置：不创建HUD
+	if enemy_data == null or enemy_data.monster_skill == null:
+		return
+
+	var skill: Resource = enemy_data.monster_skill
+
+	## HUD容器：定位在敌人头顶上方
+	_skill_hud = Control.new()
+	_skill_hud.name = "SkillHUD"
+	add_child(_skill_hud)
+	## 定位到敌人头顶（sprite上方约-40px处）
+	_skill_hud.position = Vector2(-40, -50)
+	_skill_hud.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+
+	## 技能名称标签
+	_skill_name_label = Label.new()
+	_skill_name_label.text = skill.display_name
+	_skill_name_label.add_theme_color_override("font_color", skill.effect_color)
+	_skill_name_label.add_theme_font_size_override("font_size", 9)
+	_skill_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_skill_name_label.size = Vector2(80, 12)
+	_skill_name_label.position = Vector2(0, 0)
+	_skill_hud.add_child(_skill_name_label)
+
+	## 冷却进度条背景（深色底条）
+	_skill_bar_bg = ColorRect.new()
+	_skill_bar_bg.color = Color(0.1, 0.1, 0.15, 0.7)
+	_skill_bar_bg.size = Vector2(60, 3)
+	_skill_bar_bg.position = Vector2(10, 13)
+	_skill_hud.add_child(_skill_bar_bg)
+
+	## 冷却进度条前景（技能主题色，随冷却递减从右向左缩短）
+	_skill_bar_fg = ColorRect.new()
+	_skill_bar_fg.color = skill.effect_color
+	_skill_bar_fg.size = Vector2(60, 3)
+	_skill_bar_fg.position = Vector2(10, 13)
+	_skill_hud.add_child(_skill_bar_fg)
+
+## _process() - 每帧更新技能HUD（冷却进度条+距离显隐）
+func _process(_delta: float) -> void:
+	_update_skill_hud()
+
+## 更新技能HUD状态（冷却进度条宽度+距离显隐）
+func _update_skill_hud() -> void:
+	if _skill_hud == null or not is_instance_valid(_skill_hud):
+		return
+	## 玩家不存在或距离过远时隐藏HUD（避免屏幕外敌人HUD占资源）
+	if _player == null or not is_instance_valid(_player):
+		_skill_hud.visible = false
+		return
+	var dist: float = global_position.distance_to(_player.global_position)
+	## 超过600像素不显示HUD（超出视觉范围）
+	_skill_hud.visible = dist < 600.0
+
+	## 更新冷却进度条：进度=剩余冷却/总冷却（1=刚释放，0=冷却完成可再放）
+	if skill_cooldown > 0.0 and _skill_bar_fg != null:
+		var progress: float = clampf(_skill_timer / skill_cooldown, 0.0, 1.0)
+		## 进度条从满到空（冷却中=长条，可释放=空条）
+		_skill_bar_fg.size.x = 60.0 * progress
+
+		## 冷却完成时进度条闪烁提示（可释放状态）
+		if _skill_timer <= 0.0:
+			_skill_bar_fg.color = Color(1.0, 1.0, 0.3, 0.8 + 0.2 * sin(Time.get_ticks_msec() * 0.008))
+		else:
+			## 恢复正常颜色
+			if enemy_data != null and enemy_data.monster_skill != null:
+				_skill_bar_fg.color = enemy_data.monster_skill.effect_color
 
 ## ========== 辅助方法 ==========
 
@@ -361,7 +471,19 @@ func _physics_process(delta: float) -> void:
 	_attack_timer -= delta
 	## 递减漫游方向切换计时器
 	_wander_timer -= delta
-	
+	## 递减技能冷却计时器（独立于攻击冷却）
+	_skill_timer -= delta
+
+	## 技能释放中时跳过普通AI（冲锋/传送/自爆等技能需要独占控制权）
+	if _skill_active:
+		return
+
+	## 技能冷却完成且有技能配置 → 优先释放技能（在普通AI之前）
+	if _skill_timer <= 0.0 and enemy_data != null and enemy_data.monster_skill != null:
+		if _current_state != EnemyState.WANDER:
+			_perform_skill()
+			_skill_timer = skill_cooldown
+
 	## 根据与玩家的距离更新当前状态
 	_update_state()
 	
@@ -579,6 +701,395 @@ func _perform_attack() -> void:
 	## 发出攻击信号（用于播放攻击动画等）
 	attacked.emit(direction)
 
+## ========== 怪物技能系统 ==========
+
+## 释放技能（根据MonsterSkill.skill_type分发到对应实现）
+## 技能独立于普通攻击，有独立冷却计时器，在_physics_process中触发
+func _perform_skill() -> void:
+	if enemy_data == null or enemy_data.monster_skill == null:
+		return
+	if _player == null:
+		return
+
+	var skill: Resource = enemy_data.monster_skill
+	var dmg: int = skill_damage
+	var skill_color: Color = skill.effect_color
+
+	## 技能释放音效（每种技能专属音效，玩家可凭声音辨识威胁类型）
+	## 音效名与MonsterSkill.SkillType一一对应
+	var sfx_name: String = "enemy_shoot"
+	match skill.skill_type:
+		MonsterSkill.SkillType.SPREAD_SHOT:     sfx_name = "skill_spread"
+		MonsterSkill.SkillType.NOVA_BURST:      sfx_name = "skill_nova"
+		MonsterSkill.SkillType.CHARGE_RUSH:     sfx_name = "skill_charge"
+		MonsterSkill.SkillType.AOE_SLAM:        sfx_name = "skill_slam"
+		MonsterSkill.SkillType.HOMING_SHOT:     sfx_name = "skill_homing"
+		MonsterSkill.SkillType.BARRAGE:         sfx_name = "skill_barrage"
+		MonsterSkill.SkillType.TELEPORT_STRIKE: sfx_name = "skill_teleport"
+		MonsterSkill.SkillType.PIERCING_SHOT:   sfx_name = "skill_piercing"
+		MonsterSkill.SkillType.SUICIDE_BOMB:    sfx_name = "skill_bomb_fuse"
+	if AudioManager:
+		AudioManager.play_2d(sfx_name, global_position, 0.8)
+
+	## 按技能类型分发
+	match skill.skill_type:
+		MonsterSkill.SkillType.SPREAD_SHOT:
+			_skill_spread_shot(skill, dmg, skill_color)
+		MonsterSkill.SkillType.NOVA_BURST:
+			_skill_nova_burst(skill, dmg, skill_color)
+		MonsterSkill.SkillType.CHARGE_RUSH:
+			_skill_charge_rush(skill, dmg)
+		MonsterSkill.SkillType.AOE_SLAM:
+			_skill_aoe_slam(skill, dmg, skill_color)
+		MonsterSkill.SkillType.HOMING_SHOT:
+			_skill_homing_shot(skill, dmg, skill_color)
+		MonsterSkill.SkillType.BARRAGE:
+			_skill_barrage(skill, dmg, skill_color)
+		MonsterSkill.SkillType.TELEPORT_STRIKE:
+			_skill_teleport_strike(skill, dmg, skill_color)
+		MonsterSkill.SkillType.PIERCING_SHOT:
+			_skill_piercing_shot(skill, dmg, skill_color)
+		MonsterSkill.SkillType.SUICIDE_BOMB:
+			_skill_suicide_bomb(skill, dmg, skill_color)
+
+	## 动画反馈
+	if animator != null:
+		animator.play_attack()
+
+## ---------- 技能1：扇形散射 ----------
+## 发射多发子弹呈扇形分布（弓手/骷髅兵）
+func _skill_spread_shot(skill: Resource, dmg: int, color: Color) -> void:
+	var base_dir: Vector2 = (_player.global_position - global_position).normalized()
+	## 视觉特效：扇形枪口闪光（朝玩家方向的小型扩散光圈）
+	_create_cast_flash(base_dir, 30.0, color)
+	var count: int = skill.projectile_count
+	var spread: float = deg_to_rad(skill.spread_angle)
+	for i in range(count):
+		var angle_offset: float = 0.0
+		if count > 1:
+			angle_offset = spread * (float(i) / float(count - 1) - 0.5)
+		var dir: Vector2 = base_dir.rotated(angle_offset)
+		_spawn_skill_bullet(dir, dmg, skill.projectile_speed, color)
+
+## ---------- 技能2：环形弹幕 ----------
+## 360度均匀放射子弹（火法师）
+func _skill_nova_burst(skill: Resource, dmg: int, color: Color) -> void:
+	## 视觉特效：扩散光环（从敌人中心向外快速扩大的圆环，预警弹幕来临）
+	_create_nova_flash(40.0, color)
+	var count: int = skill.projectile_count
+	for i in range(count):
+		var angle: float = TAU * float(i) / float(count)
+		var dir: Vector2 = Vector2.RIGHT.rotated(angle)
+		_spawn_skill_bullet(dir, dmg, skill.projectile_speed, color)
+
+## ---------- 技能3：冲锋突进 ----------
+## 向玩家方向高速冲刺，冲刺期间碰撞伤害翻倍（骑士/食尸鬼）
+func _skill_charge_rush(skill: Resource, dmg: int) -> void:
+	if _player == null:
+		return
+	var dir: Vector2 = (_player.global_position - global_position).normalized()
+	_skill_active = true
+	## 冲锋期间碰撞伤害临时提升
+	var original_damage: int = damage
+	damage = dmg
+	## 视觉提示：缩放脉冲+冲锋残影
+	if sprite != null:
+		var tw: Tween = create_tween()
+		tw.tween_property(sprite, "scale", Vector2(1.3, 0.7), 0.1)
+		## 冲锋残影：沿途留下半透明分身
+		var trail_tween: Tween = create_tween()
+		for trail_i in range(3):
+			trail_tween.tween_callback(_spawn_charge_ghost.bind(dir, skill.charge_speed, trail_i))
+			trail_tween.tween_interval(skill.charge_duration / 4.0)
+	## 冲锋移动
+	var tween: Tween = create_tween()
+	tween.tween_property(self, "global_position", \
+		global_position + dir * skill.charge_speed * skill.charge_duration, \
+		skill.charge_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	## 冲锋结束恢复
+	tween.tween_callback(_end_charge_rush.bind(original_damage))
+
+## 冲锋结束恢复回调（由_tween_callback调用）
+func _end_charge_rush(original_damage: int) -> void:
+	damage = original_damage
+	_skill_active = false
+	if sprite != null:
+		sprite.scale = Vector2.ONE
+
+## ---------- 技能4：周身震击 ----------
+## 原地AOE伤害，范围内玩家受伤（坦克）
+func _skill_aoe_slam(skill: Resource, dmg: int, color: Color) -> void:
+	_skill_active = true
+	## 视觉特效：施法前摇预警（原地快速闪白+缩放放大，提示玩家即将震击）
+	if sprite != null:
+		var warn: Tween = create_tween()
+		warn.tween_property(sprite, "modulate", Color(1.5, 1.5, 1.5), 0.08)
+	## 视觉：震击波纹（快速放大+淡出的圆环）
+	var slam_visual: Node2D = _create_aoe_visual(skill.aoe_radius, color)
+	## 震屏效果（小型）
+	_do_screen_shake(4.0, 0.15)
+	## 延迟0.1秒后造成伤害（给玩家闪避窗口）
+	await get_tree().create_timer(0.1, false).timeout
+	## 检查玩家是否在范围内
+	if _player != null and is_instance_valid(_player):
+		var dist: float = global_position.distance_to(_player.global_position)
+		if dist <= skill.aoe_radius:
+			if _player.has_method("set_last_attacker"):
+				_player.set_last_attacker(self, {"is_bullet": false})
+			if _player.has_method("take_damage"):
+				_player.take_damage(dmg)
+	_skill_active = false
+
+## ---------- 技能5：追踪弹 ----------
+## 发射一颗追踪玩家的子弹（猎人）
+func _skill_homing_shot(skill: Resource, dmg: int, color: Color) -> void:
+	var dir: Vector2 = (_player.global_position - global_position).normalized()
+	## 视觉特效：施法闪光（预警追踪弹来临）
+	_create_cast_flash(dir, 25.0, color)
+	var bullet: Area2D = _spawn_skill_bullet(dir, dmg, skill.projectile_speed, color)
+	## 追踪逻辑：子弹存在期间持续转向玩家
+	if bullet != null:
+		var homing_time: float = skill.homing_duration
+		var turn_rate: float = 3.0  ## 追踪转向速率（弧度/秒）
+		bullet.set_meta("homing_target", _player)
+		bullet.set_meta("homing_turn_rate", turn_rate)
+		bullet.set_meta("homing_time", homing_time)
+		bullet.set_meta("homing_elapsed", 0.0)
+		## 追踪弹视觉标记：Bullet.gd读取此meta绘制发光光环
+		bullet.set_meta("is_homing_shot", true)
+		bullet.set_meta("homing_color", color)
+		## 追踪逻辑由Bullet.gd的_update_homing()读取meta驱动，无需额外连接信号
+
+## ---------- 技能6：连续弹幕 ----------
+## 间隔发射多颗子弹（火箭兵）
+func _skill_barrage(skill: Resource, dmg: int, color: Color) -> void:
+	var count: int = skill.projectile_count
+	var interval: float = skill.barrage_interval
+	for i in range(count):
+		await get_tree().create_timer(interval * i, false).timeout
+		if _player == null or not is_instance_valid(_player):
+			return
+		var dir: Vector2 = (_player.global_position - global_position).normalized()
+		## 视觉特效：每发枪口闪光
+		_create_cast_flash(dir, 20.0, color)
+		_spawn_skill_bullet(dir, dmg, skill.projectile_speed, color)
+
+## ---------- 技能7：传送突袭 ----------
+## 传送到玩家身后发射散弹（夜魇）
+func _skill_teleport_strike(skill: Resource, dmg: int, color: Color) -> void:
+	if _player == null:
+		return
+	_skill_active = true
+	## 传送前视觉提示（原位闪烁淡出+粒子爆裂）
+	if sprite != null:
+		sprite.modulate.a = 0.3
+	_create_cast_flash(Vector2.ZERO, 35.0, color)
+	await get_tree().create_timer(0.15, false).timeout
+	## 传送到玩家身后
+	var behind_dir: Vector2 = (_player.global_position - global_position).normalized()
+	global_position = _player.global_position + behind_dir * skill.teleport_distance
+	if sprite != null:
+		sprite.modulate.a = 1.0
+	## 传送后粒子爆裂（新位置）
+	_create_cast_flash(Vector2.ZERO, 35.0, color)
+	## 发射散弹
+	var base_dir: Vector2 = -behind_dir  ## 从玩家身前向玩家方向射
+	var count: int = skill.projectile_count
+	var spread: float = deg_to_rad(skill.spread_angle)
+	for i in range(count):
+		var angle_offset: float = 0.0
+		if count > 1:
+			angle_offset = spread * (float(i) / float(count - 1) - 0.5)
+		var dir: Vector2 = base_dir.rotated(angle_offset)
+		_spawn_skill_bullet(dir, dmg, skill.projectile_speed, color)
+	_skill_active = false
+
+## ---------- 技能8：穿透弹 ----------
+## 高速穿透子弹，不被销毁（狙击手）
+func _skill_piercing_shot(skill: Resource, dmg: int, color: Color) -> void:
+	var dir: Vector2 = (_player.global_position - global_position).normalized()
+	## 视觉特效：锐利枪口闪光（长条形，暗示穿透方向）
+	_create_cast_flash(dir, 35.0, color)
+	var bullet: Area2D = _spawn_skill_bullet(dir, dmg, skill.piercing_speed, color)
+	## 穿透弹设置keep_alive（命中后不销毁）
+	if bullet != null and "_keep_alive" in bullet:
+		bullet._keep_alive = true
+	## 穿透弹视觉标记：Bullet.gd读取此meta绘制拖尾
+	if bullet != null:
+		bullet.set_meta("is_piercing_shot", true)
+		bullet.set_meta("piercing_color", color)
+	## 3秒后自动销毁
+	if bullet != null:
+		get_tree().create_timer(3.0, false).timeout.connect(bullet.queue_free)
+
+## ---------- 技能9：自爆 ----------
+## 倒计时后原地爆炸（自爆怪）
+func _skill_suicide_bomb(skill: Resource, dmg: int, color: Color) -> void:
+	_skill_active = true
+	## 视觉提示：闪烁+放大（倒计时期间）
+	if sprite != null:
+		var tw: Tween = create_tween()
+		tw.set_loops(int(skill.bomb_fuse / 0.15))
+		tw.tween_property(sprite, "modulate", Color(1, 0.3, 0.3, 1), 0.075)
+		tw.tween_property(sprite, "modulate", Color.WHITE, 0.075)
+	## 倒计时
+	await get_tree().create_timer(skill.bomb_fuse, false).timeout
+	## 爆炸：AOE伤害
+	if _player != null and is_instance_valid(_player):
+		var dist: float = global_position.distance_to(_player.global_position)
+		if dist <= skill.aoe_radius:
+			if _player.has_method("set_last_attacker"):
+				_player.set_last_attacker(self, {"is_bullet": false})
+			if _player.has_method("take_damage"):
+				_player.take_damage(dmg)
+	## 爆炸视觉
+	_create_aoe_visual(skill.aoe_radius, color)
+	## 爆炸震屏（大型）
+	_do_screen_shake(10.0, 0.3)
+	## 爆炸音效（复用bomber_explode，区别于引信音）
+	if AudioManager:
+		AudioManager.play_2d("bomber_explode", global_position, 1.0)
+	## 自爆怪死亡
+	_skill_active = false
+	take_damage(max_health)  ## 直接秒杀自己
+
+## ---------- 技能通用：创建技能子弹 ----------
+## 复用现有BULLET_SCENE创建子弹，设置技能伤害/速度/颜色
+func _spawn_skill_bullet(direction: Vector2, dmg: int, speed: float, color: Color) -> Area2D:
+	if BULLET_SCENE == null:
+		return null
+	var bullet_data: BulletDataClass = BulletDataClass.new()
+	bullet_data.damage = dmg
+	bullet_data.speed = speed
+	var bullet: Area2D = BULLET_SCENE.instantiate()
+	bullet.set_bullet_data(bullet_data)
+	bullet.set_owner_group("enemy")
+	bullet.monitoring = false
+	bullet.collision_layer = 8
+	bullet.collision_mask = 1
+	bullet.set_direction(direction)
+	bullet.global_position = global_position + direction * 30.0
+	get_parent().add_child(bullet)
+	bullet.monitoring = true
+	## 技能子弹染色
+	var bullet_sprite: Sprite2D = bullet.get_node_or_null("Sprite2D")
+	if bullet_sprite:
+		bullet_sprite.modulate = color
+	return bullet
+
+## ---------- 技能通用：AOE视觉 ----------
+## 创建一个快速放大+淡出的圆环Node2D作为AOE视觉反馈
+func _create_aoe_visual(radius: float, color: Color) -> Node2D:
+	var visual: Node2D = Node2D.new()
+	visual.z_index = 10
+	visual.global_position = global_position
+	visual.modulate = color
+	get_parent().add_child(visual)
+	## 绘制AOE圆环（通过绑定方法，避免多行lambda语法问题）
+	visual.draw.connect(_draw_aoe_ring.bind(visual, radius, color))
+	## 动画：放大+淡出后销毁
+	var tw: Tween = create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(visual, "scale", Vector2(1.3, 1.3), 0.3)
+	tw.tween_property(visual, "modulate:a", 0.0, 0.3)
+	tw.chain().tween_callback(visual.queue_free)
+	visual.queue_redraw()
+	return visual
+
+## AOE圆环绘制回调（由draw信号触发）
+func _draw_aoe_ring(visual: Node2D, radius: float, color: Color) -> void:
+	visual.draw_circle(Vector2.ZERO, radius, Color(color.r, color.g, color.b, 0.15))
+	visual.draw_arc(Vector2.ZERO, radius, 0, TAU, 48, color, 2.0)
+
+## ---------- 技能通用：施法枪口闪光 ----------
+## 朝指定方向创建一个快速放大+淡出的小圆，模拟施法/射击枪口闪光
+## 参数：direction - 闪光方向（Vector2.ZERO=原地全方位），offset - 距离敌人中心的偏移，color - 闪光颜色
+func _create_cast_flash(direction: Vector2, offset: float, color: Color) -> void:
+	var flash: Node2D = Node2D.new()
+	flash.z_index = 10
+	## 计算闪光位置（方向偏移或原地）
+	if direction == Vector2.ZERO:
+		flash.global_position = global_position
+	else:
+		flash.global_position = global_position + direction * offset
+	get_parent().add_child(flash)
+	## 绘制实心圆+外环
+	flash.draw.connect(_draw_cast_flash.bind(flash, color))
+	## 动画：快速放大+淡出
+	var tw: Tween = create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(flash, "scale", Vector2(2.0, 2.0), 0.15)
+	tw.tween_property(flash, "modulate:a", 0.0, 0.15)
+	tw.chain().tween_callback(flash.queue_free)
+	flash.queue_redraw()
+
+## 枪口闪光绘制回调
+func _draw_cast_flash(flash: Node2D, color: Color) -> void:
+	flash.draw_circle(Vector2.ZERO, 8.0, Color(color.r, color.g, color.b, 0.6))
+	flash.draw_arc(Vector2.ZERO, 12.0, 0, TAU, 24, color, 1.5)
+
+## ---------- 技能通用：环形弹幕扩散光环 ----------
+## 从敌人中心向外快速扩大的圆环，预警环形弹幕来临
+## 参数：start_radius - 起始半径，color - 光环颜色
+func _create_nova_flash(start_radius: float, color: Color) -> void:
+	var ring: Node2D = Node2D.new()
+	ring.z_index = 10
+	ring.global_position = global_position
+	get_parent().add_child(ring)
+	ring.draw.connect(_draw_nova_ring.bind(ring, start_radius, color))
+	## 动画：快速扩大+淡出
+	var tw: Tween = create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(ring, "scale", Vector2(3.0, 3.0), 0.2)
+	tw.tween_property(ring, "modulate:a", 0.0, 0.2)
+	tw.chain().tween_callback(ring.queue_free)
+	ring.queue_redraw()
+
+## 环形弹幕光环绘制回调
+func _draw_nova_ring(ring: Node2D, start_radius: float, color: Color) -> void:
+	ring.draw_arc(Vector2.ZERO, start_radius, 0, TAU, 36, color, 3.0)
+	ring.draw_arc(Vector2.ZERO, start_radius * 0.7, 0, TAU, 36, Color(color.r, color.g, color.b, 0.4), 1.5)
+
+## ---------- 技能通用：冲锋残影 ----------
+## 在冲锋沿途留下半透明的敌人分身，模拟运动模糊
+## 参数：dir - 冲锋方向，charge_speed - 冲锋速度，index - 残影序号
+func _spawn_charge_ghost(dir: Vector2, charge_speed: float, index: int) -> void:
+	if sprite == null:
+		return
+	var ghost: Sprite2D = Sprite2D.new()
+	ghost.texture = sprite.texture
+	ghost.region_enabled = sprite.region_enabled
+	if sprite.region_enabled:
+		ghost.region_rect = sprite.region_rect
+	ghost.global_position = global_position - dir * charge_speed * 0.05 * float(index + 1)
+	ghost.scale = sprite.scale
+	ghost.modulate = Color(1.0, 1.0, 1.0, 0.35)
+	ghost.z_index = sprite.z_index - 1
+	get_parent().add_child(ghost)
+	## 残影快速淡出
+	var tw: Tween = create_tween()
+	tw.tween_property(ghost, "modulate:a", 0.0, 0.3)
+	tw.chain().tween_callback(ghost.queue_free)
+
+## ---------- 技能通用：震屏效果 ----------
+## 对玩家相机施加短暂偏移抖动，强化打击感
+## 参数：intensity - 抖动幅度（像素），duration - 持续时间（秒）
+func _do_screen_shake(intensity: float, duration: float) -> void:
+	var cam: Camera2D = get_viewport().get_camera_2d()
+	if cam == null:
+		return
+	var original_offset: Vector2 = cam.offset
+	var shake_tween: Tween = create_tween()
+	## 3次随机偏移抖动+回归
+	for i in range(3):
+		var shake_offset: Vector2 = Vector2(
+			RandomManager.randf_range(-intensity, intensity),
+			RandomManager.randf_range(-intensity, intensity)
+		)
+		shake_tween.tween_property(cam, "offset", original_offset + shake_offset, duration / 3.0)
+	## 回归原始偏移
+	shake_tween.tween_property(cam, "offset", original_offset, duration / 3.0)
+
 ## ========== 伤害与死亡系统 ==========
 
 ## 敌人受到伤害时调用（对外接口）
@@ -601,6 +1112,11 @@ func take_damage(amount: int) -> void:
 
 	## 播放受伤闪烁效果
 	_flash_hit()
+
+	## 弹出浮动伤害数字（直播增强：让观众看清打了多少伤害）
+	## 暴击判定：伤害量 > 敌人最大血量 25% 就算大伤害（红字+放大动画）
+	var is_big_hit: bool = amount > max(1, max_health) * 0.25
+	DamageNumberClass.pop(global_position + Vector2(0, -20), amount, is_big_hit)
 
 	## 如果血量归零，执行死亡逻辑
 	if health <= 0:
@@ -702,11 +1218,32 @@ func _die() -> void:
 	## 如果有掉落道具，发出信号通知GameWorld生成拾取物
 	if drop_items.size() > 0:
 		drops_generated.emit(global_position, drop_items)
-	
+
+	## ---------- 神庙掉落判定 ----------
+	## 高级怪物（非小怪）死亡时按概率生成神庙
+	## 概率公式在DifficultyManager中统一管理（基础0.1%→上限10%）
+	_try_spawn_temple()
+
 	## 发出死亡信号（用于统计、清理等）
 	killed.emit()
 	## 使用call_deferred延迟销毁，避免物理回调中修改场景树导致错误
 	call_deferred("queue_free")
+
+## 神庙掉落判定：掷骰命中则通知GameWorld在死亡位置生成神庙
+func _try_spawn_temple() -> void:
+	if enemy_data == null:
+		return
+	## 计算神庙出现概率（小怪返回0，高级怪按品级/难度/精英缩放）
+	var chance: float = DifficultyManager.get_temple_spawn_chance(enemy_data)
+	if chance <= 0.0:
+		return
+	## 掷骰
+	if RandomManager.randf() >= chance:
+		return
+	## 命中：通知GameWorld生成神庙（call_deferred避免物理回调中改场景树）
+	var world: Node2D = get_parent()
+	if world != null and world.has_method("spawn_temple"):
+		world.call_deferred("spawn_temple", global_position)
 
 ## 死亡视觉：缩放消失 + 彩色粒子碎片
 ## 性能设计：碎片改用TrailGhost对象池（复用节点+自驱动漂移动画），
@@ -747,14 +1284,15 @@ func _spawn_death_explosion_vfx(world: Node2D, pos: Vector2, col: Color) -> void
 		tw.chain().tween_callback(ring.queue_free)
 
 ## 根据敌人强度生成默认掉落（无配置数据时的回退机制）
+## 爆率设计：前期控制掉落数量，避免满屏物品影响体验；精英怪保证有奖励但不泛滥
 func _generate_default_drops() -> Array:
 	var drops: Array = []
 	## 根据最大血量判断强度，越高血量概率和品质越高
 	var is_elite: bool = (enemy_data != null and enemy_data.is_elite) or max_health >= 15
 	var is_strong: bool = max_health >= 8
-	
-	## 基础梦境碎片（小）：60%概率普通怪，100%概率精英怪
-	var chance_frag_small: float = 0.6 if not is_elite else 1.0
+
+	## 基础梦境碎片（小）：25%概率普通怪，80%概率精英怪
+	var chance_frag_small: float = 0.25 if not is_elite else 0.8
 	if randf() < chance_frag_small:
 		var d: DropItemClass = DropItemClass.new()
 		d.item_id = "fragment_small"
@@ -765,9 +1303,9 @@ func _generate_default_drops() -> Array:
 		d.is_rare = false
 		d.auto_adsorb = true
 		drops.append(d)
-	
-	## 中型碎片：30%概率（强怪），80%概率精英怪
-	var chance_frag_mid: float = 0.3 if not is_elite else 0.8
+
+	## 中型碎片：12%概率（强怪），50%概率精英怪
+	var chance_frag_mid: float = 0.12 if not is_elite else 0.5
 	if randf() < chance_frag_mid and (is_strong or is_elite):
 		var d: DropItemClass = DropItemClass.new()
 		d.item_id = "fragment_medium"
@@ -778,9 +1316,9 @@ func _generate_default_drops() -> Array:
 		d.is_rare = is_elite
 		d.auto_adsorb = true
 		drops.append(d)
-	
-	## 小血包：15%概率普通怪，40%概率精英怪
-	var chance_health: float = 0.15 if not is_elite else 0.4
+
+	## 小血包：5%概率普通怪，25%概率精英怪
+	var chance_health: float = 0.05 if not is_elite else 0.25
 	if randf() < chance_health:
 		var d: DropItemClass = DropItemClass.new()
 		d.item_id = "health_small"
@@ -791,9 +1329,9 @@ func _generate_default_drops() -> Array:
 		d.is_rare = false
 		d.auto_adsorb = true
 		drops.append(d)
-	
-	## BUFF：20%概率精英怪（伤害加成）
-	if is_elite and randf() < 0.2:
+
+	## BUFF：10%概率精英怪（伤害加成）
+	if is_elite and randf() < 0.1:
 		var d: DropItemClass = DropItemClass.new()
 		d.item_id = "buff_attack"
 		d.item_name = "Power Boost"
@@ -803,7 +1341,57 @@ func _generate_default_drops() -> Array:
 		d.is_rare = true
 		d.auto_adsorb = false
 		drops.append(d)
-	
+
+	## ---------- 装备护盾掉落 ----------
+	## 普通护盾：5%概率所有怪，精英怪 15%
+	var chance_normal_shield: float = 0.05 if not is_elite else 0.15
+	if randf() < chance_normal_shield:
+		var sd: DropItemClass = DropItemClass.new()
+		sd.item_id = "shield_basic"
+		sd.item_name = "基础护盾"
+		sd.item_type = DropItemClass.ItemType.EQUIPMENT
+		sd.value = 0
+		sd.drop_chance = 1.0
+		sd.is_rare = false
+		sd.auto_adsorb = false
+		## 动态创建基础护盾数据（无特效）
+		var ShieldDataClass = load("res://scripts/resources/equipment/ShieldEquipmentData.gd")
+		var shield_data = ShieldDataClass.new()
+		shield_data.shield_id = "shield_basic"
+		shield_data.display_name = "基础护盾"
+		shield_data.shield_color = Color(0.3, 0.6, 1.0, 0.8)
+		shield_data.max_hp = 30.0
+		shield_data.absorb_per_hit = 30.0
+		shield_data.regen_delay = 10.0
+		shield_data.regen_rate = 10.0
+		shield_data.is_special = false
+		shield_data.shield_effect = null
+		sd.shield_equipment = shield_data
+		drops.append(sd)
+
+	## 特效护盾：0.5%概率所有怪，精英怪 3%
+	var chance_special_shield: float = 0.005 if not is_elite else 0.03
+	if randf() < chance_special_shield:
+		## 随机选择一种特效护盾
+		var special_types: Array = ["shield_poison", "shield_frost", "shield_reflect"]
+		var chosen: String = special_types[randi() % special_types.size()]
+		var sd2: DropItemClass = DropItemClass.new()
+		sd2.item_id = chosen
+		sd2.item_name = "特效护盾"
+		sd2.item_type = DropItemClass.ItemType.EQUIPMENT
+		sd2.value = 0
+		sd2.drop_chance = 1.0
+		sd2.is_rare = true
+		sd2.auto_adsorb = false
+		## 从 .tres 资源加载特效护盾数据
+		var path_map: Dictionary = {
+			"shield_poison": "res://data/equipment/shield_poison.tres",
+			"shield_frost": "res://data/equipment/shield_frost.tres",
+			"shield_reflect": "res://data/equipment/shield_reflect.tres",
+		}
+		sd2.shield_equipment = load(path_map[chosen])
+		drops.append(sd2)
+
 	return drops
 
 ## ========== 碰撞检测 ==========
@@ -811,6 +1399,9 @@ func _generate_default_drops() -> Array:
 ## 玩家碰撞处理（当敌人碰撞玩家时调用）
 ## 参数：player - 玩家节点
 func on_player_collision(player: Node2D) -> void:
+	## 通知玩家攻击者信息（装备护盾特效需要知道是谁在攻击）
+	if player.has_method("set_last_attacker"):
+		player.set_last_attacker(self, {"is_bullet": false})
 	## 如果玩家有take_damage方法，调用它造成伤害
 	if player.has_method("take_damage"):
 		player.take_damage(damage)

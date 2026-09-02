@@ -99,6 +99,11 @@ func _input(event: InputEvent) -> void:
 	var is_echo: bool = 'echo' in event and event.echo
 	
 	if is_pressed and not is_echo:
+		## 输入屏蔽期不捕获：冷却期内的按键属于"切界面瞬间"的残留操作，
+		## 直接丢弃而非缓存——否则会滞留到冷却结束后被消费，造成迟到的误触发
+		## （如：继续游戏后0.2s内按的ESC在半秒后突然生效，菜单凭空弹出）
+		if _input_cooldown_timer > 0.0:
+			return
 		# 检查键盘/手柄游戏动作
 		var game_actions: Array[String] = [
 			"game_move_up", "game_move_down", "game_move_left", "game_move_right",
@@ -194,6 +199,9 @@ func vibrate(type: VibrationType) -> void:
 ## 注册输入上下文（用于模式切换）
 func push_context(context_name: String) -> void:
 	_context_stack.append(context_name)
+	## 丢弃旧上下文中已捕获未消费的按键：切换瞬间残留的按下事件
+	## 在新界面里触发属于误操作（如游戏内按过的ESC残留到暂停菜单里）
+	_just_pressed_actions.clear()
 	# 触发输入屏蔽期
 	_input_cooldown_timer = INPUT_COOLDOWN
 
@@ -203,6 +211,8 @@ func pop_context() -> void:
 	## 栈底GAMEPLAY永不弹出（size>1才pop），保证任何时刻都有合法上下文
 	if _context_stack.size() > 1:
 		_context_stack.pop_back()
+		## 同push_context：清空残留按键，防止旧界面的按下事件泄漏到新界面
+		_just_pressed_actions.clear()
 		# 触发输入屏蔽期
 		_input_cooldown_timer = INPUT_COOLDOWN
 
@@ -210,6 +220,8 @@ func pop_context() -> void:
 ## 强制重置上下文栈（用于跨场景切换时清理残留上下文）
 func reset_context(context_name: String) -> void:
 	_context_stack = [context_name]
+	## 同push_context：清空残留按键
+	_just_pressed_actions.clear()
 	_input_cooldown_timer = INPUT_COOLDOWN
 
 

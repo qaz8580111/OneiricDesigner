@@ -46,6 +46,17 @@ var _fps_timer: float = 0.0
 var _fps_frame_count: int = 0
 const FPS_REFRESH_INTERVAL: float = 0.25  # 每秒4次刷新：流畅 + 低CPU
 
+## ---------- 底部常驻状态栏（直播增强：观众可读性） ----------
+## 存活时间标签（底部居中左）
+var _time_label: Label = null
+## 击杀数标签（底部居中中）
+var _kills_label: Label = null
+## 最高连击标签（底部居中右）
+var _max_combo_label: Label = null
+## 状态栏刷新节流计时器（0.5秒刷新一次，避免每帧读单例）
+var _stat_refresh_timer: float = 0.0
+const STAT_REFRESH_INTERVAL: float = 0.5
+
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
@@ -72,6 +83,20 @@ func _ready() -> void:
 
 	## 最后：根据 Settings 保存的 show_fps 初始化 FPS 标签
 	_init_fps_display()
+
+	## ========== 连击HUD挂载 ==========
+	## ComboHUD 作为子节点挂到 GameHUD 下，自动跟随 GameHUD 生命周期
+	var ComboHUDClass = preload("res://scripts/ui/ComboHUD.gd")
+	var combo_hud: Control = Control.new()
+	combo_hud.name = "ComboHUD"
+	combo_hud.set_script(ComboHUDClass)
+	combo_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(combo_hud)
+
+	## ========== 底部常驻状态栏（直播增强：观众可读性） ==========
+	## 设计意图：非操作观众抬头就能看到"活了多久/杀了多少/最高连击"，
+	## 创造"这个主播很猛"的印象；位置在屏幕底部居中，不遮挡游戏视野
+	_build_bottom_status_bar()
 
 ## ========== FPS 计数器：读取设置 + 动态创建/刷新标签 ==========
 
@@ -102,9 +127,17 @@ func _init_fps_display() -> void:
 		## 设置 process_mode 启用 _process 帧计数（HUD 根节点默认已是 INHERIT，这里仅记录）
 		set_process(true)
 
-## _process：FPS 计数 + 周期性刷新标签文本
-## 只在 _show_fps=true 时跑计数逻辑（零性能浪费在关闭状态）
+## _process：FPS 计数 + 周期性刷新底部状态栏
+## FPS 只在 _show_fps=true 时跑计数逻辑；状态栏始终刷新（节流0.5秒）
 func _process(delta: float) -> void:
+	## ---------- 底部状态栏刷新（节流0.5秒） ----------
+	if GameManager.is_playing():
+		_stat_refresh_timer += delta
+		if _stat_refresh_timer >= STAT_REFRESH_INTERVAL:
+			_stat_refresh_timer = 0.0
+			_refresh_bottom_status()
+
+	## ---------- FPS 计数 ----------
 	if not _show_fps or _fps_label == null:
 		return
 
@@ -293,3 +326,65 @@ func _on_difficulty_changed(new_level: int) -> void:
 func _on_player_killed() -> void:
 	## 隐藏 HUD（游戏结束时不再显示）
 	visible = false
+
+## ========== 底部常驻状态栏（直播增强：观众可读性） ==========
+
+## 构建底部常驻状态栏（屏幕底部居中：存活时间 | 击杀数 | 最高连击）
+## 设计意图：非操作观众抬头就能看到本局核心数据，制造"主播很猛"的印象
+## 位置：屏幕底部居中，距底边 24px，三栏等宽
+func _build_bottom_status_bar() -> void:
+	## 状态栏配置：[标签前缀, 颜色]
+	var configs: Array = [
+		["⏱", Color(0.75, 0.9, 1.0)],      ## 存活时间：淡蓝色
+		["💀", Color(1.0, 0.5, 0.4)],       ## 击杀数：淡红色
+		["🔥", Color(1.0, 0.85, 0.3)],      ## 最高连击：金色
+	]
+	var labels: Array = []
+
+	## 三栏等宽，每栏 120px，总宽 360px，居中
+	var bar_width: float = 360.0
+	var bar_height: float = 28.0
+	var column_width: float = bar_width / 3.0
+
+	for i in range(3):
+		var label: Label = Label.new()
+		label.name = "BottomStat_%d" % i
+		label.text = "%s --" % configs[i][0]
+		label.add_theme_color_override("font_color", configs[i][1])
+		label.add_theme_font_size_override("font_size", 14)
+		label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+		label.add_theme_constant_override("outline_size", 4)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		## 位置：底部居中，三栏水平排列
+		var center_x: float = get_viewport_rect().size.x * 0.5
+		var col_x: float = center_x - bar_width * 0.5 + column_width * float(i)
+		label.position = Vector2(col_x, get_viewport_rect().size.y - bar_height - 24.0)
+		label.size = Vector2(column_width, bar_height)
+		add_child(label)
+		labels.append(label)
+
+	_time_label = labels[0]
+	_kills_label = labels[1]
+	_max_combo_label = labels[2]
+
+## 刷新底部状态栏文字（节流0.5秒调用一次，避免每帧读单例）
+func _refresh_bottom_status() -> void:
+	## 存活时间：从 RunStats 读取，格式 "MM:SS"
+	if _time_label and RunStats:
+		var total_sec: int = int(RunStats.elapsed_time)
+		var mins: int = total_sec / 60
+		var secs: int = total_sec % 60
+		_time_label.text = "⏱ %02d:%02d" % [mins, secs]
+
+	## 击杀数：从 RunStats 读取
+	if _kills_label and RunStats:
+		_kills_label.text = "💀 %d" % RunStats.kills
+
+	## 最高连击：从 ComboManager 读取
+	if _max_combo_label and ComboManager:
+		var max_combo: int = ComboManager.get_max_combo()
+		if max_combo > 0:
+			_max_combo_label.text = "🔥 %d" % max_combo
+		else:
+			_max_combo_label.text = "🔥 --"

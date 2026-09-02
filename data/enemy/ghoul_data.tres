@@ -1,6 +1,25 @@
-[gd_resource type="Resource" load_steps=2 format=3]
+[gd_resource type="Resource" load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/resources/enemy/MonsterSkill.gd" id="2"]
+
+[sub_resource type="Resource" id="MonsterSkill_ghoul"]
+script = ExtResource("2")
+skill_id = "ghoul_leap"
+display_name = "Leap Charge"
+skill_type = 2
+effect_color = Color(0.8, 0.5, 0.3, 1)
+projectile_count = 3
+spread_angle = 45.0
+projectile_speed = 250.0
+barrage_interval = 0.15
+aoe_radius = 80.0
+charge_speed = 450.0
+charge_duration = 0.35
+teleport_distance = 80.0
+homing_duration = 3.0
+piercing_speed = 600.0
+bomb_fuse = 1.0
 
 [resource type="EnemyData" script_class="EnemyData"]
 script = ExtResource("1")
@@ -10,11 +29,14 @@ speed = 130.0
 wander_speed = 70.0
 wander_interval = 1.8
 max_health = 10
-damage = 15
+damage = 8
 detection_range = 380.0
 attack_range = 50.0
-attack_cooldown = 0.9
+attack_cooldown = 1.5
 bullet_data = null
+monster_skill = SubResource("MonsterSkill_ghoul")
+skill_cooldown = 8.0
+skill_damage = 6
 drop_items = []
 placeholder_color = Color(0.6, 0.4, 0.3, 1)
 placeholder_size = Vector2(34, 38)

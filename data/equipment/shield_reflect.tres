@@ -1,0 +1,24 @@
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/equipment/ShieldEquipmentData.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/resources/equipment/ReflectShieldEffect.gd" id="2"]
+
+[resource type="ShieldEquipmentData" script_class="ShieldEquipmentData"]
+script = ExtResource("1")
+shield_id = "shield_reflect"
+display_name = "反击护盾"
+shield_color = Color(1.0, 0.6, 0.2, 0.8)
+max_hp = 20.0
+absorb_per_hit = 20.0
+regen_delay = 10.0
+regen_rate = 7.0
+is_special = true
+shield_effect = SubResource("ShieldEffect_1")
+visual_radius = 36.0
+visual_thickness = 3.0
+
+[sub_resource type="Resource" id="ShieldEffect_1"]
+script = ExtResource("2")
+reflect_damage = 3
+reflect_speed = 500.0
+knockback_force = 300.0

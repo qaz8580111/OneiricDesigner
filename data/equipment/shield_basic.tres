@@ -1,0 +1,17 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/equipment/ShieldEquipmentData.gd" id="1"]
+
+[resource type="ShieldEquipmentData" script_class="ShieldEquipmentData"]
+script = ExtResource("1")
+shield_id = "shield_basic"
+display_name = "基础护盾"
+shield_color = Color(0.3, 0.6, 1.0, 0.8)
+max_hp = 30.0
+absorb_per_hit = 30.0
+regen_delay = 10.0
+regen_rate = 10.0
+is_special = false
+shield_effect = null
+visual_radius = 36.0
+visual_thickness = 3.0

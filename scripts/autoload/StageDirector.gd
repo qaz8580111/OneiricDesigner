@@ -38,9 +38,10 @@ const TrailGhostClass = preload("res://scripts/entities/TrailGhost.gd")
 
 ## ========== 调参常量（阶段曲线的核心配置，集中管理便于平衡调整） ==========
 
-## 每个阶段的时长（秒）：阶段 N 事件在 N*120 秒，阶段 N.5 在 N*120+60 秒
-## 即：120s 阶段1怪潮 → 180s 阶段1Boss → 240s 阶段2怪潮 → 300s 阶段2Boss → ……
-const STAGE_INTERVAL: float = 120.0
+## 每个阶段的时长（秒）：阶段 N 事件在 N*210 秒，阶段 N.5 在 N*210+105 秒
+## 旧值120s→210s：原节奏20分钟通关，现在约35分钟，让玩家有充分的循序渐进体验
+## 即：210s 阶段1怪潮 → 315s 阶段1Boss → 420s 阶段2怪潮 → 525s 阶段2Boss → ……
+const STAGE_INTERVAL: float = 210.0
 
 ## 总进度上限：把控到阶段 10（阶段 10.5 为关底 Boss）
 const MAX_STAGE: int = 10
@@ -98,6 +99,17 @@ var _wave_check_accum: float = 0.0
 
 ## 当前存活的 Boss 引用（killed 信号驱动阶段推进；is_instance_valid 防悬挂）
 var _current_boss: Node = null
+
+## ---------- 濒死狂暴状态（直播增强：Boss HP<20% 攻速提升+屏幕红边） ----------
+## 当前 Boss 是否已进入濒死狂暴（一局只触发一次，避免反复切换）
+var _boss_enraged: bool = false
+## 狂暴触发的 HP 阈值（20%）
+const BOSS_ENRAGE_THRESHOLD: float = 0.2
+
+## ---------- Boss登场时停帧计数状态（process_frame 回调需要持久化） ----------
+var _time_stop_remaining: int = 0
+var _time_stop_callback: Callable = Callable()
+const BOSS_ENTRY_TIME_STOP_FRAMES: int = 12  ## 60fps × 0.2s = 12帧
 
 ## GameWorld 缓存引用（懒查找，场景切换后自动失效重查）
 var _world_cache: Node2D = null
@@ -314,6 +326,12 @@ func _fire_boss(ev: Dictionary) -> bool:
 	if boss.has_method("reset_physics_interpolation"):
 		boss.reset_physics_interpolation()
 
+	## ---------- 直播增强：Boss登场时停+震屏 ----------
+	## 时停 0.2 秒（Engine.time_scale = 0.0 → 帧数计数恢复，不受 time_scale 影响）
+	_do_boss_entry_time_stop()
+	## 震屏 0.4 秒（Camera2D offset 抖动，final_boss 强度加倍）
+	_do_boss_entry_shake(world, is_final)
+
 	## ---- 装饰 1：入场淡入（不缩放物理体——Godot4 不推荐缩放 CharacterBody2D） ----
 	if "sprite" in boss and boss.sprite != null:
 		boss.sprite.modulate.a = 0.0
@@ -452,7 +470,7 @@ func _pick_boss_spawn_position(world: Node2D) -> Vector2:
 
 ## ========== Boss 事件回调（后置通知） ==========
 
-## Boss 受击回调：驱动头顶血条与屏幕血条（事件驱动，无每帧轮询）
+## Boss 受击回调：驱动头顶血条与屏幕血条 + 濒死狂暴检测（直播增强）
 ## 参数：_amount - 伤害值（未用），boss - Boss 实例
 func _on_boss_damaged(_amount: int, boss: Node) -> void:
 	if not is_instance_valid(boss):
@@ -471,6 +489,12 @@ func _on_boss_damaged(_amount: int, boss: Node) -> void:
 	## 屏幕血条：同比例更新
 	if _boss_bar_fg != null:
 		_boss_bar_fg.size.x = _boss_bar_fg.get_parent().get_meta("full_w") * ratio
+
+	## ---------- 濒死狂暴检测（直播增强） ----------
+	## HP 低于 20% 且还没狂暴过 → 触发濒死狂暴
+	if not _boss_enraged and ratio <= BOSS_ENRAGE_THRESHOLD:
+		_boss_enraged = true
+		_do_boss_enrage(boss)
 
 ## Boss 死亡回调：阶段推进 / 通关结算
 ## 参数：boss - 死亡的 Boss，is_final - 是否关底 Boss
@@ -678,6 +702,7 @@ func _on_game_started() -> void:
 	_wave_deadline = 0.0
 	_wave_check_accum = 0.0
 	_current_boss = null
+	_boss_enraged = false  ## 重置濒死狂暴状态（新局从满血开始）
 	_world_cache = null  ## 场景可能已重建，强制重查 GameWorld
 	## 切面 UI 复位
 	_hide_boss_hud()
@@ -703,3 +728,113 @@ func _get_world() -> Node2D:
 	if gw != null and gw.has_method("_spawn_enemy"):
 		_world_cache = gw
 	return _world_cache
+
+## ========== 直播增强：Boss登场特效 ==========
+
+## Boss登场时停效果：Engine.time_scale = 0.0 持续约 12 帧（≈0.2秒@60fps）
+## 用帧计数恢复（time_scale=0 会让 Timer 失效，但帧循环本身不受影响）
+func _do_boss_entry_time_stop() -> void:
+	_time_stop_remaining = BOSS_ENTRY_TIME_STOP_FRAMES
+	_time_stop_callback = _on_boss_entry_time_stop_tick
+	Engine.time_scale = 0.0
+	get_tree().process_frame.connect(_time_stop_callback)
+
+## Boss登场时停帧回调（每帧减1，到0时恢复 time_scale=1.0）
+func _on_boss_entry_time_stop_tick() -> void:
+	_time_stop_remaining -= 1
+	if _time_stop_remaining <= 0:
+		Engine.time_scale = 1.0
+		get_tree().process_frame.disconnect(_time_stop_callback)
+
+## Boss登场震屏效果：Camera2D offset 抖动（关底Boss强度加倍）
+## 参数：world - 游戏世界（用于取 Camera2D），is_final - 是否关底Boss
+func _do_boss_entry_shake(world: Node2D, is_final: bool) -> void:
+	var cam: Camera2D = world.get_viewport().get_camera_2d()
+	if cam == null:
+		return
+
+	var original_offset: Vector2 = cam.offset
+	var duration: float = 0.4
+	## 关底Boss震屏强度加倍
+	var intensity: float = 6.0 if is_final else 3.0
+
+	var shake_tween: Tween = create_tween()
+	## 3次随机偏移抖动+回归
+	for i in range(3):
+		var shake_offset: Vector2 = Vector2(
+			RandomManager.randf_range(-intensity, intensity),
+			RandomManager.randf_range(-intensity, intensity)
+		)
+		shake_tween.tween_property(cam, "offset", original_offset + shake_offset, duration / 3.0)
+	## 回归原始偏移
+	shake_tween.tween_property(cam, "offset", original_offset, duration / 3.0)
+
+## Boss濒死狂暴：HP<20%时攻速+50% + 屏幕红边闪烁 + 专属音效
+## 设计意图：让Boss在即将死亡时给玩家最后一击的紧张感，观众也跟着屏息
+## 参数：boss - 濒死的Boss实例
+func _do_boss_enrage(boss: Node) -> void:
+	## 1. 攻速提升50%（减小攻击冷却 + 提升移动速度）
+	if boss.has_method("set_attack_cooldown"):
+		boss.set_attack_cooldown(boss.attack_cooldown * 0.66)
+	else:
+		## 没有setter时直接修改属性
+		if "attack_cooldown" in boss:
+			boss.attack_cooldown *= 0.66
+		if "speed" in boss:
+			boss.speed *= 1.2
+
+	## 2. 屏幕红边闪烁（用 CanvasLayer + ColorRect 构建四条边）
+	var border_thickness: float = 16.0
+	var cam: Camera2D = null
+	if get_tree().current_scene != null:
+		cam = get_tree().current_scene.get_viewport().get_camera_2d()
+	if cam != null:
+		var layer: CanvasLayer = CanvasLayer.new()
+		layer.name = "BossEnrageBorder"
+		layer.layer = 100  ## 顶层显示
+		get_tree().current_scene.add_child(layer)
+
+		## 四条边：anchor配置(左/右/上/下) + offset配置(左/右/上/下)
+		## 上：anchor(0,1,1,1) offset(0,0,0,-border) → 位于顶部，高度=border
+		## 下：anchor(0,1,1,1) offset(0,0,-border,0) → 位于底部，高度=border
+		## 左：anchor(0,0,0,1) offset(0,border,0,-border) → 左侧，宽=border
+		## 右：anchor(1,0,1,1) offset(-border,border,0,-border) → 右侧，宽=border
+		var rect_configs: Array[Dictionary] = [
+			{"anchor_l": 0.0, "anchor_r": 1.0, "anchor_t": 0.0, "anchor_b": 0.0,
+			 "offset_l": 0.0, "offset_r": 0.0, "offset_t": 0.0, "offset_b": border_thickness},       ## 上
+			{"anchor_l": 0.0, "anchor_r": 1.0, "anchor_t": 1.0, "anchor_b": 1.0,
+			 "offset_l": 0.0, "offset_r": 0.0, "offset_t": -border_thickness, "offset_b": 0.0},     ## 下
+			{"anchor_l": 0.0, "anchor_r": 0.0, "anchor_t": 0.0, "anchor_b": 1.0,
+			 "offset_l": 0.0, "offset_r": border_thickness, "offset_t": 0.0, "offset_b": 0.0},      ## 左
+			{"anchor_l": 1.0, "anchor_r": 1.0, "anchor_t": 0.0, "anchor_b": 1.0,
+			 "offset_l": -border_thickness, "offset_r": 0.0, "offset_t": 0.0, "offset_b": 0.0},     ## 右
+		]
+
+		for cfg in rect_configs:
+			var rect: ColorRect = ColorRect.new()
+			rect.color = Color(1.0, 0.15, 0.15, 0.0)
+			rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			rect.anchor_left = cfg["anchor_l"]
+			rect.anchor_right = cfg["anchor_r"]
+			rect.anchor_top = cfg["anchor_t"]
+			rect.anchor_bottom = cfg["anchor_b"]
+			rect.offset_left = cfg["offset_l"]
+			rect.offset_right = cfg["offset_r"]
+			rect.offset_top = cfg["offset_t"]
+			rect.offset_bottom = cfg["offset_b"]
+			layer.add_child(rect)
+
+		## 红边闪烁动画：连续闪烁3次后淡出销毁
+		var tw: Tween = layer.create_tween()
+		tw.set_trans(Tween.TRANS_SINE)
+		for i in range(3):
+			tw.tween_property(layer, "modulate:a", 0.8, 0.1)
+			tw.tween_property(layer, "modulate:a", 0.0, 0.15)
+		tw.tween_interval(0.3)
+		tw.tween_callback(layer.queue_free)
+
+	## 3. 狂暴音效 + 屏幕字幕
+	if AudioManager:
+		AudioManager.play("difficulty_up", 1.1)
+	var boss_name: String = boss.enemy_data.enemy_name if "enemy_data" in boss else "Boss"
+	_show_banner("⚠ %s 狂暴了！" % boss_name, Color(1.0, 0.3, 0.3), 1.5)

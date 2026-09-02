@@ -146,12 +146,50 @@ func _generate_all_sfx() -> void:
 	_sfx_cache["game_over"]          = _gen_sfx_slide(400, 100, 1.0, "sawtooth")
 
 	## ---------- 升级/难度系统类（roguelike核心循环反馈音） ----------
-	## 升级三选一选定词条：明亮上行琶音感（奖励反馈）
-	_sfx_cache["upgrade_pick"]       = _gen_sfx_slide(500, 1000, 0.18, "triangle", 0.7)
+	## 升级三选一选定瞬间：专属确认音"嗒"（比通用ui_click更柔和有厚度）
+	## 参数考量：1400Hz略高于ui_click的1200Hz更清脆；triangle波比square柔和不刺耳；
+	## 0.05s比ui_click的0.04s略长保证可闻性；amp 0.5与奖励音拉开层次
+	_sfx_cache["upgrade_confirm"]    = _gen_sfx_beep(1400, 0.05, "triangle", 0.5)
+	## 升级选定后的奖励音"叮"：上行滑音（微调：起点650→终点1300更明亮，
+	## 时长0.22s延长回味，amp 0.65略降为确认音让出层次）
+	_sfx_cache["upgrade_pick"]       = _gen_sfx_slide(650, 1300, 0.22, "triangle", 0.65)
 	## 难度提升：低沉下行（压迫感提示"敌人变强了"）
 	_sfx_cache["difficulty_up"]      = _gen_sfx_slide(600, 300, 0.25, "sawtooth", 0.6)
 	## 敌潮波次来袭：双段警报式滑音（紧急感）
 	_sfx_cache["wave_start"]         = _gen_sfx_slide(300, 900, 0.4, "square", 0.65)
+
+	## ---------- 直播增强类（连击/险胜/心跳/里程碑） ----------
+	## 连击击杀音：短促高频"嗒"（每杀一个播放，ComboManager 每连杀升调复用）
+	## 设计意图：短时长+方波=脆感，避免与射击/命中音抢频；让观众能清晰计数"嗒嗒嗒"
+	_sfx_cache["combo_tick"]         = _gen_sfx_beep(1600, 0.06, "square", 0.5)
+	## 连击里程碑音：上行华丽滑音（10/25/50/100杀等触发）
+	## 设计意图：比普通升级音更明亮的三角波上行，制造"成就解锁"的情绪爆点
+	_sfx_cache["combo_milestone"]    = _gen_sfx_slide(500, 1600, 0.35, "triangle", 0.75)
+	## 心跳音：低沉双拍"咚-咚"（险胜状态时加速播放）
+	## 设计意图：低频方波+快速衰减=紧张感，HP越低播放间隔越短
+	_sfx_cache["heartbeat"]          = _gen_sfx_beep(80, 0.15, "square", 0.6)
+	## 险胜奖励音：明亮上行三连音（险胜触发时播放）
+	_sfx_cache["near_death_reward"]  = _gen_sfx_slide(700, 1400, 0.3, "sine", 0.7)
+
+	## ---------- 怪物技能类（每种技能专属音效，玩家可凭声音辨识威胁类型） ----------
+	## 扇形散射：多箭齐发的"嗖"声（短促下行三角波）
+	_sfx_cache["skill_spread"]       = _gen_sfx_slide(900, 500, 0.1, "triangle", 0.5)
+	## 环形弹幕：能量爆裂的"嗡"声（低频锯齿持续鸣响）
+	_sfx_cache["skill_nova"]         = _gen_sfx_beep(180, 0.2, "sawtooth", 0.6)
+	## 冲锋突进：低沉加速的"嗖"声（上行锯齿波，模拟由远及近）
+	_sfx_cache["skill_charge"]       = _gen_sfx_slide(150, 400, 0.3, "sawtooth", 0.7)
+	## 周身震击：沉重砸地的"咚"声（极低频下行方波）
+	_sfx_cache["skill_slam"]         = _gen_sfx_slide(100, 40, 0.25, "square", 0.8)
+	## 追踪弹：魔幻锁定的"嘀"声（上行正弦波，神秘感）
+	_sfx_cache["skill_homing"]       = _gen_sfx_slide(500, 1000, 0.15, "sine", 0.5)
+	## 连续弹幕：连射的"嗒嗒"声（短促下行锯齿波）
+	_sfx_cache["skill_barrage"]      = _gen_sfx_slide(300, 150, 0.12, "sawtooth", 0.5)
+	## 传送突袭：空灵传送的"咻"声（高频下行正弦波，空灵感）
+	_sfx_cache["skill_teleport"]     = _gen_sfx_slide(1200, 300, 0.2, "sine", 0.5)
+	## 穿透弹：锐利破空的"嗖"声（高频上行方波，锐利感）
+	_sfx_cache["skill_piercing"]     = _gen_sfx_slide(1400, 2000, 0.06, "square", 0.5)
+	## 自爆引信：急促滴答声（短促方波，紧张感）
+	_sfx_cache["skill_bomb_fuse"]    = _gen_sfx_beep(600, 0.05, "square", 0.3)
 
 ## =========================================================
 ##  程序化生成音效工具函数：

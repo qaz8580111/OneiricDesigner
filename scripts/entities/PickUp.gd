@@ -104,23 +104,24 @@ func _physics_process(delta: float) -> void:
 	## 如果正在拾取或道具数据为空，直接返回
 	if _is_picking or drop_item == null:
 		return
-	
+
 	## 自动吸附类型（梦境碎片、回血）：飞向玩家
+	## 手动类型（武器、物品、BUFF/技能）：原地停留，需玩家走到位置后按E拾取
+	## 扩展：新增装备类型时，在DropItem.get_auto_adsorb()中返回false即可走手动拾取路径
 	if drop_item.get_auto_adsorb() and _player != null:
 		## 计算从道具位置指向玩家位置的方向向量并归一化
 		var direction: Vector2 = (_player.position - position).normalized()
 		## 计算道具与玩家之间的距离
 		var distance: float = _player.position.distance_to(position)
-		
+
 		## 在吸附范围内才移动（加50像素余量）
 		if distance < adsorb_radius + 50.0:
 			## 距离越近速度越快（速度乘数：1.0 ~ 3.0）
 			var speed_multiplier: float = 1.0 + (1.0 - distance / adsorb_radius) * 2.0
 			## 更新道具位置（方向 × 速度 × 乘数 × 时间）
-			## 用局部position即可：PickUp挂在原点的GameWorld下，局部坐标与全局坐标等价
 			position += direction * adsorb_speed * speed_multiplier * delta
-	
-	## 如果玩家在拾取范围内且按空格键，执行拾取
+
+	## 如果玩家在手动拾取范围内且按交互键，执行拾取
 	if _player != null and is_player_in_range():
 		if InputManager.is_action_just_pressed_safe("game_interact"):
 			pickup(_player)
@@ -189,6 +190,10 @@ func set_drop_item(item: DropItemClass) -> void:
 			## 增益效果：紫色，22x22
 			color = Color(1, 0, 1, 1)
 			size = Vector2(22, 22)
+		DropItemClass.ItemType.EQUIPMENT:
+			## 装备：青蓝色，24x24，与护盾视觉色一致
+			color = Color(0.3, 0.6, 1.0, 1)
+			size = Vector2(24, 24)
 	
 	## 如果是稀有道具，降低透明度（半透明效果）
 	if item.is_rare:

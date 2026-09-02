@@ -1,0 +1,15 @@
+{
+  "name": "oneiric-live-bridge",
+  "version": "1.0.0",
+  "description": "B站直播弹幕/礼物桥接服务——连接B站WSS，输出统一JSON事件供Godot消费",
+  "type": "module",
+  "main": "bilibili_bridge.js",
+  "scripts": {
+    "start": "node bilibili_bridge.js",
+    "mock": "node bilibili_bridge.js --mock"
+  },
+  "dependencies": {
+    "bilibili-ws-client": "^3.2.0",
+    "ws": "^8.16.0"
+  }
+}

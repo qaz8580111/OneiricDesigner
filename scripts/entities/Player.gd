@@ -26,13 +26,17 @@ const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
 ## 通用角色动画器组件（驱动呼吸/弹跳/攻击/受击动画）
 const CharacterAnimatorClass = preload("res://scripts/components/CharacterAnimator.gd")
 
+## 浮动伤害数字组件（玩家受伤时弹出，直播增强）
+const DamageNumberClass = preload("res://scripts/components/DamageNumber.gd")
+
 ## ========== 导出变量（编辑器可配置） ==========
 
 ## 玩家移动速度（像素/秒）
 @export var speed: float = 150.0
 
 ## 射击冷却时间（秒），控制射速
-@export var shoot_cooldown: float = 0.2
+## 初始0.8秒一颗，前期节奏适中；通过升级词条（fire_rate_mult）逐步提升到中后期速度
+@export var shoot_cooldown: float = 0.8
 
 ## 玩家子弹配置（决定子弹伤害、速度、形态、特效等）
 @export var bullet_data: BulletDataClass = null
@@ -47,6 +51,9 @@ const CharacterAnimatorClass = preload("res://scripts/components/CharacterAnimat
 
 ## 健康控制器节点，管理护盾和核心血量系统
 @onready var health_controller: Node = $HealthController
+
+## 装备护盾组件节点（独立于分段护盾，额外吸收伤害+特效触发）
+@onready var equipment_shield: Node2D = $EquipmentShieldComponent
 
 ## ========== 成员变量（运行时数据） ==========
 
@@ -88,6 +95,28 @@ var _base_bullet_damage: int = 0
 
 ## 基础子弹速度（词条乘算基准，词条只修改私有副本的speed）
 var _base_bullet_speed: float = 0.0
+
+## 最近一次攻击者（Enemy/Bullet 节点引用，用于装备护盾判定阵营/类型）
+var _last_attacker: Node = null
+
+## 最近一次攻击上下文（is_bullet/direction/bullet_data 等）
+var _last_attack_context: Dictionary = {}
+
+## ========== 险胜反馈系统（直播增强："差点死"的紧张感） ==========
+## 红血存活计时器：进入红血后累计存活时间，存活5秒以上触发险胜奖励
+var _critical_survival_timer: float = 0.0
+## 是否处于红血状态（_on_critical_state_active 中同步）
+var _is_in_critical: bool = false
+## 心跳音效间隔（随红血存活时间缩短：初始0.8秒→最低0.25秒）
+var _heartbeat_interval: float = 0.8
+## 心跳音效计时（递减到0时播放心跳音）
+var _heartbeat_timer: float = 0.0
+## 是否已获得险胜奖励（一局红血期间只触发一次）
+var _near_death_rewarded: bool = false
+## 险胜奖励：临时攻击加成倍率（1.15=+15%攻击力）
+const NEAR_DEATH_ATTACK_BONUS: float = 1.15
+## 险胜奖励：红血存活阈值（秒，达到后触发奖励）
+const NEAR_DEATH_SURVIVAL_THRESHOLD: float = 5.0
 
 ## ========== 信号定义（用于与其他节点通信） ==========
 
@@ -324,10 +353,101 @@ func add_buff(item_id: String, value: int) -> void:
 ## _physics_process() - 每物理帧调用一次（默认60次/秒），用于处理物理相关逻辑
 ## 为什么不用 _process：move_and_slide 依赖物理步进，物理帧固定步长可保证碰撞检测稳定不穿模
 func _physics_process(delta: float) -> void:
+	## ---------- 险胜反馈系统（红血存活计时+心跳音效） ----------
+	_update_near_death_feedback(delta)
+
 	## 处理玩家移动
 	_move(delta)
 	## 处理玩家射击
 	_handle_shoot(delta)
+
+## ========== 险胜反馈系统（直播增强） ==========
+
+## 更新险胜反馈（红血存活计时、心跳音效、险胜奖励触发）
+## 在 _physics_process 中每帧调用（物理帧稳定60Hz）
+func _update_near_death_feedback(delta: float) -> void:
+	## 门禁：只在红血状态 + 游戏进行中时更新
+	if not _is_in_critical or not GameManager.is_playing():
+		return
+
+	## 累计红血存活时间
+	_critical_survival_timer += delta
+
+	## 心跳间隔随存活时间缩短（越久越紧张：0.8秒→最低0.25秒）
+	_heartbeat_interval = maxf(0.25, 0.8 - _critical_survival_timer * 0.08)
+
+	## 心跳音效计时器
+	_heartbeat_timer -= delta
+	if _heartbeat_timer <= 0.0:
+		_heartbeat_timer = _heartbeat_interval
+		if AudioManager:
+			## 心跳音随存活时间升高音高（紧张感累积）
+			var hp_ratio: float = health_controller.get_survival_state().get("core", 0) / maxf(health_controller.get_survival_state().get("max_core", 1), 1)
+			AudioManager.play("heartbeat", 0.5 + hp_ratio * 0.3, 0.8 + (1.0 - hp_ratio) * 0.4)
+
+	## 触发险胜奖励：红血存活超过阈值且未奖励过
+	if not _near_death_rewarded and _critical_survival_timer >= NEAR_DEATH_SURVIVAL_THRESHOLD:
+		_near_death_rewarded = true
+		_on_near_death_reward()
+
+## 险胜奖励触发回调：临时攻击加成 + 专属音效 + 屏幕金边
+func _on_near_death_reward() -> void:
+	## 临时攻击加成：修改私有子弹数据的伤害倍率
+	## 设计意图：不改 _base_bullet_damage（词条乘算基准），而是给私有副本乘一个临时倍率
+	if _private_bullet_data != null:
+		_private_bullet_data.damage = int(float(_private_bullet_data.damage) * NEAR_DEATH_ATTACK_BONUS)
+
+	## 险胜专属音效
+	if AudioManager:
+		AudioManager.play("near_death_reward", 0.9)
+
+	## 屏幕金边闪烁反馈（通过 Camera2D 创建 ColorRect 叠层）
+	var cam: Camera2D = get_viewport().get_camera_2d()
+	if cam != null:
+		## 创建金色边框遮罩（上下左右各20px宽的 ColorRect）
+		var border_parent: Control = Control.new()
+		border_parent.name = "NearDeathBorder"
+		border_parent.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		border_parent.z_index = 1000  ## 顶层显示
+		cam.add_child(border_parent)
+
+		var border_color: Color = Color(1.0, 0.9, 0.3, 0.0)
+		var border_thickness: float = 20.0
+
+		## 上边框
+		var top: ColorRect = ColorRect.new()
+		top.color = border_color
+		top.anchor_right = 1.0
+		top.size = Vector2(0, border_thickness)
+		border_parent.add_child(top)
+		## 下边框
+		var bottom: ColorRect = ColorRect.new()
+		bottom.color = border_color
+		bottom.anchor_top = 1.0
+		bottom.anchor_right = 1.0
+		bottom.offset_top = -border_thickness
+		border_parent.add_child(bottom)
+		## 左边框
+		var left: ColorRect = ColorRect.new()
+		left.color = border_color
+		left.size = Vector2(border_thickness, 0)
+		left.anchor_bottom = 1.0
+		border_parent.add_child(left)
+		## 右边框
+		var right: ColorRect = ColorRect.new()
+		right.color = border_color
+		right.anchor_left = 1.0
+		right.anchor_bottom = 1.0
+		right.offset_left = -border_thickness
+		border_parent.add_child(right)
+
+		## 闪烁动画：淡入→停留→淡出→销毁
+		var tw: Tween = border_parent.create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(border_parent, "modulate:a", 1.0, 0.3)
+		tw.tween_property(border_parent, "modulate:a", 0.0, 1.2)\
+			.set_delay(0.8)
+		tw.tween_callback(border_parent.queue_free)
 
 ## 处理玩家移动逻辑
 ## 参数：delta - 帧间隔时间（秒），用于确保移动速度不受帧率影响
@@ -402,35 +522,61 @@ func _shoot() -> void:
 ## ========== 血量与伤害系统 ==========
 
 ## 玩家受到伤害时调用（对外接口）
+## 伤害拦截顺序：装备护盾（EquipmentShieldComponent）→ 分段护盾（ShieldComponent）→ 核心血量
 ## 参数：amount - 伤害数值
 func take_damage(amount: float) -> void:
-	if health_controller:
+	var remaining: float = amount
+	var shield_absorbed: float = 0.0  ## 护盾吸收的伤害量（用于蓝色数字显示）
+	var core_damage: float = 0.0      ## 核心血扣减的伤害量（用于红色数字显示）
+
+	## 装备护盾优先吸收（独立于分段护盾，最先拦截）
+	if equipment_shield != null and equipment_shield.has_method("has_shield") and equipment_shield.has_shield():
+		var before: float = remaining
+		remaining = equipment_shield.absorb_damage(amount, _last_attacker, _last_attack_context)
+		shield_absorbed += before - remaining  ## 装备护盾吸收的部分
+
+	## 装备护盾吸收后仍有剩余伤害 → 交给分段护盾/核心血量
+	if remaining > 0.0 and health_controller:
 		## 记录受伤前的状态，用于检测是否刚进入无敌状态
 		var state_before: Dictionary = health_controller.get_survival_state()
 		var was_invincible: bool = state_before.get("is_invincible", false)
 		var hp_before: float = state_before.get("core_hp", 0)
-		
-		## 调用健康控制器处理伤害（先扣护盾，再扣核心血）
-		health_controller.apply_damage(amount, "unknown")
-		
+		var shield_before: int = state_before.get("shield_segments", 0)
+
+		## 调用健康控制器处理伤害（先扣分段护盾，再扣核心血）
+		health_controller.apply_damage(remaining, "unknown")
+
 		## 记录受伤后的状态
 		var state_after: Dictionary = health_controller.get_survival_state()
 		var is_invincible: bool = state_after.get("is_invincible", false)
 		var shield_after: int = state_after.get("shield_segments", 0)
 		var hp_after: float = state_after.get("core_hp", 0)
-		
+
+		## 计算分段护盾吸收了多少（简化：remaining - 核心血实际扣减）
+		core_damage = hp_before - hp_after
+		shield_absorbed += remaining - core_damage  ## 分段护盾吸收的部分
+
 		## 护盾破碎音效
-		if shield_after == 0 and state_before.get("shield_segments", 0) > 0:
+		if shield_after == 0 and shield_before > 0:
 			if AudioManager:
 				AudioManager.play_2d("shield_break", global_position, 0.95)
 		## 玩家扣血音效（核心血量变化）
-		elif hp_after < hp_before:
+		elif core_damage > 0.0:
 			if AudioManager:
 				AudioManager.play_2d("player_hurt", global_position, 0.9)
-		
+
 		## 如果刚进入无敌状态，启动闪烁效果
 		if is_invincible and not was_invincible:
 			_start_invincible_blink()
+
+	## ---------- 弹出伤害数字（直播增强：让观众看清受伤构成） ----------
+	## 核心血扣减：红色，大伤害时 is_crit=true 放大
+	if core_damage > 0.0:
+		var is_big_damage: bool = core_damage > 15.0  ## 玩家被打15+就算大伤害
+		DamageNumberClass.pop(global_position + Vector2(0, -20), int(core_damage), is_big_damage, Color(1.0, 0.3, 0.2))
+	## 护盾吸收：蓝色（让玩家知道护盾在挡伤害）
+	if shield_absorbed > 0.0:
+		DamageNumberClass.pop(global_position + Vector2(-15, -30), int(shield_absorbed), false, Color(0.4, 0.7, 1.0))
 
 ## 恢复核心血量（对外接口）
 ## 参数：amount - 恢复的血量值
@@ -446,6 +592,22 @@ func heal(amount: float) -> void:
 func heal_shield(segments: int) -> void:
 	if health_controller:
 		health_controller.heal_shield(segments)
+
+## ========== 装备护盾系统 ==========
+
+## 设置最近攻击者信息（Bullet.gd / Enemy.gd 在调用 take_damage 前调用）
+## 参数：attacker - 攻击者节点，context - 上下文字典
+func set_last_attacker(attacker: Node, context: Dictionary = {}) -> void:
+	_last_attacker = attacker
+	_last_attack_context = context
+
+## 装备护盾（拾取 EQUIPMENT 类型掉落物时由 DropItem.apply 调用）
+## 参数：shield_data - 护盾装备数据资源
+func equip_shield(shield_data: Resource) -> void:
+	if equipment_shield != null and equipment_shield.has_method("equip"):
+		equipment_shield.equip(shield_data)
+		if AudioManager:
+			AudioManager.play_2d("buff_pickup", global_position, 0.8)
 
 ## ========== 梦境碎片系统 ==========
 
@@ -493,12 +655,27 @@ func _on_health_changed(state: Dictionary) -> void:
 ## 红血状态变化回调：当玩家进入/退出红血状态时调用
 ## 参数：is_active - 是否处于红血状态
 func _on_critical_state_active(is_active: bool) -> void:
+	_is_in_critical = is_active
 	if is_active:
 		## 红血状态：将玩家颜色变为红色，警示玩家
 		sprite.modulate = Color(1, 0.3, 0.3, 1)
+		## ---------- 险胜系统启动 ----------
+		_critical_survival_timer = 0.0
+		_heartbeat_interval = 0.8  ## 初始心跳间隔0.8秒
+		_heartbeat_timer = 0.0
+		_near_death_rewarded = false
+		## 播放进入红血的警示音
+		if AudioManager:
+			AudioManager.play("heartbeat", 0.8, 0.6)
 	else:
 		## 退出红血：恢复原始颜色
 		sprite.modulate = _original_color
+		## ---------- 险胜系统重置 + 撤销临时加成 ----------
+		if _near_death_rewarded and _private_bullet_data != null:
+			## 撤销险胜临时攻击加成（恢复到奖励前的数值）
+			_private_bullet_data.damage = int(float(_private_bullet_data.damage) / NEAR_DEATH_ATTACK_BONUS)
+		_critical_survival_timer = 0.0
+		_near_death_rewarded = false
 
 ## 玩家死亡回调：当玩家核心血量归零时调用
 func _on_player_died() -> void:

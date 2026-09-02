@@ -6,9 +6,9 @@
 script = ExtResource("1")
 upgrade_id = "upg_move_speed"
 display_name = "轻灵之靴"
-description = "移动速度 +10%"
+description = "移动速度 +12%"
 rarity = 0
 max_stacks = 5
 stat_modifiers = {
-"move_speed_mult": 0.1
+"move_speed_mult": 0.12
 }

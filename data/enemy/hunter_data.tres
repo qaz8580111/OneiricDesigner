@@ -1,7 +1,26 @@
-[gd_resource type="Resource" load_steps=3 format=3]
+[gd_resource type="Resource" load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/enemy/EnemyData.gd" id="1"]
 [ext_resource type="BulletData" path="res://data/bullet/enemy_homing_bullet.tres" id="2"]
+[ext_resource type="Script" path="res://scripts/resources/enemy/MonsterSkill.gd" id="3"]
+
+[sub_resource type="Resource" id="MonsterSkill_hunter"]
+script = ExtResource("3")
+skill_id = "hunter_homing"
+display_name = "Tracking Shot"
+skill_type = 4
+effect_color = Color(0.6, 0.3, 0.8, 1)
+projectile_count = 3
+spread_angle = 45.0
+projectile_speed = 200.0
+barrage_interval = 0.15
+aoe_radius = 80.0
+charge_speed = 400.0
+charge_duration = 0.4
+teleport_distance = 80.0
+homing_duration = 3.5
+piercing_speed = 600.0
+bomb_fuse = 1.0
 
 [resource type="EnemyData" script_class="EnemyData"]
 script = ExtResource("1")
@@ -11,11 +30,14 @@ speed = 100.0
 wander_speed = 50.0
 wander_interval = 2.0
 max_health = 9
-damage = 6
+damage = 4
 detection_range = 520.0
 attack_range = 400.0
-attack_cooldown = 1.6
+attack_cooldown = 2.2
 bullet_data = ExtResource("2")
+monster_skill = SubResource("MonsterSkill_hunter")
+skill_cooldown = 8.0
+skill_damage = 5
 drop_items = []
 placeholder_color = Color(0.5, 0.2, 0.7, 1)
 placeholder_size = Vector2(30, 38)

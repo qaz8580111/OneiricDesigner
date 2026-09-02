@@ -204,13 +204,66 @@ func _physics_process(delta: float) -> void:
 	## 触发子弹飞行时的特效（ON_TRAVEL类型）
 	_bullet_data.trigger_effects(BulletEffectClass.TriggerType.ON_TRAVEL, self)
 
+	## 追踪弹逻辑：检查是否被标记为追踪弹（由Enemy._skill_homing_shot设置meta）
+	_update_homing(delta)
+
 	## 更新拖尾残影（若已被特效启用）
 	_update_trail(delta)
+
+	## 技能子弹视觉：追踪弹发光光环/穿透弹拖尾需要每帧重绘
+	if has_meta("is_homing_shot") or has_meta("is_piercing_shot"):
+		queue_redraw()
 
 	## 检查子弹是否超出屏幕边界
 	_check_screen_boundary()
 
+## ========== 追踪弹逻辑 ==========
+
+## 追踪弹方向更新（由Enemy._skill_homing_shot通过meta标记驱动）
+## 检查子弹是否携带追踪meta，有则持续转向目标
+func _update_homing(delta: float) -> void:
+	if not has_meta("homing_target"):
+		return
+	var target: Node = get_meta("homing_target")
+	if target == null or not is_instance_valid(target):
+		return
+	## 追踪时长耗尽则停止追踪
+	var elapsed: float = get_meta("homing_elapsed") + delta
+	set_meta("homing_elapsed", elapsed)
+	var homing_time: float = get_meta("homing_time")
+	if elapsed >= homing_time:
+		return  ## 追踪期结束，子弹直线飞行
+	## 计算朝向目标的方向
+	var to_target: Vector2 = (target.global_position - global_position).normalized()
+	var turn_rate: float = get_meta("homing_turn_rate")
+	## 逐步转向目标方向（线性插值，按转向速率限制角度变化）
+	_direction = _direction.lerp(to_target, turn_rate * delta).normalized()
+
 ## ========== 屏幕边界检测 ==========
+
+## _draw() - 技能子弹视觉绘制（追踪弹发光光环/穿透弹拖尾）
+## 仅当子弹被标记为技能子弹时绘制额外视觉，普通子弹不触发
+func _draw() -> void:
+	## 追踪弹发光光环：围绕子弹绘制脉动的彩色光环
+	if has_meta("is_homing_shot"):
+		var color: Color = get_meta("homing_color", Color(0.6, 0.3, 0.8))
+		var pulse: float = 0.7 + 0.3 * sin(Time.get_ticks_msec() * 0.008)
+		## 外圈光晕（半透明大圆）
+		draw_circle(Vector2.ZERO, 10.0, Color(color.r, color.g, color.b, 0.2 * pulse))
+		## 内圈光环（较亮）
+		draw_arc(Vector2.ZERO, 7.0, 0, TAU, 24, Color(color.r, color.g, color.b, pulse), 1.5)
+
+	## 穿透弹拖尾：沿反方向绘制渐变拖尾线段
+	if has_meta("is_piercing_shot"):
+		var color: Color = get_meta("piercing_color", Color(1.0, 0.9, 0.3))
+		## 拖尾方向：子弹的反方向
+		var trail_dir: Vector2 = -_direction
+		## 绘制3段渐变拖尾（由近到远逐渐透明）
+		for i in range(3):
+			var alpha: float = 0.6 - 0.18 * float(i)
+			var start: Vector2 = trail_dir * (4.0 + i * 6.0)
+			var end: Vector2 = trail_dir * (10.0 + i * 6.0)
+			draw_line(start, end, Color(color.r, color.g, color.b, alpha), 3.0 - float(i) * 0.5)
 
 ## 检查子弹是否超出屏幕边界，超出则自动销毁
 ## 性能设计：相机/屏幕尺寸使用缓存（每0.5秒刷新），避免每帧的查找开销
@@ -276,10 +329,13 @@ func _on_body_entered(body: Node2D) -> void:
 	
 	## 调用目标的take_damage方法（使用get_final_damage获取最终伤害，支持扩展）
 	var damage_amount: float = _bullet_data.get_final_damage() if _bullet_data else 10.0
+	## 通知目标攻击者信息（装备护盾特效需要知道子弹和方向）
+	if body.has_method("set_last_attacker"):
+		body.set_last_attacker(self, {"is_bullet": true, "direction": _direction, "bullet_data": _bullet_data})
 	if body.has_method("take_damage"):
 		body.call("take_damage", damage_amount)
 		hit.emit(self, body)
-	
+
 	## 销毁子弹（保活特效生效时跳过）
 	if not _keep_alive:
 		_destroy()
@@ -320,6 +376,9 @@ func _on_area_entered(area: Area2D) -> void:
 	
 	## 调用目标的take_damage方法（使用get_final_damage获取最终伤害，支持扩展）
 	var damage_amount: float = _bullet_data.get_final_damage() if _bullet_data else 10.0
+	## 通知目标攻击者信息（装备护盾特效需要知道子弹和方向）
+	if target.has_method("set_last_attacker"):
+		target.set_last_attacker(self, {"is_bullet": true, "direction": _direction, "bullet_data": _bullet_data})
 	if target.has_method("take_damage"):
 		target.call("take_damage", damage_amount)
 		hit.emit(self, target)
