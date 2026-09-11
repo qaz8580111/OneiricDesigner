@@ -69,6 +69,12 @@ var auto_shoot: bool = true
 ## 射击冷却计时器，递减到0时可再次射击
 var _shoot_timer: float = 0.0
 
+## 当前瞄准方向（每物理帧由_update_aim刷新；移动朝向与子弹方向共用，保证二者一致）
+var _aim_direction: Vector2 = Vector2.RIGHT
+
+## 手柄玩家是否曾拨动右摇杆（false时瞄准回退到移动方向/默认右向，避免开火乱射）
+var _has_joy_aim: bool = false
+
 ## 玩家原始颜色，用于受伤后恢复显示
 var _original_color: Color = Color.WHITE
 
@@ -131,6 +137,11 @@ signal dream_fragment_changed(amount: int)
 ## 玩家血量/护盾状态变化时发出此信号
 ## 参数：state - 包含当前生存状态的字典
 signal health_changed(state: Dictionary)
+
+## 子弹特效列表变化时发出此信号（玩家获得/失去特效词条时）
+## 数据流：apply_bullet_effect → 此信号 → GameHUD 更新buff图标栏
+## 参数：effects - 当前所有激活的子弹特效资源数组
+signal effects_changed(effects: Array)
 
 ## ========== 生命周期方法 ==========
 
@@ -195,6 +206,13 @@ func _ready() -> void:
 
 	## 初始同步一次（兜底：若词条在玩家实例化之前已应用，也能拿到正确属性）
 	_sync_upgrade_stats()
+
+	## ========== 相机接管（修复重开后相机不跟随的bug） ==========
+	## Player.tscn中Camera2D已设current=true，但旧玩家free+新玩家add同帧时，
+	## Godot 4有时不会自动切换current相机。显式调用make_current确保新相机立即接管。
+	var cam: Camera2D = get_node_or_null("Camera2D")
+	if cam != null:
+		cam.make_current()
 
 ## ========== 辅助方法 ==========
 
@@ -313,6 +331,8 @@ func apply_bullet_effect(effect: Resource) -> void:
 	## 播放获得特效音效（区别于普通拾取的强化感）
 	if AudioManager:
 		AudioManager.play("buff_pickup", 0.8)
+	## 广播特效列表变化（HUD更新buff图标栏）
+	effects_changed.emit(_private_bullet_data.effects.duplicate())
 
 ## 查询是否已拥有某子弹特效（UpgradeManager三选一去重过滤用）
 ## 参数：effect_id - 特效唯一标识（如"explosion"）
@@ -326,6 +346,13 @@ func has_bullet_effect(effect_id: String) -> bool:
 		if effect != null and effect.effect_id == effect_id:
 			return true
 	return false
+
+## 获取当前所有激活的子弹特效（HUD展示buff图标用）
+## 返回：特效资源数组的副本（防止外部修改内部列表）
+func get_active_effects() -> Array:
+	if _private_bullet_data == null:
+		return []
+	return _private_bullet_data.effects.duplicate()
 
 ## 应用核心血量上限加值（UpgradeManager血量词条调用）
 ## 数据流：UpgradeManager.apply_upgrade(max_hp_bonus词条) → 此方法 → 血量组件扩容
@@ -356,6 +383,8 @@ func _physics_process(delta: float) -> void:
 	## ---------- 险胜反馈系统（红血存活计时+心跳音效） ----------
 	_update_near_death_feedback(delta)
 
+	## 先刷新瞄准方向（键鼠=鼠标指向，手柄=右摇杆），移动朝向与射击共用
+	_update_aim()
 	## 处理玩家移动
 	_move(delta)
 	## 处理玩家射击
@@ -468,10 +497,34 @@ func _move(delta: float) -> void:
 	if animator != null:
 		## 移动/待机切换：有输入即弹跳，无输入回呼吸
 		animator.set_moving(input_dir != Vector2.ZERO)
-		## 朝向跟随鼠标瞄准方向（射击游戏的瞄准感：角色面向准星侧）
-		var aim_vec: Vector2 = get_global_mouse_position() - global_position
-		if absf(aim_vec.x) > 1.0:
-			animator.set_facing(aim_vec.x)
+		## 朝向跟随当前瞄准方向（键鼠=准星侧，手柄=右摇杆指向），双设备体验统一
+		if absf(_aim_direction.x) > 0.1:
+			animator.set_facing(_aim_direction.x)
+
+## 更新瞄准方向（每物理帧先于移动/射击执行）
+## 设备分流规则：
+##   1. 右摇杆有效偏转 → 手柄瞄准，缓存摇杆方向（拨过一次后持续保留，回中不丢失）
+##   2. 手柄设备但右摇杆回中 → 沿用缓存方向；从未拨过时回退到移动方向/默认右向
+##   3. 键鼠设备 → 玩家指向鼠标的世界坐标（原版逻辑）
+## 设备类型由 InputManager 事件驱动自动切换，玩家无需手动选模式
+func _update_aim() -> void:
+	## 分支1：右摇杆正在偏转（is_aim_active已做径向死区过滤）
+	if InputManager.is_aim_active():
+		_aim_direction = InputManager.get_aim_vector().normalized()
+		_has_joy_aim = true
+		return
+	## 分支2：手柄设备且摇杆回中——保留上次瞄准，不擅自改向
+	if InputManager.current_device == "joypad":
+		if not _has_joy_aim:
+			## 首次未拨右摇杆：移动中朝移动方向瞄准，静止时默认朝右
+			var move_vec: Vector2 = InputManager.get_movement()
+			if move_vec != Vector2.ZERO:
+				_aim_direction = move_vec.normalized()
+		return
+	## 分支3：键鼠——瞄准鼠标世界位置；鼠标与玩家重合时保持上一次方向（normalized零向量防护）
+	var mouse_dir: Vector2 = get_global_mouse_position() - global_position
+	if mouse_dir.length() > 0.001:
+		_aim_direction = mouse_dir.normalized()
 
 ## 处理玩家射击逻辑
 ## 参数：delta - 帧间隔时间（秒）
@@ -480,13 +533,15 @@ func _handle_shoot(delta: float) -> void:
 	_shoot_timer -= delta
 	
 	## 判断是否应该射击
-	## 自动射击模式：冷却完成后自动射击，无需按下鼠标
-	## 手动射击模式：需要按住鼠标左键才射击
+	## 自动射击模式：冷却完成后自动射击，无需按下按键（射击方向仍跟随当前瞄准）
+	## 手动射击模式：按住鼠标左键/手柄X键，或手柄右摇杆保持偏转（双摇杆射击惯例：拨摇杆即开火）
 	var should_shoot: bool = false
 	if auto_shoot:
 		should_shoot = _shoot_timer <= 0.0
 	else:
-		should_shoot = _shoot_timer <= 0.0 and InputManager.is_action_pressed_safe("game_shoot")
+		var trigger_held: bool = InputManager.is_action_pressed_safe("game_shoot") \
+			or InputManager.is_aim_active()
+		should_shoot = _shoot_timer <= 0.0 and trigger_held
 	
 	## 如果应该射击，执行射击动作
 	if should_shoot:
@@ -501,10 +556,9 @@ func set_auto_shoot(enabled: bool) -> void:
 
 ## 执行射击动作
 func _shoot() -> void:
-	## 获取鼠标在世界坐标系中的位置
-	var mouse_pos: Vector2 = get_global_mouse_position()
-	## 计算从玩家位置指向鼠标位置的方向向量并归一化
-	var direction: Vector2 = (mouse_pos - global_position).normalized()
+	## 射击方向使用每帧刷新的瞄准方向（键鼠=鼠标指向，手柄=右摇杆指向），
+	## 方向来源统一在_update_aim分流，此处不再直接读取鼠标
+	var direction: Vector2 = _aim_direction
 	
 	## 播放射击音效（带随机音高避免重复）
 	if AudioManager:

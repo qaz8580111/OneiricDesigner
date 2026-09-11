@@ -26,10 +26,25 @@ var _stats_label: Label = null
 ## 是否已构建完成（防止R键在面板构建前触发）
 var _is_ready: bool = false
 
+## ---------- 手柄/键盘导航状态 ----------
+## 当前选中按钮索引：0=再来一局，1=返回主菜单
+var _selected_index: int = 0
+
+## 两个按钮的引用（导航时需要高亮）
+var _restart_btn: Button = null
+var _menu_btn: Button = null
+
+## 选中态样式常量
+const SELECTED_MODULATE: Color = Color(1.25, 1.15, 0.75)  ## 金色高亮
+const NORMAL_MODULATE: Color = Color(1.0, 1.0, 1.0)
+const SELECT_TWEEN_TIME: float = 0.06
+
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 构建整个面板UI并填充本局统计
 func _ready() -> void:
+	## 结算面板需要在暂停状态下也能响应输入（死亡过渡后树已unpause，但保险起见）
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	## 全屏覆盖：set_anchors_and_offsets_preset同时设置锚点与偏移（等价编辑器Layout菜单）
 	## 关键修复：不能用set_anchors_preset——它只改锚点并按"保持当前矩形"重算偏移，
 	## 新建Control的矩形是(0,0,0,0)，结果面板塌缩成左上角0x0的点，
@@ -99,17 +114,24 @@ func _ready() -> void:
 	restart_btn.custom_minimum_size = Vector2(120, 28)
 	restart_btn.add_theme_color_override("font_color", Color(0.5, 1.0, 0.5))
 	restart_btn.pressed.connect(_on_restart_pressed)
+	## 禁用内置焦点导航，改用手动D-Pad逻辑（避免一次按键跳两格）
+	restart_btn.focus_mode = Control.FOCUS_NONE
 	hbox.add_child(restart_btn)
+	_restart_btn = restart_btn
 
 	## 返回主菜单按钮（次要操作，默认色）
 	var menu_btn: Button = Button.new()
 	menu_btn.text = "返回主菜单"
 	menu_btn.custom_minimum_size = Vector2(120, 28)
 	menu_btn.pressed.connect(_on_back_pressed)
+	menu_btn.focus_mode = Control.FOCUS_NONE
 	hbox.add_child(menu_btn)
+	_menu_btn = menu_btn
 
 	## 标记构建完成（R键重开生效前提）
 	_is_ready = true
+	## 默认选中"再来一局"（最高频操作）
+	_set_selection(0)
 
 ## _unhandled_input() - R键快捷重开
 ## 设计意图：死亡后重开是最高频操作，快捷键减少点击摩擦
@@ -123,6 +145,52 @@ func _unhandled_input(event: InputEvent) -> void:
 	## R键触发重开
 	if event.physical_keycode == KEY_R:
 		_on_restart_pressed()
+
+## _process() - 手柄D-Pad左右导航 + A键确认
+## 设计意图：结算面板是死亡后唯一交互入口，必须支持手柄全操作；
+## 复用InputManager网关保证与升级/神庙面板一致的输入过滤
+func _process(_delta: float) -> void:
+	## 构建未完成时不响应
+	if not _is_ready:
+		return
+	## D-Pad/方向键左：选中上一个按钮（左=再来一局，右=返回菜单，故左键选索引0）
+	if InputManager.is_action_just_pressed_safe("ui_left"):
+		_set_selection(0)
+	## D-Pad/方向键右：选中下一个按钮
+	elif InputManager.is_action_just_pressed_safe("ui_right"):
+		_set_selection(1)
+	## A键/空格/回车：确认当前选中按钮
+	elif InputManager.is_action_just_pressed_safe("ui_confirm") \
+			or InputManager.is_action_just_pressed_safe("game_confirm"):
+		_activate_current()
+
+## ========== 导航辅助方法 ==========
+
+## 设置选中索引（去重 + clamp保护）
+func _set_selection(index: int) -> void:
+	index = clampi(index, 0, 1)
+	if index == _selected_index and _is_ready:
+		return
+	_selected_index = index
+	_refresh_selection_visual()
+
+## 刷新选中按钮的视觉高亮
+func _refresh_selection_visual() -> void:
+	if _restart_btn == null or _menu_btn == null:
+		return
+	## 用单个tween同时高亮选中按钮、淡化未选中按钮
+	var tw: Tween = create_tween().set_parallel(true)
+	var selected: Button = _restart_btn if _selected_index == 0 else _menu_btn
+	var unselected: Button = _menu_btn if _selected_index == 0 else _restart_btn
+	tw.tween_property(selected, "modulate", SELECTED_MODULATE, SELECT_TWEEN_TIME).set_ease(Tween.EASE_OUT)
+	tw.tween_property(unselected, "modulate", NORMAL_MODULATE, SELECT_TWEEN_TIME).set_ease(Tween.EASE_OUT)
+
+## 激活当前选中的按钮
+func _activate_current() -> void:
+	if _selected_index == 0:
+		_on_restart_pressed()
+	else:
+		_on_back_pressed()
 
 ## ========== 内部方法 ==========
 

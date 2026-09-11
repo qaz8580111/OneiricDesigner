@@ -44,6 +44,9 @@ var _active_joypad_id: int = -1
 ## 缓存的移动向量（供 _process 轮询使用）
 var _cached_movement: Vector2 = Vector2.ZERO
 
+## 缓存的右摇杆瞄准向量（手柄双摇杆射击专用，已做径向死区过滤）
+var _cached_aim: Vector2 = Vector2.ZERO
+
 ## 缓存的动作按下状态（_input 中捕获，_physics_process 中消费后清除）
 var _just_pressed_actions: Dictionary = {}
 
@@ -108,8 +111,12 @@ func _input(event: InputEvent) -> void:
 		var game_actions: Array[String] = [
 			"game_move_up", "game_move_down", "game_move_left", "game_move_right",
 			"game_shoot", "game_interact", "game_confirm", "game_cancel",
-			"game_advance", "game_skip",
-			"ui_cancel", "ui_confirm"
+			"game_advance", "game_skip", "game_pause",
+			# UI方向动作也统一捕获：D-Pad/方向键在菜单与选择面板中经网关消费，
+			# 避免业务层直接读 Input（修复此前 ui_up/down/left/right 未入缓存导致
+			# MenuNavigator 与选择面板收不到 D-Pad 按下事件的问题）
+			"ui_cancel", "ui_confirm",
+			"ui_up", "ui_down", "ui_left", "ui_right"
 		]
 		for action in game_actions:
 			# 先检查动作是否存在于 InputMap 中，避免报错
@@ -130,6 +137,18 @@ func get_movement() -> Vector2:
 ## 获取导航向量（已处理死区+归一化）- UI菜单导航专用
 func get_navigation_vector() -> Vector2:
 	return _cached_movement
+
+
+## 获取右摇杆瞄准向量（已做径向死区过滤，未归一时保留摇杆倾斜强度）
+## 仅手柄有输入来源；键鼠瞄准走鼠标位置，调用方应先判断 current_device
+## 返回：摇杆偏转向量；回中时为 Vector2.ZERO
+func get_aim_vector() -> Vector2:
+	return _cached_aim
+
+
+## 右摇杆当前是否处于有效偏转（超出死区）- 手动射击模式下"拨摇杆即开火"
+func is_aim_active() -> bool:
+	return _cached_aim.length() > 0.0
 
 
 ## 安全检测动作按下（自动屏蔽输入冷却期）
@@ -286,7 +305,7 @@ func _update_device_type(device: String) -> void:
 		input_device_changed.emit(device)
 
 
-## 缓存移动输入向量（每帧刷新）：玩家等业务层读缓存而非直接查Input，
+## 缓存移动/瞄准输入向量（每帧刷新）：玩家等业务层读缓存而非直接查Input，
 ## 统一走网关保证死区/轴策略只在一处实现，便于全局调整
 func _cache_movement_input() -> void:
 	# 安全获取轴输入，确保动作存在
@@ -300,6 +319,18 @@ func _cache_movement_input() -> void:
 
 	_cached_movement = Vector2(input_x, input_y)
 
+	# ---------- 右摇杆瞄准轴（手柄独占；动作缺失时视为零输入） ----------
+	var aim_x: float = 0.0
+	var aim_y: float = 0.0
+	if InputMap.has_action("game_aim_left") and InputMap.has_action("game_aim_right"):
+		aim_x = Input.get_axis("game_aim_left", "game_aim_right")
+	if InputMap.has_action("game_aim_up") and InputMap.has_action("game_aim_down"):
+		aim_y = Input.get_axis("game_aim_up", "game_aim_down")
+	# 径向死区二次过滤：InputMap 的逐轴死区只能过滤单轴，斜向推摇杆时
+	# 合成向量仍可能残留漂移，按模长再过滤一次保证回中干净
+	var aim_vec: Vector2 = Vector2(aim_x, aim_y)
+	_cached_aim = aim_vec if aim_vec.length() >= JOYSTICK_DEADZONE else Vector2.ZERO
+
 
 ## 检查动作是否在当前上下文允许
 func _is_action_allowed_in_context(action: String) -> bool:
@@ -307,12 +338,24 @@ func _is_action_allowed_in_context(action: String) -> bool:
 
 	# 定义上下文允许的动作列表（值为动作名或前缀，如"ui_"放行全部ui_开头的动作）
 	var allowed_actions: Dictionary = {
-		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot"],
-		"PAUSE_MENU": ["ui_", "game_interact"],
+		# game_pause：手柄START/键盘Pause呼出暂停；瞄准为网关内轮询轴，game_aim_仅作文档化标注
+		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot", "game_pause", "game_aim_"],
+		# game_pause：暂停菜单中再按START恢复游戏（ui_cancel=B/ESC由菜单导航器处理恢复）
+		"PAUSE_MENU": ["ui_", "game_interact", "game_pause"],
 		"SETTINGS": ["ui_"],
 		"EVENT_POPUP": ["game_confirm", "game_cancel"],
 		"DIALOGUE": ["game_advance", "game_skip"],
 		"INVENTORY": ["ui_navigate", "ui_confirm", "ui_cancel"],
+		# 升级三选一/神庙面板：不暂停战斗，移动/射击/交互全部保留，
+		# 额外放行UI方向与确认动作供D-Pad/方向键选择卡片
+		"LEVEL_UP_CHOICE": [
+			"game_move_", "game_shoot", "game_interact", "game_aim_",
+			"ui_up", "ui_down", "ui_left", "ui_right", "ui_confirm", "game_confirm", "ui_cancel"
+		],
+		"TEMPLE_CHOICE": [
+			"game_move_", "game_shoot", "game_interact", "game_aim_",
+			"ui_up", "ui_down", "ui_left", "ui_right", "ui_confirm", "game_confirm", "ui_cancel"
+		],
 	}
 
 	var allowed: Array = allowed_actions.get(current_context, [])

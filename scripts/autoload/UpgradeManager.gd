@@ -225,6 +225,10 @@ func _do_open_level_up_choice() -> void:
 	## 连接选择信号：玩家选定词条后应用并关闭
 	_panel.upgrade_chosen.connect(_on_upgrade_chosen)
 
+	## 注册选择上下文：不暂停战斗（移动/射击保留），仅额外放行D-Pad/方向键+确认，
+	## push自带0.2s屏蔽期，防止升级瞬间残留的攻击/交互键直接选中卡片
+	InputManager.push_context("LEVEL_UP_CHOICE")
+
 	## 初始化面板显示（传入候选词条）
 	_panel.setup(choices)
 
@@ -301,6 +305,10 @@ func _process_pending() -> void:
 
 ## 关闭并销毁选择面板（连同 CanvasLayer 一起清理）
 func _close_panel() -> void:
+	## 条件注销选择上下文：仅当栈顶确实是本面板上下文时才pop。
+	## 跨场景重开（Main.reset_context）后栈已被重置，无条件pop会破坏新栈
+	if InputManager and InputManager.get_current_context() == "LEVEL_UP_CHOICE":
+		InputManager.pop_context()
 	if _panel != null and is_instance_valid(_panel):
 		_panel.queue_free()
 	_panel = null

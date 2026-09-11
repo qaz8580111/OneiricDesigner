@@ -3,8 +3,10 @@
 ## 设计意图：
 ##   1. 紧凑底栏：屏幕底部居中的小面板，不覆盖游戏画面，无全屏蒙层
 ##   2. 不暂停游戏：玩家可边战斗边选择，战斗节奏不被打断
-##   3. 水平卡片排列：3张卡片并排，鼠标点击或数字键1/2/3选择
+##   3. 水平卡片排列：3张卡片并排，鼠标点击/数字键1/2/3/手柄D-Pad左右+A选择
 ##   4. 描述用tooltip展示：卡片只显示名称，鼠标悬停看详情，减小占用面积
+## 输入架构：选择输入全部经InputManager网关（LEVEL_UP_CHOICE上下文放行ui_left/right/confirm）；
+##           卡片显式FOCUS_NONE，避免Godot内置焦点导航与手动选中索引双重移动
 ## 数据流：UpgradeManager.open_level_up_choice() → 创建面板 → setup(choices)
 ##        → 玩家选定 upgrade_chosen → UpgradeManager 应用词条、销毁面板
 extends Control
@@ -26,12 +28,25 @@ var _card_container: HBoxContainer = null
 var _panel_bg: PanelContainer = null
 var _animating: bool = true
 
+## 当前选中卡片索引（鼠标悬停/D-Pad左右共用一个选中态，A键/回车确认）
+var _selected_index: int = 0
+
+## ========== 选中态视觉常量 ==========
+
+## 选中卡片的金色提亮（modulate乘法叠加，>1允许，呈现高亮金属感）
+const SELECTED_MODULATE: Color = Color(1.25, 1.15, 0.75, 1.0)
+## 未选中卡片的正常颜色
+const NORMAL_MODULATE: Color = Color.WHITE
+## 选中卡片放大倍数（突出当前选项）
+const SELECTED_SCALE: Vector2 = Vector2(1.08, 1.08)
+## 选中态切换动画时长（秒，快速响应不拖沓）
+const SELECT_TWEEN_TIME: float = 0.06
+
 ## ========== 动画时长常量 ==========
 
 const PANEL_TIME: float = 0.15   ## 面板淡入时长
 const CARD_STAGGER: float = 0.04 ## 卡片错峰间隔
 const CARD_TIME: float = 0.12    ## 单张卡片入场时长
-const HOVER_TIME: float = 0.06   ## 悬停放大时长
 
 ## ========== 生命周期方法 ==========
 
@@ -89,6 +104,22 @@ func _ready() -> void:
 	## 动画初始状态
 	_panel_bg.modulate.a = 0.0
 
+## _process() - 手柄D-Pad/键盘方向键导航与确认（经InputManager网关轮询消费）
+## 每帧最多消费一次"刚按下"事件，天然支持连按但不会一帧跳多格
+func _process(_delta: float) -> void:
+	## 入场动画/已锁定选择期间不响应导航，避免误触
+	if _animating or _locked or _cards.is_empty():
+		return
+	## D-Pad左/键盘左方向键：选中左一张（边界夹取，不循环）
+	if InputManager.is_action_just_pressed_safe("ui_left"):
+		_set_selection(_selected_index - 1)
+	## D-Pad右/键盘右方向键：选中右一张
+	elif InputManager.is_action_just_pressed_safe("ui_right"):
+		_set_selection(_selected_index + 1)
+	## A键/Space/Enter：确认当前选中卡片
+	if InputManager.is_action_just_pressed_safe("ui_confirm"):
+		_choose(_selected_index)
+
 ## _unhandled_input() - 处理数字键1/2/3快捷选择
 func _unhandled_input(event: InputEvent) -> void:
 	if _animating or _locked:
@@ -109,6 +140,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func setup(choices: Array) -> void:
 	_choices = choices
 	_cards.clear()
+	## 选中索引置-1：入场动画结束时_set_selection(0)才会真正刷新高亮（同索引会被去重跳过）
+	_selected_index = -1
 	for i in range(choices.size()):
 		var card: Button = _create_card(choices[i], i)
 		card.modulate.a = 0.0
@@ -133,22 +166,45 @@ func _create_card(upgrade: Resource, index: int) -> Button:
 	card.text = "%d.[%s] %s" % [index + 1, rarity_names[rarity], display_name]
 	card.tooltip_text = desc
 	card.custom_minimum_size = Vector2(150, 32)
+	## 显式关闭引擎焦点导航：选中态由本面板通过_selected_index统一管理，
+	## 否则D-Pad/方向键会同时触发Godot内置焦点移动，导致一次按键跳两格
+	card.focus_mode = Control.FOCUS_NONE
 	card.add_theme_color_override("font_color", rarity_colors[rarity])
 	card.add_theme_color_override("font_hover_color", Color(1.0, 0.95, 0.5))
 	card.pressed.connect(_choose.bind(index))
-	## 悬停放大反馈
-	card.mouse_entered.connect(func() -> void:
-		card.pivot_offset = card.size * 0.5
-		var t: Tween = card.create_tween()
-		t.tween_property(card, "scale", Vector2(1.05, 1.05), HOVER_TIME).set_ease(Tween.EASE_OUT)
-	)
-	card.mouse_exited.connect(func() -> void:
-		var t: Tween = card.create_tween()
-		t.tween_property(card, "scale", Vector2.ONE, HOVER_TIME)
-	)
+	## 缩放以卡片中心为原点（选中放大时不偏移）
+	card.pivot_offset = card.custom_minimum_size * 0.5
+	## 鼠标悬停即同步选中索引：键鼠与手柄共用同一套选中高亮/确认逻辑
+	card.mouse_entered.connect(_set_selection.bind(index))
 	return card
 
-## 选择词条（统一入口：鼠标点击与键盘快捷键都走这里）
+## 设置当前选中卡片（鼠标悬停与D-Pad导航的唯一入口）
+## 参数：index - 目标索引，自动夹取到[0,卡片数)边界，不循环（线性选择符合直觉）
+func _set_selection(index: int) -> void:
+	if _cards.is_empty():
+		return
+	var new_index: int = clampi(index, 0, _cards.size() - 1)
+	if new_index == _selected_index:
+		return
+	_selected_index = new_index
+	_refresh_selection_visual()
+
+## 刷新全部卡片的选中态视觉（选中=金色提亮+放大，其余=正常）
+func _refresh_selection_visual() -> void:
+	for i in range(_cards.size()):
+		var card: Button = _cards[i]
+		var is_selected: bool = i == _selected_index
+		var target_modulate: Color = SELECTED_MODULATE if is_selected else NORMAL_MODULATE
+		var target_scale: Vector2 = SELECTED_SCALE if is_selected else Vector2.ONE
+		## 保留入场淡入的透明度（只改RGB，动画期间alpha由入场tween接管）
+		target_modulate.a = card.modulate.a
+		## 短tween过渡，选中反馈干脆利落
+		var t: Tween = card.create_tween()
+		t.set_parallel(true)
+		t.tween_property(card, "modulate", target_modulate, SELECT_TWEEN_TIME)
+		t.tween_property(card, "scale", target_scale, SELECT_TWEEN_TIME).set_ease(Tween.EASE_OUT)
+
+## 选择词条（统一入口：鼠标点击/数字键/D-Pad导航后A键确认都走这里）
 func _choose(index: int) -> void:
 	if _locked or _animating:
 		return
@@ -179,8 +235,11 @@ func _play_enter_animation() -> void:
 		ct.tween_interval(i * CARD_STAGGER)
 		ct.tween_property(card, "modulate:a", 1.0, CARD_TIME)
 
-	## 动画结束 → 解锁输入
+	## 动画结束 → 解锁输入并高亮第一张卡片（手柄玩家无需先按键即可确认默认项）
 	var total_time: float = max(0, _cards.size() - 1) * CARD_STAGGER + CARD_TIME
 	var unlock_tween: Tween = create_tween()
 	unlock_tween.tween_interval(total_time)
-	unlock_tween.tween_callback(func() -> void: _animating = false)
+	unlock_tween.tween_callback(func() -> void:
+		_animating = false
+		_set_selection(0)
+	)

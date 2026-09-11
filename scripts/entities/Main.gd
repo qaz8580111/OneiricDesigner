@@ -99,7 +99,11 @@ var game_hud: Control = null
 ## _ready() - 节点进入场景树时调用一次，用于初始化
 func _ready() -> void:
 	## 设置此节点为PROCESS_MODE_ALWAYS（暂停状态下仍可更新，确保死亡动画正常运行）
+	## 注意：Main自身ALWAYS，但游戏世界容器必须显式设为PAUSABLE，
+	## 否则Player/Enemy/Camera2D会继承ALWAYS导致暂停无效（已发生的线上事故根因）
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	## 游戏世界容器及其所有子节点（玩家/敌人/子弹/相机）在暂停时应冻结
+	game_world_container.process_mode = Node.PROCESS_MODE_PAUSABLE
 	
 	## 连接游戏管理器的信号（GameManager是全局单例）
 	if GameManager:
@@ -479,12 +483,22 @@ func _process(delta: float) -> void:
 	## 处理死亡黑屏过渡动画
 	_update_death_fade()
 	
-	## 检测取消/暂停按钮（如ESC键）
-	if InputManager.is_action_just_pressed_safe("ui_cancel"):
-		## 升级三选一进行中屏蔽ESC（防止暂停菜单叠加在选择面板上造成UI冲突）
-		## 数据流：升级触发 → UpgradeManager.is_choosing=true → 此处拦截ESC
+	## 检测暂停/取消按钮：
+	##   game_pause = 手柄START / 键盘PauseBreak（呼出与关闭暂停都走它）
+	##   ui_cancel  = 键盘ESC / 手柄B（游戏中可呼出；暂停中由PauseMenu导航器消费关闭）
+	var pause_pressed: bool = InputManager.is_action_just_pressed_safe("game_pause")
+	var cancel_pressed: bool = InputManager.is_action_just_pressed_safe("ui_cancel")
+	if pause_pressed or cancel_pressed:
+		## 升级三选一进行中屏蔽暂停（防止暂停菜单叠加在选择面板上造成UI冲突）
+		## 数据流：升级触发 → UpgradeManager.is_choosing=true → 此处拦截
 		if UpgradeManager and UpgradeManager.is_choosing:
 			return
-		## 如果当前在游戏中，显示暂停菜单
+		## 神庙选择面板打开期间同样屏蔽暂停（用上下文判断，无需Temple暴露状态）
+		if InputManager.get_current_context() == "TEMPLE_CHOICE":
+			return
+		## 游戏中：显示暂停菜单
 		if current_screen == Screen.GAME:
 			_show_pause_menu()
+		## 暂停中：START恢复游戏（B/ESC通常已被暂停菜单导航器消费，走不到这里，此处为兜底）
+		elif current_screen == Screen.PAUSED:
+			_on_resume_game()

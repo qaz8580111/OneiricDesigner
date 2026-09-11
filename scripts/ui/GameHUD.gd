@@ -23,6 +23,20 @@ extends Control
 ## 难度标签节点，显示当前难度等级（随时间提升）
 @onready var diff_label: Label = $DiffLabel
 
+## ========== Buff图标栏（展示已激活的子弹特效词条） ==========
+
+## Buff图标容器（水平排列在左上角血量条下方）
+var _buff_container: HBoxContainer = null
+
+## Buff图标缓存字典：key=effect_id, value=对应图标节点
+var _buff_icons: Dictionary = {}
+
+## 单个Buff图标的尺寸（正方形，像素）
+const BUFF_ICON_SIZE: float = 36.0
+
+## Buff图标之间的间距（像素）
+const BUFF_ICON_GAP: float = 6.0
+
 ## ========== 成员变量（运行时数据） ==========
 
 ## 玩家引用，用于获取玩家状态和连接信号
@@ -81,6 +95,11 @@ func _ready() -> void:
 	## 初始化经验条/等级/难度显示（读取单例当前值，兜底中途创建HUD的情况）
 	_refresh_progress_displays()
 
+	## ========== Buff图标栏初始化 ==========
+	## 设计意图：左上角血量/经验条下方横向排列已激活的子弹特效图标，
+	## 让玩家直观看到当前持有哪些词条效果（解决"吃了技能没感觉"的体验问题）
+	_build_buff_bar()
+
 	## 最后：根据 Settings 保存的 show_fps 初始化 FPS 标签
 	_init_fps_display()
 
@@ -110,11 +129,12 @@ func _init_fps_display() -> void:
 		_show_fps = false  # 默认不显示（避免影响首次游戏体验）
 
 	if _show_fps:
-		## 动态创建 FPS 标签（放在 HUD 左上角下方、血量条之下，不遮挡其他信息）
+		## 动态创建 FPS 标签（放在 HUD 左上角、buff栏下方，不遮挡其他信息）
+		## buff栏在y=80高36px，故FPS从y=122开始
 		_fps_label = Label.new()
 		_fps_label.name = "FPSLabel"
 		_fps_label.text = "FPS: --"
-		_fps_label.position = Vector2(20, 95)  # 经验条(72+8=80) + 15 空隙
+		_fps_label.position = Vector2(20, 122)
 		_fps_label.size = Vector2(200, 24)
 		_fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		## 样式：白色半透明加粗字体 + 青色数值，性能调试友好
@@ -207,6 +227,14 @@ func _find_player() -> bool:
 	## 连接梦境碎片变化信号：当玩家收集梦境碎片时触发回调
 	if _player.has_signal("dream_fragment_changed"):
 		_player.connect("dream_fragment_changed", _on_dream_fragment_changed)
+
+	## 连接子弹特效变化信号：玩家获得/失去特效词条时更新buff图标栏
+	## 数据流：Player.apply_bullet_effect → effects_changed → 此回调
+	if _player.has_signal("effects_changed"):
+		_player.connect("effects_changed", _on_effects_changed)
+		## 立即刷新一次（玩家可能在HUD创建前已有特效）
+		if _player.has_method("get_active_effects"):
+			_refresh_buff_icons(_player.get_active_effects())
 	
 	## 获取玩家的健康控制器节点
 	_health_controller = _player.get_node_or_null("HealthController")
@@ -321,6 +349,105 @@ func _on_difficulty_changed(new_level: int) -> void:
 		diff_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
 	else:
 		diff_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+
+## ========== Buff图标栏 ==========
+
+## 构建Buff图标栏容器（左上角，血量/经验条下方）
+func _build_buff_bar() -> void:
+	_buff_container = HBoxContainer.new()
+	_buff_container.name = "BuffBar"
+	_buff_container.add_theme_constant_override("separation", int(BUFF_ICON_GAP))
+	## 位置：左上角，经验条(72px)下方，留8px间隙
+	## 经验条在y=64，高8，所以buff栏起点y≈80
+	_buff_container.position = Vector2(20, 80)
+	## 不拦截鼠标（纯展示）
+	_buff_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_buff_container)
+
+## 根据effect_id生成稳定的颜色（同一特效始终同色，便于识别）
+## 参数：effect_id - 特效唯一标识
+## 返回：基于哈希的Color
+func _get_buff_color(effect_id: String) -> Color:
+	## 用effect_id的哈希值生成HSL色相，保证同id同色
+	var h: float = float(abs(effect_id.hash()) % 360) / 360.0
+	return Color.from_hsv(h, 0.65, 0.95)
+
+## 刷新Buff图标栏（响应Player.effects_changed信号）
+## 设计意图：增量更新——已存在的effect_id保留节点（避免闪烁），
+##           新增的创建图标，已移除的销毁节点
+## 参数：effects - 当前所有激活的子弹特效数组
+func _refresh_buff_icons(effects: Array) -> void:
+	if _buff_container == null:
+		return
+
+	## 构建当前特效id集合（用于判断哪些图标需要保留）
+	var current_ids: Dictionary = {}
+	for effect in effects:
+		if effect == null:
+			continue
+		var eid: String = effect.effect_id if "effect_id" in effect else "?"
+		current_ids[eid] = effect
+
+	## 移除不再激活的buff图标
+	for eid in _buff_icons.keys():
+		if not current_ids.has(eid):
+			var icon: Control = _buff_icons[eid]
+			if icon != null and is_instance_valid(icon):
+				icon.queue_free()
+			_buff_icons.erase(eid)
+
+	## 新增激活的buff图标
+	for eid in current_ids.keys():
+		if _buff_icons.has(eid):
+			continue  ## 已存在，跳过
+		var effect: Resource = current_ids[eid]
+		var icon: Control = _create_buff_icon(eid, effect)
+		_buff_container.add_child(icon)
+		_buff_icons[eid] = icon
+
+## 创建单个Buff图标（带颜色底+特效名称首字）
+## 参数：effect_id - 特效id；effect - 特效资源（取display_name等）
+## 返回：Buff图标节点
+func _create_buff_icon(effect_id: String, effect: Resource) -> Control:
+	## 外层Panel作为底色方块
+	var icon: Panel = Panel.new()
+	icon.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	## 用StyleBoxFlat设置背景色（基于effect_id哈希的稳定颜色）
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	style.bg_color = _get_buff_color(effect_id)
+	style.set_content_margin_all(0.0)
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.border_color = Color(1, 1, 1, 0.4)
+	icon.add_theme_stylebox_override("panel", style)
+
+	## 内层Label显示特效名称首2字符（快速识别）
+	var label: Label = Label.new()
+	label.text = effect_id.substr(0, 2).to_upper()
+	label.add_theme_color_override("font_color", Color(0, 0, 0, 0.85))
+	label.add_theme_font_size_override("font_size", 14)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.add_child(label)
+
+	## Tooltip显示完整特效id（鼠标悬停查看）
+	icon.tooltip_text = effect_id
+
+	return icon
+
+## 子弹特效变化回调（响应Player.effects_changed）
+## 参数：effects - 最新的特效数组
+func _on_effects_changed(effects: Array) -> void:
+	_refresh_buff_icons(effects)
 
 ## 玩家死亡回调：当玩家死亡时调用
 func _on_player_killed() -> void:

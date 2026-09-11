@@ -65,6 +65,12 @@ func _process(delta: float) -> void:
 	_pulse_time += delta
 	queue_redraw()
 
+## _exit_tree() - 节点被释放时兜底清理：面板挂在root的CanvasLayer上，
+## 不随Temple自动销毁；重开局（Main._clear_game）会free神庙，
+## 若此处不关闭，面板与TEMPLE_CHOICE上下文都会残留
+func _exit_tree() -> void:
+	_close_panel()
+
 ## _draw() - 程序化绘制神庙外观（石台+双柱+顶盖+发光宝石）
 func _draw() -> void:
 	var stone: Color = Color(0.45, 0.42, 0.5, 1.0)   ## 石头主色
@@ -169,6 +175,10 @@ func _open_panel() -> void:
 	## 玩家选定选项
 	_panel.option_chosen.connect(_on_option_chosen)
 
+	## 注册神庙选择上下文：不暂停战斗（移动/射击保留），额外放行D-Pad/方向键+确认；
+	## push自带0.2s屏蔽期，防止按E交互的同一次按键立刻选中选项（A/E/Space存在键位复用）
+	InputManager.push_context("TEMPLE_CHOICE")
+
 ## 玩家选定选项后的处理：应用效果 → 消失
 ## 参数：option - 被选中的神庙选项
 func _on_option_chosen(option: Resource) -> void:
@@ -205,6 +215,10 @@ func _vanish() -> void:
 
 ## 关闭面板（连同CanvasLayer一起清理）
 func _close_panel() -> void:
+	## 条件注销选择上下文：仅当栈顶确实是神庙上下文时才pop，
+	## 防止跨场景重置后误pop破坏新栈
+	if InputManager and InputManager.get_current_context() == "TEMPLE_CHOICE":
+		InputManager.pop_context()
 	if _panel != null and is_instance_valid(_panel):
 		_panel.queue_free()
 		_panel = null
