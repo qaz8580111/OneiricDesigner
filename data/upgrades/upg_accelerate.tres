@@ -9,5 +9,5 @@ upgrade_id = "upg_accelerate"
 display_name = "超频引擎"
 description = "子弹随飞行距离不断加速，越飞越快"
 rarity = 1
-max_stacks = 1
+max_stacks = 10
 bullet_effect = ExtResource("2")

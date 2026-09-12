@@ -9,5 +9,5 @@ upgrade_id = "upg_random"
 display_name = "混沌弹幕"
 description = "命中触发随机方向的弹幕风暴（子弹伤害减半）"
 rarity = 1
-max_stacks = 1
+max_stacks = 10
 bullet_effect = ExtResource("2")

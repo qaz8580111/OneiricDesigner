@@ -9,5 +9,5 @@ upgrade_id = "upg_armorbreak"
 display_name = "碎甲弹头"
 description = "命中削减敌人防御，使其后续受到的伤害提高"
 rarity = 1
-max_stacks = 1
+max_stacks = 10
 bullet_effect = ExtResource("2")

@@ -30,6 +30,10 @@ signal exp_changed(current_exp: int, needed: int)
 ## 参数：upgrade - 被应用的词条数据
 signal upgrade_applied(upgrade: Resource)
 
+## 已获得词条集合变化信号：层数增加时发出（GameHUD刷新buff图标栏与层数角标）
+## 参数：acquired - 当前已获得词条信息数组（元素为{id,name,rarity,stacks,max}字典）
+signal upgrades_changed(acquired: Array)
+
 ## ========== 等级与经验（碎片即经验） ==========
 
 ## 当前等级（从1开始）
@@ -234,23 +238,18 @@ func _do_open_level_up_choice() -> void:
 
 ## 从词条池按稀有度加权抽取3个不重复的可用词条
 ## 过滤规则：
-##   1. 叠加层数未达上限
-##   2. 特效词条未被拥有过（同特效只能拥有一次）
+##   1. 叠加层数未达上限（全局统一10级，满级词条不再出现）
+## 说明：特效词条重复获得时只累计层数（子弹特效按effect_id去重不会重复挂载），
+##       与属性词条一样遵循10级上限规则
 ## 返回：最多3个UpgradeData数组（池子不足时返回实际数量）
 func _roll_three_upgrades() -> Array:
 	## 第一步：过滤出当前可用词条
 	var available: Array = []
-	var player: Node2D = _get_player()
 	for upgrade in _upgrade_pool:
 		## 检查叠加层数上限
 		var stacks: int = _upgrade_stacks.get(upgrade.upgrade_id, 0)
 		if stacks >= upgrade.max_stacks:
 			continue
-		## 特效词条检查是否已拥有（通过玩家子弹特效的effect_id判断）
-		if upgrade.is_effect_upgrade() and player != null and player.has_method("has_bullet_effect"):
-			var effect_id: String = upgrade.bullet_effect.effect_id if upgrade.bullet_effect != null else ""
-			if effect_id != "" and player.has_bullet_effect(effect_id):
-				continue
 		available.append(upgrade)
 
 	## 无可用词条（全部满层）时返回空
@@ -327,6 +326,8 @@ func apply_upgrade(upgrade: Resource) -> void:
 	_upgrade_stacks[upgrade.upgrade_id] = _upgrade_stacks.get(upgrade.upgrade_id, 0) + 1
 	## 记录统计（本局获得词条数）
 	RunStats.add_upgrade_taken()
+	## 广播已获得词条变化（HUD刷新buff图标与层数角标）
+	upgrades_changed.emit(get_acquired_upgrades())
 
 	## 特效词条：追加到玩家子弹特效列表
 	if upgrade.is_effect_upgrade():
@@ -374,3 +375,28 @@ func _get_player() -> Node2D:
 	if players.size() > 0:
 		return players[0] as Node2D
 	return null
+
+## ========== 已获得词条查询（HUD buff 图标栏用） ==========
+
+## 查询指定词条当前层数（三选一面板显示"已有 Lv.N"用）
+## 参数：upgrade_id - 词条唯一标识
+## 返回：当前层数（0=未获得）
+func get_upgrade_stacks(upgrade_id: String) -> int:
+	return int(_upgrade_stacks.get(upgrade_id, 0))
+
+## 获取本局已获得的全部词条信息（HUD图标栏数据源）
+## 返回：字典数组，元素结构 {id, name, rarity, stacks, max_stacks}
+func get_acquired_upgrades() -> Array:
+	var result: Array = []
+	for upgrade in _upgrade_pool:
+		var stacks: int = int(_upgrade_stacks.get(upgrade.upgrade_id, 0))
+		if stacks <= 0:
+			continue
+		result.append({
+			"id": upgrade.upgrade_id,
+			"name": upgrade.display_name,
+			"rarity": upgrade.rarity,
+			"stacks": stacks,
+			"max_stacks": upgrade.max_stacks,
+		})
+	return result

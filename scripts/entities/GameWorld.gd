@@ -484,6 +484,17 @@ func spawn_temple(position: Vector2) -> void:
 	if not GameManager.is_playing():
 		return
 
+	## 全局唯一规则：同一时间只存在一座神庙。新神庙出现时，
+	## 旧神庙（未进入/未交互）立即消散消失——先快照列表再逐个清理，避免遍历中改数组
+	for old_temple in _temples.duplicate():
+		if not is_instance_valid(old_temple):
+			continue
+		## 优先走消散接口（播放淡出动画并自动清理面板/上下文）；无接口则直接释放
+		if old_temple.has_method("despawn"):
+			old_temple.despawn()
+		else:
+			old_temple.queue_free()
+
 	## 实例化神庙节点
 	var temple: Area2D = TEMPLE_SCENE.instantiate()
 	## 添加到场景树

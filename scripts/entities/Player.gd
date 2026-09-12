@@ -138,11 +138,6 @@ signal dream_fragment_changed(amount: int)
 ## 参数：state - 包含当前生存状态的字典
 signal health_changed(state: Dictionary)
 
-## 子弹特效列表变化时发出此信号（玩家获得/失去特效词条时）
-## 数据流：apply_bullet_effect → 此信号 → GameHUD 更新buff图标栏
-## 参数：effects - 当前所有激活的子弹特效资源数组
-signal effects_changed(effects: Array)
-
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
@@ -331,8 +326,6 @@ func apply_bullet_effect(effect: Resource) -> void:
 	## 播放获得特效音效（区别于普通拾取的强化感）
 	if AudioManager:
 		AudioManager.play("buff_pickup", 0.8)
-	## 广播特效列表变化（HUD更新buff图标栏）
-	effects_changed.emit(_private_bullet_data.effects.duplicate())
 
 ## 查询是否已拥有某子弹特效（UpgradeManager三选一去重过滤用）
 ## 参数：effect_id - 特效唯一标识（如"explosion"）
@@ -346,13 +339,6 @@ func has_bullet_effect(effect_id: String) -> bool:
 		if effect != null and effect.effect_id == effect_id:
 			return true
 	return false
-
-## 获取当前所有激活的子弹特效（HUD展示buff图标用）
-## 返回：特效资源数组的副本（防止外部修改内部列表）
-func get_active_effects() -> Array:
-	if _private_bullet_data == null:
-		return []
-	return _private_bullet_data.effects.duplicate()
 
 ## 应用核心血量上限加值（UpgradeManager血量词条调用）
 ## 数据流：UpgradeManager.apply_upgrade(max_hp_bonus词条) → 此方法 → 血量组件扩容

@@ -36,8 +36,8 @@ enum Rarity {
 ## 词条稀有度（决定抽取权重和UI颜色）
 @export var rarity: Rarity = Rarity.COMMON
 
-## 最大叠加层数（属性词条可重复获得，特效词条通常为1）
-@export var max_stacks: int = 5
+## 最大叠加层数（全局统一规则：所有技能均可升至10级，满级后从三选一候选中移除）
+@export var max_stacks: int = 10
 
 ## ========== 数值加成（属性词条使用） ==========
 

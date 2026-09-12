@@ -305,44 +305,22 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 
 ## ========== 神庙掉落系统 ==========
 
-## 神庙基础掉率（0.1%，初始状态）
-const TEMPLE_BASE_CHANCE: float = 0.001
-## 神庙掉率上限（10%，游戏后期）
-const TEMPLE_CHANCE_CAP: float = 0.10
-## 品级因子：敌人每点血量增加的掉率（35血坦克→+2.1%）
-const TEMPLE_HEALTH_FACTOR: float = 0.0006
-## 品级因子上限（+2%，防止高血怪单独就把掉率推满）
-const TEMPLE_HEALTH_CAP: float = 0.02
-## 难度等级因子：每级难度+0.5%（16级→+7.5%）
-const TEMPLE_LEVEL_FACTOR: float = 0.005
-## 精英怪额外加成（+1.5%）
-const TEMPLE_ELITE_BONUS: float = 0.015
+## 神庙固定掉率：0.001%（用户规则：概率不再随血量/难度/精英波动，保持极低恒定值）
+## 0.001% = 0.00001，即平均每击杀10万个高级怪出现一座
+## 注意：若意图是旧的0.1%（=0.001），将此常量改回0.001即可
+const TEMPLE_FIXED_CHANCE: float = 0.00001
 ## 小怪名单（击杀不掉神庙）：slime/bat/goblin/scout/spider
 ## 扩展说明：新增敌人默认按"高级怪"处理（有神庙掉率），若属于小怪需加入此名单
 const TEMPLE_BASIC_MOB_IDS: Array[String] = ["slime", "bat", "goblin", "scout", "spider"]
 
 ## 计算击杀指定敌人后神庙的出现概率
-## 公式：基础0.1% + 品级(血量)因子 + 难度等级因子 + 精英加成，夹在0.1%~10%之间
+## 规则（用户定制）：固定0.001%，不再随品级/难度/精英波动；小怪不掉神庙
 ## 参数：enemy_data - 被击杀敌人的数据资源
-## 返回：神庙出现概率（0.0~0.1），小怪返回0.0
+## 返回：神庙出现概率（0.0 或 TEMPLE_FIXED_CHANCE）
 func get_temple_spawn_chance(enemy_data: Resource) -> float:
 	if enemy_data == null:
 		return 0.0
 	## 小怪不掉神庙（用户规则：只有高级怪物才有几率出现神庙）
 	if "enemy_id" in enemy_data and enemy_data.enemy_id in TEMPLE_BASIC_MOB_IDS:
 		return 0.0
-
-	## 品级因子：血量越高品级越高（夹在0~2%之间）
-	var health_factor: float = 0.0
-	if "max_health" in enemy_data:
-		health_factor = minf(float(enemy_data.max_health) * TEMPLE_HEALTH_FACTOR, TEMPLE_HEALTH_CAP)
-
-	## 难度等级因子：等级越高概率越高
-	var level_factor: float = float(maxi(level - 1, 0)) * TEMPLE_LEVEL_FACTOR
-
-	## 精英加成
-	var elite_bonus: float = TEMPLE_ELITE_BONUS if ("is_elite" in enemy_data and enemy_data.is_elite) else 0.0
-
-	## 总概率：夹在基础值与上限之间
-	return clampf(TEMPLE_BASE_CHANCE + health_factor + level_factor + elite_bonus, \
-		TEMPLE_BASE_CHANCE, TEMPLE_CHANCE_CAP)
+	return TEMPLE_FIXED_CHANCE

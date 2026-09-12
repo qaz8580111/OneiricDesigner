@@ -216,6 +216,9 @@ func _start_game() -> void:
 	_is_death_slowmo = false
 	_slowmo_start_msec = 0
 	Engine.time_scale = 1.0
+	## 兜底解除暂停：神庙进入会暂停场景树，极端路径下（重开/回主菜单）
+	## 若Temple的_exit_tree清理未覆盖到，这里保证新一局一定是运行状态
+	get_tree().paused = false
 
 	## 清除当前所有UI界面（保留HUD）
 	_clear_ui()

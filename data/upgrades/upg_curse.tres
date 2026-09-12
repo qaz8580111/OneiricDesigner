@@ -9,5 +9,5 @@ upgrade_id = "upg_curse"
 display_name = "噩梦印记"
 description = "命中诅咒敌人4秒，其间其受到的伤害提高50%"
 rarity = 1
-max_stacks = 1
+max_stacks = 10
 bullet_effect = ExtResource("2")

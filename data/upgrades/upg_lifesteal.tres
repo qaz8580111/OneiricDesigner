@@ -9,5 +9,5 @@ upgrade_id = "upg_lifesteal"
 display_name = "血之汲取"
 description = "命中吸血：将30%伤害转化为自身治疗（护盾优先）"
 rarity = 1
-max_stacks = 1
+max_stacks = 10
 bullet_effect = ExtResource("2")

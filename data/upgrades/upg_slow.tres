@@ -9,5 +9,5 @@ upgrade_id = "upg_slow"
 display_name = "迟滞力场"
 description = "命中减速敌人50%，持续1.5秒"
 rarity = 0
-max_stacks = 1
+max_stacks = 10
 bullet_effect = ExtResource("2")

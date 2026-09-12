@@ -9,5 +9,5 @@ upgrade_id = "upg_poison"
 display_name = "蚀骨之毒"
 description = "命中使敌人中毒，3秒内每秒受到5点伤害"
 rarity = 1
-max_stacks = 1
+max_stacks = 10
 bullet_effect = ExtResource("2")

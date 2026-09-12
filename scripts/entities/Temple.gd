@@ -1,8 +1,10 @@
 ## Temple.gd - 远古神庙世界物体
 ## 职责：神庙的视觉呈现、玩家交互、选项面板管理、选定后消失
 ## 继承：Area2D（与PickUp同类的世界交互物体）
-## 出现方式：GameWorld.spawn_temple() 在高级怪死亡位置生成（概率由DifficultyManager计算）
+## 出现方式：GameWorld.spawn_temple() 在高级怪死亡位置生成（固定概率0.001%，全局同时仅一座）
 ## 交互方式：玩家靠近后按E（GameWorld统一处理E键，优先级高于拾取物）→ 调用 interact(player)
+## 进入规则：玩家进入神庙后游戏暂停（GameManager.pause_game），关闭面板后恢复
+## 替换规则：新神庙出现时，未进入的旧神庙立即消散（GameWorld.spawn_temple → despawn）
 ## 消失规则：玩家完成一次选项交互后，神庙伴随消散特效消失
 ## 视觉方案：_draw()程序化绘制（石台+双柱+顶盖+发光宝石，脉冲呼吸），
 ##           与主题皮肤系统无关——神庙是场景物体不是角色
@@ -38,8 +40,22 @@ var _interacted: bool = false
 ## 视觉脉冲计时器（宝石发光呼吸）
 var _pulse_time: float = 0.0
 
+## 玩家是否在交互范围内（_process中定时探测缓存，_draw只读缓存避免每帧组查询）
+var _player_near: bool = false
+
+## 交互范围探测节流计时（0.1秒一次，组查询成本摊薄）
+var _near_check_timer: float = 0.0
+const NEAR_CHECK_INTERVAL: float = 0.1
+
+## 重绘节流计时（脉冲动画30fps足够，不必每帧queue_redraw）
+var _redraw_timer: float = 0.0
+const REDRAW_INTERVAL: float = 1.0 / 30.0
+
 ## 消失动画中（true后不再响应交互，等待queue_free）
 var _vanishing: bool = false
+
+## 本神庙是否主动暂停了游戏（关闭面板时据此恢复，避免误恢复暂停菜单等其他暂停源）
+var _paused_by_temple: bool = false
 
 ## ========== 生命周期方法 ==========
 
@@ -59,11 +75,21 @@ func _ready() -> void:
 	tween.tween_property(self, "modulate:a", 1.0, 0.3)
 	tween.tween_property(self, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
-## _process() - 视觉脉冲计时
+## _process() - 视觉脉冲与交互范围探测（均节流，降低多神庙/后期场景开销）
 func _process(delta: float) -> void:
-	## 脉冲宝石发光（修改_process不重绘时用queue_redraw驱动_draw重画）
+	## 消失动画期间不再做范围探测（提示文字也不再需要）
+	if not _vanishing and not _interacted:
+		_near_check_timer -= delta
+		if _near_check_timer <= 0.0:
+			_near_check_timer = NEAR_CHECK_INTERVAL
+			_player_near = _is_player_near()
+
+	## 脉冲计时与30fps重绘（_draw是纯CPU绘制，节流避免每帧全量重画）
 	_pulse_time += delta
-	queue_redraw()
+	_redraw_timer -= delta
+	if _redraw_timer <= 0.0:
+		_redraw_timer = REDRAW_INTERVAL
+		queue_redraw()
 
 ## _exit_tree() - 节点被释放时兜底清理：面板挂在root的CanvasLayer上，
 ## 不随Temple自动销毁；重开局（Main._clear_game）会free神庙，
@@ -97,8 +123,8 @@ func _draw() -> void:
 	glow_color.a = 0.25 * gem_glow
 	draw_circle(Vector2(0, -12), 10.0, glow_color)
 
-	## 玩家在交互范围内且未交互：绘制交互提示
-	if not _interacted and not _vanishing and _is_player_near():
+	## 玩家在交互范围内且未交互：绘制交互提示（_player_near为节流探测缓存）
+	if not _interacted and not _vanishing and _player_near:
 		var hint_color: Color = Color(0.9, 0.85, 1.0, 0.9)
 		draw_string(ThemeDB.fallback_font, Vector2(-32, 40), "按 [E] 进入神庙", \
 			HORIZONTAL_ALIGNMENT_CENTER, 64, 10, hint_color)
@@ -106,8 +132,9 @@ func _draw() -> void:
 ## ========== 对外接口 ==========
 
 ## 玩家是否在交互范围内（GameWorld._handle_manual_pickup调用）
+## 返回节流探测缓存（10Hz刷新），避免交互方每帧触发组查询
 func is_player_in_range() -> bool:
-	return not _interacted and not _vanishing and _is_player_near()
+	return not _interacted and not _vanishing and _player_near
 
 ## 玩家交互（GameWorld._handle_manual_pickup在玩家按E时调用）
 ## 参数：player - 玩家节点
@@ -116,6 +143,9 @@ func interact(player: Node) -> void:
 	if _interacted or _vanishing:
 		return
 	if not GameManager.is_playing():
+		return
+	## 升级三选一面板排队中/正在选择：不允许进入（防止上下文栈与暂停状态交叉）
+	if UpgradeManager and UpgradeManager.is_choosing:
 		return
 
 	_interacted = true
@@ -165,17 +195,25 @@ func _open_panel() -> void:
 	_overlay_layer.name = "TempleOverlay"
 	## layer 越大越在上层显示，升级面板设为50，神庙面板同级=50
 	_overlay_layer.layer = 50
+	## 进入神庙即暂停：覆盖层必须绕过暂停，否则面板自身无法交互
+	_overlay_layer.process_mode = Node.PROCESS_MODE_ALWAYS
 	get_tree().root.add_child(_overlay_layer)
 
 	## 创建面板
 	_panel = TEMPLE_PANEL_SCRIPT.new()
+	_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	_overlay_layer.add_child(_panel)
 	_panel.setup(_options)
 
 	## 玩家选定选项
 	_panel.option_chosen.connect(_on_option_chosen)
 
-	## 注册神庙选择上下文：不暂停战斗（移动/射击保留），额外放行D-Pad/方向键+确认；
+	## 暂停战斗（玩家可安心选择；状态机守卫保证只在PLAYING时生效）
+	if GameManager and GameManager.is_playing():
+		GameManager.pause_game()
+		_paused_by_temple = true
+
+	## 注册神庙选择上下文：暂停后移动/射击自然停止，额外放行D-Pad/方向键+确认；
 	## push自带0.2s屏蔽期，防止按E交互的同一次按键立刻选中选项（A/E/Space存在键位复用）
 	InputManager.push_context("TEMPLE_CHOICE")
 
@@ -199,6 +237,13 @@ func _on_option_chosen(option: Resource) -> void:
 	else:
 		_interacted = false
 
+## 被新神庙替换：未进入的旧神庙立即消散（全局唯一规则）
+## 已进入/面板打开中的神庙不消散（此时游戏暂停，正常流程不会有新神庙生成，双保险）
+func despawn() -> void:
+	if _interacted or _vanishing:
+		return
+	_vanish()
+
 ## 消散动画后销毁神庙（"交互完离开后消失"规则）
 func _vanish() -> void:
 	if _vanishing:
@@ -219,6 +264,10 @@ func _close_panel() -> void:
 	## 防止跨场景重置后误pop破坏新栈
 	if InputManager and InputManager.get_current_context() == "TEMPLE_CHOICE":
 		InputManager.pop_context()
+	## 恢复战斗：仅当暂停由本神庙发起时才恢复（重开局已置PLAYING则resume_game内部守卫会拦）
+	if _paused_by_temple and GameManager:
+		_paused_by_temple = false
+		GameManager.resume_game()
 	if _panel != null and is_instance_valid(_panel):
 		_panel.queue_free()
 		_panel = null

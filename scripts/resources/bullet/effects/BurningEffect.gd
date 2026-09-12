@@ -58,22 +58,31 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 
 	_burn_target(target, duration, damage_per_second)
 
-## 火焰粒子视觉：目标位置迸出6片随机色温的火苗向上飘散淡出
+## 火焰粒子视觉：目标位置迸出3片随机色温的火苗向上飘散淡出
+## 性能：火苗数6→3（后期满屏燃烧时ColorRect/Tween分配减半），且3片火苗共用1个Tween
 ## 参数：world - 特效挂载的世界节点；pos - 火焰中心位置
 func _spawn_fire_flames(world: Node2D, pos: Vector2) -> void:
-	for i in range(6):
+	## 先创建全部火苗节点并记录
+	var flames: Array[ColorRect] = []
+	for i in range(3):
 		var flame := ColorRect.new()
 		flame.size = Vector2(10, 18)
 		flame.position = -flame.size / 2.0
 		flame.color = Color(1, randf_range(0.3, 0.7), 0, 0.9)
 		flame.global_position = pos + Vector2(randf_range(-10, 10), randf_range(-5, 5))
 		world.add_child(flame)
-		var tw: Tween = world.create_tween()
-		tw.set_parallel(true)
+		flames.append(flame)
+	## 单个并行Tween驱动全部火苗（旧实现每片火苗一个Tween，分配量x3）
+	var tw: Tween = world.create_tween()
+	tw.set_parallel(true)
+	for flame in flames:
 		tw.tween_property(flame, "scale", Vector2(0.3, 2.5), 0.5)
 		tw.tween_property(flame, "modulate:a", 0.0, 0.5)
 		tw.tween_property(flame, "global_position:y", flame.global_position.y - 25, 0.5)
-		tw.chain().tween_callback(flame.queue_free)
+	## 动画结束后逐个回收（chain后顺序追加的回调会在并行动画完成后依次执行）
+	tw.chain()
+	for flame in flames:
+		tw.tween_callback(flame.queue_free)
 
 ## 燃烧协程：按tick间隔结算持续伤害
 ## 参数：target - 燃烧目标；dur - 总持续时间（秒）；dps - 每秒伤害

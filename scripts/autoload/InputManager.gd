@@ -50,6 +50,14 @@ var _cached_aim: Vector2 = Vector2.ZERO
 ## 缓存的动作按下状态（_input 中捕获，_physics_process 中消费后清除）
 var _just_pressed_actions: Dictionary = {}
 
+## 扳机轴(LT=axis4/RT=axis5)当前扣下状态：action→bool
+## InputEventJoypadMotion没有pressed属性，通用按键分支无法捕获，
+## 必须自行维护轴值越阈(0.5)的边沿检测，否则升级面板收不到LT/RT
+var _trigger_axis_active: Dictionary = {}
+
+## 扳机扣下判定阈值（与game_choice_prev/next的InputMap deadzone一致）
+const TRIGGER_PRESSED_THRESHOLD: float = 0.5
+
 ## 缓存的鼠标左键按住状态
 var _mouse_left_pressed: bool = false
 
@@ -94,7 +102,11 @@ func _input(event: InputEvent) -> void:
 	
 	# 缓存游戏相关动作的按下事件
 	# 注意：不是所有 InputEvent 都有 pressed 和 echo 属性
-	# InputEventMouseMotion、InputEventJoypadMotion 等事件没有这些属性，直接跳过
+	# InputEventMouseMotion 没有这些属性，直接跳过；
+	# InputEventJoypadMotion 同样没有 pressed，但LT/RT扳机轴需要单独做越阈边沿检测
+	if event is InputEventJoypadMotion:
+		_handle_trigger_motion(event)
+		return
 	if not ('pressed' in event):
 		return
 	
@@ -112,6 +124,9 @@ func _input(event: InputEvent) -> void:
 			"game_move_up", "game_move_down", "game_move_left", "game_move_right",
 			"game_shoot", "game_interact", "game_confirm", "game_cancel",
 			"game_advance", "game_skip", "game_pause",
+			# 升级三选一切换：本分支只收键盘Q/E；手柄LT/RT是轴事件无pressed，
+			# 由_handle_trigger_motion单独做越阈边沿检测
+			"game_choice_prev", "game_choice_next",
 			# UI方向动作也统一捕获：D-Pad/方向键在菜单与选择面板中经网关消费，
 			# 避免业务层直接读 Input（修复此前 ui_up/down/left/right 未入缓存导致
 			# MenuNavigator 与选择面板收不到 D-Pad 按下事件的问题）
@@ -126,6 +141,29 @@ func _input(event: InputEvent) -> void:
 				## 双重过滤：动作存在 + 当前上下文允许，才写入缓存等待消费
 				if _is_action_allowed_in_context(action):
 					_just_pressed_actions[action] = true
+
+## 处理手柄轴事件中的LT/RT扳机（升级三选一切换用）
+## 背景：InputEventJoypadMotion无pressed属性，走不了通用按键缓存；
+##       这里按轴值是否越过TRIGGER_PRESSED_THRESHOLD自行做"按下/松开"边沿检测，
+##       只在松开→扣下的跳变沿写入一次just_pressed缓存（与按键语义一致）
+## 参数：event - 手柄轴事件（axis 4=LT / axis 5=RT）
+func _handle_trigger_motion(event: InputEventJoypadMotion) -> void:
+	## 输入屏蔽期同样丢弃扳机事件（防止面板push瞬间的残留扣动误选）
+	if _input_cooldown_timer > 0.0:
+		return
+	for action in ["game_choice_prev", "game_choice_next"]:
+		if not InputMap.has_action(action):
+			continue
+		## is_action判定轴方向归属（axis4+正向→prev，axis5+正向→next），
+		## 再用轴值阈值判定扣下状态
+		var now_active: bool = event.is_action(action) \
+			and event.axis_value >= TRIGGER_PRESSED_THRESHOLD
+		var was_active: bool = bool(_trigger_axis_active.get(action, false))
+		## 状态无论是否被上下文放行都要更新，避免上下文切换后边沿状态错乱
+		_trigger_axis_active[action] = now_active
+		## 仅在"松开→扣下"跳变沿、且当前上下文允许时缓存一次
+		if now_active and not was_active and _is_action_allowed_in_context(action):
+			_just_pressed_actions[action] = true
 
 
 ## ==================== 公开接口 ====================
@@ -346,10 +384,12 @@ func _is_action_allowed_in_context(action: String) -> bool:
 		"EVENT_POPUP": ["game_confirm", "game_cancel"],
 		"DIALOGUE": ["game_advance", "game_skip"],
 		"INVENTORY": ["ui_navigate", "ui_confirm", "ui_cancel"],
-		# 升级三选一/神庙面板：不暂停战斗，移动/射击/交互全部保留，
-		# 额外放行UI方向与确认动作供D-Pad/方向键选择卡片
+		# 升级三选一：不暂停战斗，移动/射击/交互全部保留；
+		# 卡片左右切换优先用手柄LT/RT扳机(game_choice_prev/next)，键盘Q/E同义；
+		# D-Pad/方向键(ui_left/ui_right)保留为备用，确认用A/Space
 		"LEVEL_UP_CHOICE": [
 			"game_move_", "game_shoot", "game_interact", "game_aim_",
+			"game_choice_prev", "game_choice_next",
 			"ui_up", "ui_down", "ui_left", "ui_right", "ui_confirm", "game_confirm", "ui_cancel"
 		],
 		"TEMPLE_CHOICE": [

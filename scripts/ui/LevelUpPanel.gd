@@ -3,9 +3,10 @@
 ## 设计意图：
 ##   1. 紧凑底栏：屏幕底部居中的小面板，不覆盖游戏画面，无全屏蒙层
 ##   2. 不暂停游戏：玩家可边战斗边选择，战斗节奏不被打断
-##   3. 水平卡片排列：3张卡片并排，鼠标点击/数字键1/2/3/手柄D-Pad左右+A选择
+##   3. 水平卡片排列：3张卡片并排，鼠标点击/数字键1/2/3/手柄LT·RT扳机+A选择
 ##   4. 描述用tooltip展示：卡片只显示名称，鼠标悬停看详情，减小占用面积
-## 输入架构：选择输入全部经InputManager网关（LEVEL_UP_CHOICE上下文放行ui_left/right/confirm）；
+## 输入架构：选择输入全部经InputManager网关（LEVEL_UP_CHOICE上下文放行
+##           game_choice_prev/next=手柄LT/RT扳机、键盘Q/E，ui_left/right为备用）；
 ##           卡片显式FOCUS_NONE，避免Godot内置焦点导航与手动选中索引双重移动
 ## 数据流：UpgradeManager.open_level_up_choice() → 创建面板 → setup(choices)
 ##        → 玩家选定 upgrade_chosen → UpgradeManager 应用词条、销毁面板
@@ -104,17 +105,19 @@ func _ready() -> void:
 	## 动画初始状态
 	_panel_bg.modulate.a = 0.0
 
-## _process() - 手柄D-Pad/键盘方向键导航与确认（经InputManager网关轮询消费）
+## _process() - 手柄LT/RT扳机(或D-Pad/键盘左右)导航与确认（经InputManager网关轮询消费）
 ## 每帧最多消费一次"刚按下"事件，天然支持连按但不会一帧跳多格
 func _process(_delta: float) -> void:
 	## 入场动画/已锁定选择期间不响应导航，避免误触
 	if _animating or _locked or _cards.is_empty():
 		return
-	## D-Pad左/键盘左方向键：选中左一张（边界夹取，不循环）
-	if InputManager.is_action_just_pressed_safe("ui_left"):
+	## 左移一张：手柄LT扳机 / 键盘Q / 备用D-Pad左·键盘左方向键（边界夹取，不循环）
+	if InputManager.is_action_just_pressed_safe("game_choice_prev") \
+			or InputManager.is_action_just_pressed_safe("ui_left"):
 		_set_selection(_selected_index - 1)
-	## D-Pad右/键盘右方向键：选中右一张
-	elif InputManager.is_action_just_pressed_safe("ui_right"):
+	## 右移一张：手柄RT扳机 / 键盘E / 备用D-Pad右·键盘右方向键
+	elif InputManager.is_action_just_pressed_safe("game_choice_next") \
+			or InputManager.is_action_just_pressed_safe("ui_right"):
 		_set_selection(_selected_index + 1)
 	## A键/Space/Enter：确认当前选中卡片
 	if InputManager.is_action_just_pressed_safe("ui_confirm"):
@@ -163,7 +166,14 @@ func _create_card(upgrade: Resource, index: int) -> Button:
 	var rarity: int = upgrade.rarity if "rarity" in upgrade else 0
 	var display_name: String = upgrade.display_name if "display_name" in upgrade else "???"
 	var desc: String = upgrade.description if "description" in upgrade else ""
-	card.text = "%d.[%s] %s" % [index + 1, rarity_names[rarity], display_name]
+	## 已获得过的词条显示当前等级（第二次拾取起即为Lv.2，满级10后不会再出现在候选中）
+	var level_tag: String = ""
+	var uid: String = upgrade.upgrade_id if "upgrade_id" in upgrade else ""
+	if uid != "" and UpgradeManager:
+		var cur_stacks: int = UpgradeManager.get_upgrade_stacks(uid)
+		if cur_stacks > 0:
+			level_tag = "  [Lv.%d→%d]" % [cur_stacks, cur_stacks + 1]
+	card.text = "%d.[%s] %s%s" % [index + 1, rarity_names[rarity], display_name, level_tag]
 	card.tooltip_text = desc
 	card.custom_minimum_size = Vector2(150, 32)
 	## 显式关闭引擎焦点导航：选中态由本面板通过_selected_index统一管理，

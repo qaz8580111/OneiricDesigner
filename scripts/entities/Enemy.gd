@@ -283,9 +283,18 @@ func _create_skill_hud() -> void:
 	_skill_bar_fg.position = Vector2(10, 13)
 	_skill_hud.add_child(_skill_bar_fg)
 
-## _process() - 每帧更新技能HUD（冷却进度条+距离显隐）
-func _process(_delta: float) -> void:
-	_update_skill_hud()
+## 技能HUD刷新节流间隔（秒）：每个敌人每帧做距离判定+进度条更新在LV32后(同屏数十敌人)开销显著，
+## 冷却条/显隐以4Hz刷新视觉上完全足够
+const SKILL_HUD_REFRESH_INTERVAL: float = 0.25
+## 技能HUD刷新节流计时器
+var _skill_hud_timer: float = 0.0
+
+## _process() - 节流更新技能HUD（冷却进度条+距离显隐），后期同屏敌人多时显著降低每帧开销
+func _process(delta: float) -> void:
+	_skill_hud_timer -= delta
+	if _skill_hud_timer <= 0.0:
+		_skill_hud_timer = SKILL_HUD_REFRESH_INTERVAL
+		_update_skill_hud()
 
 ## 更新技能HUD状态（冷却进度条宽度+距离显隐）
 func _update_skill_hud() -> void:

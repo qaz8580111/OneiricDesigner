@@ -37,6 +37,13 @@ const BUFF_ICON_SIZE: float = 36.0
 ## Buff图标之间的间距（像素）
 const BUFF_ICON_GAP: float = 6.0
 
+## ---------- 顶部居中游戏计时（玩家随时知道本局时长） ----------
+## 顶部居中时间标签
+var _time_center_label: Label = null
+## 顶部计时刷新节流（0.25秒刷新一次，避免每帧拼字符串）
+var _center_time_timer: float = 0.0
+const CENTER_TIME_REFRESH_INTERVAL: float = 0.25
+
 ## ========== 成员变量（运行时数据） ==========
 
 ## 玩家引用，用于获取玩家状态和连接信号
@@ -92,13 +99,21 @@ func _ready() -> void:
 	if DifficultyManager:
 		DifficultyManager.difficulty_changed.connect(_on_difficulty_changed)
 
+	## 监听已获得词条变化：新增技能/层数提升时刷新左上角buff图标栏
+	## 数据流：UpgradeManager.apply_upgrade → upgrades_changed → 此回调
+	if UpgradeManager:
+		UpgradeManager.upgrades_changed.connect(_on_upgrades_changed)
+
 	## 初始化经验条/等级/难度显示（读取单例当前值，兜底中途创建HUD的情况）
 	_refresh_progress_displays()
 
 	## ========== Buff图标栏初始化 ==========
-	## 设计意图：左上角血量/经验条下方横向排列已激活的子弹特效图标，
-	## 让玩家直观看到当前持有哪些词条效果（解决"吃了技能没感觉"的体验问题）
+	## 设计意图：左上角血量/经验条下方横向排列已获得的技能图标（含层数角标），
+	## 让玩家直观看到当前持有哪些词条、各自几级（解决"吃了技能没感觉"的体验问题）
 	_build_buff_bar()
+	## 容器就绪后立即刷新一次（HUD可能在已有词条后才创建）
+	if UpgradeManager:
+		_refresh_buff_icons(UpgradeManager.get_acquired_upgrades())
 
 	## 最后：根据 Settings 保存的 show_fps 初始化 FPS 标签
 	_init_fps_display()
@@ -116,6 +131,37 @@ func _ready() -> void:
 	## 设计意图：非操作观众抬头就能看到"活了多久/杀了多少/最高连击"，
 	## 创造"这个主播很猛"的印象；位置在屏幕底部居中，不遮挡游戏视野
 	_build_bottom_status_bar()
+
+	## ========== 顶部居中游戏计时 ==========
+	## 玩家游戏中随时需要知道已存活时长，放屏幕顶部正中央最醒目
+	_build_center_timer()
+
+## 构建顶部居中的游戏计时标签
+func _build_center_timer() -> void:
+	_time_center_label = Label.new()
+	_time_center_label.name = "CenterTimer"
+	_time_center_label.text = "00:00"
+	_time_center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_time_center_label.add_theme_font_size_override("font_size", 22)
+	## 金色半透明白字+黑色描边：任意背景上都可读
+	_time_center_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 0.95))
+	_time_center_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_time_center_label.add_theme_constant_override("outline_size", 5)
+	_time_center_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	## 水平居中于屏幕顶部（距顶12px，宽度200px）
+	var screen_size: Vector2 = get_viewport_rect().size
+	_time_center_label.position = Vector2(screen_size.x * 0.5 - 100.0, 12.0)
+	_time_center_label.size = Vector2(200.0, 30.0)
+	add_child(_time_center_label)
+
+## 刷新顶部居中计时（节流调用）
+func _refresh_center_timer() -> void:
+	if _time_center_label == null or RunStats == null:
+		return
+	var total_sec: int = int(RunStats.elapsed_time)
+	var mins: int = total_sec / 60
+	var secs: int = total_sec % 60
+	_time_center_label.text = "%02d:%02d" % [mins, secs]
 
 ## ========== FPS 计数器：读取设置 + 动态创建/刷新标签 ==========
 
@@ -156,6 +202,11 @@ func _process(delta: float) -> void:
 		if _stat_refresh_timer >= STAT_REFRESH_INTERVAL:
 			_stat_refresh_timer = 0.0
 			_refresh_bottom_status()
+		## 顶部居中计时刷新（节流0.25秒）
+		_center_time_timer += delta
+		if _center_time_timer >= CENTER_TIME_REFRESH_INTERVAL:
+			_center_time_timer = 0.0
+			_refresh_center_timer()
 
 	## ---------- FPS 计数 ----------
 	if not _show_fps or _fps_label == null:
@@ -227,14 +278,6 @@ func _find_player() -> bool:
 	## 连接梦境碎片变化信号：当玩家收集梦境碎片时触发回调
 	if _player.has_signal("dream_fragment_changed"):
 		_player.connect("dream_fragment_changed", _on_dream_fragment_changed)
-
-	## 连接子弹特效变化信号：玩家获得/失去特效词条时更新buff图标栏
-	## 数据流：Player.apply_bullet_effect → effects_changed → 此回调
-	if _player.has_signal("effects_changed"):
-		_player.connect("effects_changed", _on_effects_changed)
-		## 立即刷新一次（玩家可能在HUD创建前已有特效）
-		if _player.has_method("get_active_effects"):
-			_refresh_buff_icons(_player.get_active_effects())
 	
 	## 获取玩家的健康控制器节点
 	_health_controller = _player.get_node_or_null("HealthController")
@@ -364,58 +407,58 @@ func _build_buff_bar() -> void:
 	_buff_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_buff_container)
 
-## 根据effect_id生成稳定的颜色（同一特效始终同色，便于识别）
-## 参数：effect_id - 特效唯一标识
-## 返回：基于哈希的Color
-func _get_buff_color(effect_id: String) -> Color:
-	## 用effect_id的哈希值生成HSL色相，保证同id同色
-	var h: float = float(abs(effect_id.hash()) % 360) / 360.0
-	return Color.from_hsv(h, 0.65, 0.95)
+## 稀有度对应的图标底色（普通灰白/稀有蓝/史诗紫，与三选一面板配色一致）
+func _get_rarity_color(rarity: int) -> Color:
+	match rarity:
+		1:
+			return Color(0.4, 0.7, 1.0)    ## 稀有：蓝色
+		2:
+			return Color(0.8, 0.4, 1.0)    ## 史诗：紫色
+		_:
+			return Color(0.85, 0.85, 0.9)  ## 普通：浅灰白
 
-## 刷新Buff图标栏（响应Player.effects_changed信号）
-## 设计意图：增量更新——已存在的effect_id保留节点（避免闪烁），
+## 刷新Buff图标栏（响应UpgradeManager.upgrades_changed信号）
+## 设计意图：增量更新——已存在的词条id保留节点（仅更新层数角标，避免闪烁），
 ##           新增的创建图标，已移除的销毁节点
-## 参数：effects - 当前所有激活的子弹特效数组
-func _refresh_buff_icons(effects: Array) -> void:
+## 参数：acquired - get_acquired_upgrades()返回的词条信息字典数组
+func _refresh_buff_icons(acquired: Array) -> void:
 	if _buff_container == null:
 		return
 
-	## 构建当前特效id集合（用于判断哪些图标需要保留）
+	## 构建当前词条id集合（用于判断哪些图标需要保留）
 	var current_ids: Dictionary = {}
-	for effect in effects:
-		if effect == null:
-			continue
-		var eid: String = effect.effect_id if "effect_id" in effect else "?"
-		current_ids[eid] = effect
+	for info in acquired:
+		current_ids[info["id"]] = info
 
 	## 移除不再激活的buff图标
 	for eid in _buff_icons.keys():
 		if not current_ids.has(eid):
-			var icon: Control = _buff_icons[eid]
-			if icon != null and is_instance_valid(icon):
-				icon.queue_free()
+			var old: Control = _buff_icons[eid]
+			if old != null and is_instance_valid(old):
+				old.queue_free()
 			_buff_icons.erase(eid)
 
-	## 新增激活的buff图标
+	## 新增激活的buff图标；已存在的仅同步层数角标
 	for eid in current_ids.keys():
+		var info: Dictionary = current_ids[eid]
 		if _buff_icons.has(eid):
-			continue  ## 已存在，跳过
-		var effect: Resource = current_ids[eid]
-		var icon: Control = _create_buff_icon(eid, effect)
+			_update_buff_badge(_buff_icons[eid], int(info["stacks"]), int(info["max_stacks"]))
+			continue
+		var icon: Control = _create_buff_icon(info)
 		_buff_container.add_child(icon)
 		_buff_icons[eid] = icon
 
-## 创建单个Buff图标（带颜色底+特效名称首字）
-## 参数：effect_id - 特效id；effect - 特效资源（取display_name等）
+## 创建单个Buff图标（稀有度底色+技能名首2字+右下角层数角标）
+## 参数：info - 词条信息字典（id/name/rarity/stacks/max_stacks）
 ## 返回：Buff图标节点
-func _create_buff_icon(effect_id: String, effect: Resource) -> Control:
+func _create_buff_icon(info: Dictionary) -> Control:
 	## 外层Panel作为底色方块
 	var icon: Panel = Panel.new()
 	icon.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## 用StyleBoxFlat设置背景色（基于effect_id哈希的稳定颜色）
+	## 用StyleBoxFlat设置稀有度底色与白色描边
 	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = _get_buff_color(effect_id)
+	style.bg_color = _get_rarity_color(int(info["rarity"]))
 	style.set_content_margin_all(0.0)
 	style.corner_radius_top_left = 4
 	style.corner_radius_top_right = 4
@@ -428,26 +471,58 @@ func _create_buff_icon(effect_id: String, effect: Resource) -> Control:
 	style.border_color = Color(1, 1, 1, 0.4)
 	icon.add_theme_stylebox_override("panel", style)
 
-	## 内层Label显示特效名称首2字符（快速识别）
+	## 内层Label显示技能名称首2字符（中文游戏名的快速识别方式）
 	var label: Label = Label.new()
-	label.text = effect_id.substr(0, 2).to_upper()
+	var skill_name: String = String(info["name"])
+	label.text = skill_name.substr(0, 2)
 	label.add_theme_color_override("font_color", Color(0, 0, 0, 0.85))
-	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_font_size_override("font_size", 13)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	icon.add_child(label)
 
-	## Tooltip显示完整特效id（鼠标悬停查看）
-	icon.tooltip_text = effect_id
+	## 层数角标（右下角，Lv.2起显示；满级10用金色）
+	var badge: Label = Label.new()
+	badge.name = "LevelBadge"
+	badge.add_theme_font_size_override("font_size", 11)
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	badge.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	badge.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	badge.offset_left = -10
+	badge.offset_top = -12
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.add_child(badge)
+	_update_buff_badge(icon, int(info["stacks"]), int(info["max_stacks"]))
+
+	## Tooltip显示完整技能名与层数（鼠标悬停查看）
+	icon.tooltip_text = "%s  Lv.%d/%d" % [skill_name, int(info["stacks"]), int(info["max_stacks"])]
 
 	return icon
 
-## 子弹特效变化回调（响应Player.effects_changed）
-## 参数：effects - 最新的特效数组
-func _on_effects_changed(effects: Array) -> void:
-	_refresh_buff_icons(effects)
+## 更新图标右下角的层数角标（1级不显示，2级起白字，满级金字）
+## 参数：icon - 图标节点；stacks - 当前层数；max_stacks - 上限
+func _update_buff_badge(icon: Control, stacks: int, max_stacks: int) -> void:
+	var badge: Label = icon.get_node_or_null("LevelBadge")
+	if badge == null:
+		return
+	if stacks <= 1:
+		badge.text = ""
+		return
+	badge.text = "×%d" % stacks
+	if stacks >= max_stacks:
+		badge.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))  ## 满级金色
+	else:
+		badge.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))  ## 普通白色
+	## 描边保证深色底图上也清晰可读
+	badge.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	badge.add_theme_constant_override("outline_size", 3)
+
+## 已获得词条变化回调（响应UpgradeManager.upgrades_changed）
+## 参数：acquired - 最新的词条信息数组
+func _on_upgrades_changed(acquired: Array) -> void:
+	_refresh_buff_icons(acquired)
 
 ## 玩家死亡回调：当玩家死亡时调用
 func _on_player_killed() -> void:

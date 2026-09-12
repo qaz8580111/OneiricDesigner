@@ -9,5 +9,5 @@ upgrade_id = "upg_explosion"
 display_name = "爆裂星核"
 description = "子弹命中时爆炸，对范围内敌人造成120%范围伤害"
 rarity = 2
-max_stacks = 1
+max_stacks = 10
 bullet_effect = ExtResource("2")
