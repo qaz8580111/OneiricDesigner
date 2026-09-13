@@ -16,6 +16,9 @@ extends Control
 
 const UpgradeDataClass = preload("res://scripts/resources/upgrade/UpgradeData.gd")
 
+## 图标加载库（按"icon_<id>.png"路径契约自动加载，缺失时回退纯文字卡片）
+const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
+
 ## ========== 信号定义 ==========
 
 signal upgrade_chosen(upgrade: Resource)
@@ -176,6 +179,13 @@ func _create_card(upgrade: Resource, index: int) -> Button:
 	card.text = "%d.[%s] %s%s" % [index + 1, rarity_names[rarity], display_name, level_tag]
 	card.tooltip_text = desc
 	card.custom_minimum_size = Vector2(150, 32)
+	## 词条图标：按id+稀有度从IconLibrary加载（assets/art/ui/icons/ 路径契约），
+	## 图标缺失时保持纯文字卡片（容错，游戏不因缺图报错）
+	var icon_tex: Texture2D = IconLibraryLib.get_upgrade_icon(uid, rarity)
+	if icon_tex != null:
+		card.icon = icon_tex
+		## 限制图标宽度22px并等比缩放（原图1024px，直接显示会撑爆卡片）
+		card.add_theme_constant_override("icon_max_width", 22)
 	## 显式关闭引擎焦点导航：选中态由本面板通过_selected_index统一管理，
 	## 否则D-Pad/方向键会同时触发Godot内置焦点移动，导致一次按键跳两格
 	card.focus_mode = Control.FOCUS_NONE

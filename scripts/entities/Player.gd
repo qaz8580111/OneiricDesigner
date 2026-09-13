@@ -604,6 +604,9 @@ func take_damage(amount: float) -> void:
 		elif core_damage > 0.0:
 			if AudioManager:
 				AudioManager.play_2d("player_hurt", global_position, 0.9)
+			## 核心血量受击：播放受击动画（FRAMES 模式切到 hit 槽位，PROCEDURAL 模式触发抖动）
+			if animator != null:
+				animator.play_hit_shake()
 
 		## 如果刚进入无敌状态，启动闪烁效果
 		if is_invincible and not was_invincible:
@@ -719,7 +722,11 @@ func _on_critical_state_active(is_active: bool) -> void:
 
 ## 玩家死亡回调：当玩家核心血量归零时调用
 func _on_player_died() -> void:
-	## 将玩家颜色变为半透明灰色，表示死亡
+	## 播放死亡动画（FRAMES 模式切到 death 槽位）
+	if animator != null:
+		animator.play_death()
+	## 将玩家颜色变为半透明灰色，表示死亡（PROCEDURAL 模式的 sprite 用；FRAMES 模式下 sprite 隐藏，
+	## 序列帧节点的灰化由死亡帧本身表现，此处对 sprite 的设置仅作兼容）
 	sprite.modulate = Color(0.5, 0.5, 0.5, 0.5)
 
 ## ========== 无敌闪烁效果 ==========

@@ -1,7 +1,8 @@
-[gd_resource type="Resource" script_class="GameTheme" load_steps=23 format=3]
+[gd_resource type="Resource" script_class="GameTheme" load_steps=24 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/skin/GameTheme.gd" id="1_theme"]
 [ext_resource type="Script" path="res://scripts/resources/skin/CharacterSkin.gd" id="2_skin"]
+[ext_resource type="SpriteFrames" path="res://assets/art/roles/player_frames.tres" id="3_player_frames"]
 
 ; ==============================================================================
 ; default_theme.tres - 默认主题包（"梦境默认"）
@@ -12,25 +13,15 @@
 ; ==============================================================================
 
 ; ------------------------------ 玩家皮肤 ------------------------------
-; 蓝色英雄：剑+短发+胸甲+围巾（经典勇者造型）
+; 序列帧模式：使用 assets/art/roles/ 下的美术资源（delay/move/attack/hit/death）
+; render_mode=1=FRAMES；target_size 决定序列帧缩放目标（美术 24px 帧 → 放大到 40px）
 [sub_resource type="Resource" id="skin_player"]
 script = ExtResource("2_skin")
 skin_id = "default_player"
-shape = "square"
-main_color = Color(0, 0.5, 1, 1)
-accent_color = Color(0.55, 0.8, 1, 1)
+render_mode = 1
+frames = ExtResource("3_player_frames")
 target_size = Vector2(40, 40)
-move_bounce_scale = 0.14
-move_bounce_speed = 12.0
-weapon_type = "sword"
-weapon_color = Color(0.85, 0.85, 0.95, 1)
-hat_type = "none"
-hair_style = "spiky"
-hair_color = Color(0.15, 0.2, 0.35, 1)
-armor_style = "chestplate"
-armor_color = Color(0.3, 0.55, 0.85, 1)
-accessory_type = "scarf"
-accessory_color = Color(0.9, 0.3, 0.35, 1)
+flip_with_direction = true
 
 ; ------------------------------ 敌人兜底皮肤 ------------------------------
 ; 所有未单独配置的敌人用它（朴素红色方形+眼镜，标识"未定制"）

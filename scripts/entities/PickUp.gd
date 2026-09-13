@@ -17,10 +17,19 @@ extends Area2D
 ## 掉落道具数据资源类，用于配置道具属性和效果
 const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
 
+## 图标加载库（护盾装备按"icon_<shield_id>.png"路径契约加载图标贴图）
+const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
+
 ## ========== 静态纹理缓存（性能优化） ==========
 ## 设计意图：每次掉落都创建Image+ImageTexture有分配和上传开销，
 ##           掉落物颜色/尺寸组合有限，用static缓存按"颜色|尺寸"复用纹理
 static var _texture_cache: Dictionary = {}
+
+## 图标缩小纹理缓存：命名空间:id|尺寸 → 按道具尺寸预缩小的 ImageTexture
+## 命名空间区分来源（shield:护盾装备 / drop:消耗品），同类掉落物共享同一份缩小纹理
+## 设计意图：图标原图可能远大于掉落物显示尺寸，加载后立即缩小一次并按键缓存，
+##           多个同类掉落物共享；且不动 sprite.scale（脉冲动画按scale=1基线做绝对值tween）
+static var _icon_texture_cache: Dictionary = {}
 
 ## ========== 成员变量（运行时数据） ==========
 
@@ -47,6 +56,13 @@ var drop_item: DropItemClass = null
 ## 消失前闪烁警告时长（秒）：最后这段时间闪烁提示玩家"再不捡就没了"
 ## （roguelike掉落物的标准做法——有限寿命+临期视觉警告，兼顾性能与拾取体验）
 const BLINK_WINDOW: float = 3.0
+
+## 图标在游戏世界中的统一显示尺寸（像素，正方形边长）
+## 设计意图：美术图标源图仅24px且主体只占画布约35%~65%（四周透明边距），
+##           若按类型色块尺寸16/20/22渲染，视觉主体只有8~14px，远小于原实心色块；
+##           统一32px显示（主体等效约12~21px），既补偿透明边距又不超过玩家角色(40px)，
+##           所有掉落物视觉大小一致、清晰可辨；脉冲动画仍以scale=1为基线，不受影响
+const ICON_WORLD_SIZE: int = 32
 
 ## ========== 内部状态变量 ==========
 
@@ -164,50 +180,104 @@ func set_drop_item(item: DropItemClass) -> void:
 	if sprite == null or item == null:
 		return
 	
-	## 根据道具类型设置默认颜色和大小
+	## 根据道具类型设置显示尺寸与"兜底色"（有真实图标时颜色不生效，
+	## 仅在图标资源缺失时作为占位方块色，颜色语义保留用于兜底辨认）
 	var color: Color = Color.WHITE
 	var size: Vector2 = Vector2(20, 20)
-	
+
 	## 根据道具类型设置不同颜色和大小
 	match item.item_type:
 		DropItemClass.ItemType.DREAM_FRAGMENT:
-			## 梦境碎片：金色，16x16
+			## 梦境碎片：兜底色金色，16x16（正常使用 icon_fragments_* 真实图标）
 			color = Color(1, 0.8, 0, 1)
 			size = Vector2(16, 16)
 		DropItemClass.ItemType.HEALTH:
-			## 回血道具：绿色，20x20
+			## 回血道具：兜底色绿色，20x20（正常使用 icon_blood_* 真实图标）
 			color = Color(0, 1, 0, 1)
 			size = Vector2(20, 20)
 		DropItemClass.ItemType.WEAPON:
-			## 武器：灰色，24x24
+			## 武器：灰色，24x24（预留类型，暂无图标→显示灰色方块）
 			color = Color(0.5, 0.5, 0.5, 1)
 			size = Vector2(24, 24)
 		DropItemClass.ItemType.ITEM:
-			## 普通物品：浅灰色，20x20
+			## 普通物品：浅灰色，20x20（预留类型，暂无图标→显示浅灰方块）
 			color = Color(0.8, 0.8, 0.8, 1)
 			size = Vector2(20, 20)
 		DropItemClass.ItemType.BUFF:
-			## 增益效果：紫色，22x22
+			## 增益效果：兜底色紫色，22x22（正常使用 icon_skill 真实图标）
 			color = Color(1, 0, 1, 1)
 			size = Vector2(22, 22)
 		DropItemClass.ItemType.EQUIPMENT:
-			## 装备：青蓝色，24x24，与护盾视觉色一致
+			## 装备：兜底色青蓝色，24x24（正常使用对应护盾真实图标）
 			color = Color(0.3, 0.6, 1.0, 1)
 			size = Vector2(24, 24)
-	
-	## 如果是稀有道具，降低透明度（半透明效果）
+
+	## 稀有道具兜底方块半透明（有图标时下方白色基色会覆盖此效果）
 	if item.is_rare:
 		color.a = 0.8
-	
-	## 保存原始颜色（用于恢复手动拾取提示状态）
-	_original_color = color
-	## 设置精灵颜色
-	sprite.modulate = color
-	
-	## 创建占位纹理并应用到精灵
-	_create_placeholder_texture(sprite, color, int(size.x), int(size.y))
+
+	## ========== 外观解析：优先真实图标，缺失才用占位色块 ==========
+	## 图标来源按类型分两条，统一交给 _get_scaled_icon_texture 缩放缓存：
+	##   EQUIPMENT → 护盾图标（灰色护盾目录，id取自shield_equipment）
+	##   其他类型  → 掉落物图标（敌人掉落目录，item_id经DROP_ICON_MAP映射）
+	var icon_src: Texture2D = null
+	var icon_cache_key: String = ""
+	if item.item_type == DropItemClass.ItemType.EQUIPMENT and item.shield_equipment != null:
+		## 读取护盾id（用in检查属性存在，防御未挂脚本的资源）
+		if "shield_id" in item.shield_equipment:
+			var shield_id: String = str(item.shield_equipment.shield_id)
+			icon_src = IconLibraryLib.get_shield_icon(shield_id)
+			icon_cache_key = "shield:%s" % shield_id
+	else:
+		## 消耗品：按 item_id 英文语义自动适配图标（碎片/血包/技能书）
+		icon_src = IconLibraryLib.get_drop_icon(item.item_id)
+		icon_cache_key = "drop:%s" % item.item_id
+
+	## 按世界统一显示尺寸生成图标纹理（不用类型色块尺寸——那会把24px源图再下采样到16~22）。
+	## 放大像素小图用NEAREST、缩小大图用LANCZOS，插值方式在缩放方法内部按方向自动选择
+	var final_tex: Texture2D = null
+	if icon_src != null:
+		final_tex = _get_scaled_icon_texture(icon_src, icon_cache_key, ICON_WORLD_SIZE)
+
+	if final_tex != null:
+		## 图标路径：白色modulate保留美术原色（类型tint色会给彩色图标串色）；
+		## 闪烁/拾取淡出逻辑只改alpha，白色基色下表现不受影响
+		sprite.texture = final_tex
+		_original_color = Color.WHITE
+		sprite.modulate = Color.WHITE
+	else:
+		## 兜底路径：无图标资源（如预留的WEAPON/ITEM类型）时用颜色占位方块
+		_original_color = color
+		sprite.modulate = color
+		_create_placeholder_texture(sprite, color, int(size.x), int(size.y))
 
 ## ========== 辅助方法 ==========
+
+## 获取按世界显示尺寸缩放的图标纹理（通用：护盾装备/消耗品掉落共用，带静态缓存）
+## 数据流：调用方已从IconLibrary取得原图 → get_image缩放到目标尺寸 → 按缓存键复用
+## 参数：src - IconLibrary加载的原始图标纹理；cache_key - 缓存键（命名空间:id，尺寸由内部拼接）
+##       target_size - 目标显示尺寸（像素，正方形边长）
+## 返回：缩放后的纹理；原图无图像数据时返回 null（调用方回退占位色块）
+## 插值选择（关键画质点）：
+##   源图>目标（如护盾128→32，下采样）→ LANCZOS 高质量缩小，边缘干净
+##   源图<目标（如掉落24→32，上采样）→ NEAREST 最近邻，像素风小图放大保持锐利不发糊
+##   源图=目标 → 不resize，直接建纹理
+func _get_scaled_icon_texture(src: Texture2D, cache_key: String, target_size: int) -> Texture2D:
+	## 缓存键补尺寸后缀（同一id在不同显示尺寸下分别缓存）
+	var full_key := "%s|%d" % [cache_key, target_size]
+	if _icon_texture_cache.has(full_key):
+		return _icon_texture_cache[full_key]
+	## 取出图像数据
+	var img: Image = src.get_image()
+	if img == null:
+		return null
+	## 尺寸不一致才resize，按缩放方向选择插值算法
+	if img.get_width() != target_size:
+		var interp: int = Image.INTERPOLATE_LANCZOS if img.get_width() > target_size else Image.INTERPOLATE_NEAREST
+		img.resize(target_size, target_size, interp)
+	var scaled_tex: ImageTexture = ImageTexture.create_from_image(img)
+	_icon_texture_cache[full_key] = scaled_tex
+	return scaled_tex
 
 ## 创建占位纹理（无美术资源时使用）
 ## 性能设计：纹理按"颜色|尺寸"键入静态缓存，同配置掉落物共享纹理，

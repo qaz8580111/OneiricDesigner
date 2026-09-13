@@ -1,10 +1,14 @@
 ## GameHUD.gd - 游戏 HUD 界面脚本
-## 职责：显示玩家健康状态（血量）、梦境碎片数量、经验/等级、难度等实时游戏信息
+## 职责：显示玩家健康状态（血量）、梦境碎片数量、经验/等级、难度、装备护盾状态等实时游戏信息
 ## 继承：Control（Godot 4的UI控制节点，作为HUD容器）
 ## 数据流（被动刷新，HUD不持有游戏逻辑状态）：
 ##   Player.dream_fragment_changed / HealthController(health_changed, player_died) → 血量与碎片显示
 ##   UpgradeManager(exp_changed, level_up) → 经验条与等级；DifficultyManager(difficulty_changed) → 难度文字
+##   EquipmentShieldComponent(shield_equipped/shield_hit/...) → 护盾类型图标与耐久显示
 extends Control
+
+## 图标加载库（按"icon_<id>.png"路径契约自动加载，缺失时回退文字图标）
+const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
@@ -23,10 +27,12 @@ extends Control
 ## 难度标签节点，显示当前难度等级（随时间提升）
 @onready var diff_label: Label = $DiffLabel
 
-## ========== Buff图标栏（展示已激活的子弹特效词条） ==========
+## ========== Buff图标栏（按稀有度三行分区展示） ==========
 
-## Buff图标容器（水平排列在左上角血量条下方）
-var _buff_container: HBoxContainer = null
+## 三行图标容器缓存：key=稀有度枚举值(2史诗/1稀有/0普通)，value=该行的HBoxContainer
+## 设计意图：按稀有度分行且从高到低排列（史诗最上、普通最下），
+##           玩家扫一眼左上角即可判断当前build的强度构成
+var _buff_rows: Dictionary = {}
 
 ## Buff图标缓存字典：key=effect_id, value=对应图标节点
 var _buff_icons: Dictionary = {}
@@ -37,12 +43,28 @@ const BUFF_ICON_SIZE: float = 36.0
 ## Buff图标之间的间距（像素）
 const BUFF_ICON_GAP: float = 6.0
 
-## ---------- 顶部居中游戏计时（玩家随时知道本局时长） ----------
-## 顶部居中时间标签
-var _time_center_label: Label = null
-## 顶部计时刷新节流（0.25秒刷新一次，避免每帧拼字符串）
-var _center_time_timer: float = 0.0
-const CENTER_TIME_REFRESH_INTERVAL: float = 0.25
+## 三行图标区的起始y（护盾显示区84~120之下，与经验条/碎片统计彻底分离不遮挡）
+const BUFF_ROWS_START_Y: float = 130.0
+
+## 行间距 = 图标高度 + 图标间距（三行紧凑排列）
+const BUFF_ROW_SPACING: float = BUFF_ICON_SIZE + BUFF_ICON_GAP
+
+## ========== 装备护盾显示（左上角：类型图标 + 耐久度） ==========
+
+## 护盾显示面板容器（图标+名称耐久文字+耐久条，未装备护盾时整体隐藏）
+var _shield_panel: HBoxContainer = null
+## 护盾图标底板（Panel，底色随护盾颜色，图标缺失时作为类型色块兜底）
+var _shield_icon_holder: Panel = null
+## 护盾图标纹理矩形（真实图标贴图，缺失时隐藏）
+var _shield_icon_rect: TextureRect = null
+## 护盾名称+耐久数值标签（如"冰霜护盾 45/60"）
+var _shield_name_label: Label = null
+## 护盾耐久条（颜色随护盾类型）
+var _shield_durability_bar: ProgressBar = null
+## 装备护盾组件引用（数据源：Player下的EquipmentShieldComponent节点）
+var _equipment_shield: Node = null
+## 当前显示的护盾id（防止节流刷新时重复重建图标/颜色）
+var _shield_display_id: String = ""
 
 ## ========== 成员变量（运行时数据） ==========
 
@@ -67,12 +89,12 @@ var _fps_timer: float = 0.0
 var _fps_frame_count: int = 0
 const FPS_REFRESH_INTERVAL: float = 0.25  # 每秒4次刷新：流畅 + 低CPU
 
-## ---------- 底部常驻状态栏（直播增强：观众可读性） ----------
-## 存活时间标签（底部居中左）
+## ---------- 顶部常驻状态栏（直播增强：观众可读性） ----------
+## 存活时间标签（顶部居中左）
 var _time_label: Label = null
-## 击杀数标签（底部居中中）
+## 击杀数标签（顶部居中中）
 var _kills_label: Label = null
-## 最高连击标签（底部居中右）
+## 最高连击标签（顶部居中右）
 var _max_combo_label: Label = null
 ## 状态栏刷新节流计时器（0.5秒刷新一次，避免每帧读单例）
 var _stat_refresh_timer: float = 0.0
@@ -108,9 +130,15 @@ func _ready() -> void:
 	_refresh_progress_displays()
 
 	## ========== Buff图标栏初始化 ==========
-	## 设计意图：左上角血量/经验条下方横向排列已获得的技能图标（含层数角标），
-	## 让玩家直观看到当前持有哪些词条、各自几级（解决"吃了技能没感觉"的体验问题）
+	## 设计意图：左上角按稀有度三行排列已获得的技能图标（史诗/稀有/普通自上而下，
+	## 含层数角标），让玩家直观看到当前持有哪些词条、各自几级与强度构成
 	_build_buff_bar()
+	## ========== 装备护盾显示初始化 ==========
+	## 护盾类型图标+耐久条（未装备时隐藏，装备后常驻左上角经验条下方）
+	_build_shield_display()
+	## 面板就绪后立即刷新一次（兜底HUD在护盾已装备后才创建的情况；
+	## _find_player中的那次刷新因面板未构建被空引用保护跳过）
+	_refresh_shield_display()
 	## 容器就绪后立即刷新一次（HUD可能在已有词条后才创建）
 	if UpgradeManager:
 		_refresh_buff_icons(UpgradeManager.get_acquired_upgrades())
@@ -127,41 +155,11 @@ func _ready() -> void:
 	combo_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(combo_hud)
 
-	## ========== 底部常驻状态栏（直播增强：观众可读性） ==========
-	## 设计意图：非操作观众抬头就能看到"活了多久/杀了多少/最高连击"，
-	## 创造"这个主播很猛"的印象；位置在屏幕底部居中，不遮挡游戏视野
-	_build_bottom_status_bar()
-
-	## ========== 顶部居中游戏计时 ==========
-	## 玩家游戏中随时需要知道已存活时长，放屏幕顶部正中央最醒目
-	_build_center_timer()
-
-## 构建顶部居中的游戏计时标签
-func _build_center_timer() -> void:
-	_time_center_label = Label.new()
-	_time_center_label.name = "CenterTimer"
-	_time_center_label.text = "00:00"
-	_time_center_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_time_center_label.add_theme_font_size_override("font_size", 22)
-	## 金色半透明白字+黑色描边：任意背景上都可读
-	_time_center_label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.65, 0.95))
-	_time_center_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-	_time_center_label.add_theme_constant_override("outline_size", 5)
-	_time_center_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## 水平居中于屏幕顶部（距顶12px，宽度200px）
-	var screen_size: Vector2 = get_viewport_rect().size
-	_time_center_label.position = Vector2(screen_size.x * 0.5 - 100.0, 12.0)
-	_time_center_label.size = Vector2(200.0, 30.0)
-	add_child(_time_center_label)
-
-## 刷新顶部居中计时（节流调用）
-func _refresh_center_timer() -> void:
-	if _time_center_label == null or RunStats == null:
-		return
-	var total_sec: int = int(RunStats.elapsed_time)
-	var mins: int = total_sec / 60
-	var secs: int = total_sec % 60
-	_time_center_label.text = "%02d:%02d" % [mins, secs]
+	## ========== 顶部状态栏（直播增强：观众可读性） ==========
+	## 设计意图：非操作观众一眼看到"活了多久/杀了多少/最高连击"，
+	## 位置在屏幕顶部居中（原底部栏整体上移，替代原顶部计时标签的位置，
+	## 避免时间信息在顶部/底部重复出现）
+	_build_top_status_bar()
 
 ## ========== FPS 计数器：读取设置 + 动态创建/刷新标签 ==========
 
@@ -175,12 +173,12 @@ func _init_fps_display() -> void:
 		_show_fps = false  # 默认不显示（避免影响首次游戏体验）
 
 	if _show_fps:
-		## 动态创建 FPS 标签（放在 HUD 左上角、buff栏下方，不遮挡其他信息）
-		## buff栏在y=80高36px，故FPS从y=122开始
+		## 动态创建 FPS 标签（放在 HUD 左上角、buff三行图标区下方，不遮挡其他信息）
+		## buff三行图标区在y=130~250，故FPS从y=256开始
 		_fps_label = Label.new()
 		_fps_label.name = "FPSLabel"
 		_fps_label.text = "FPS: --"
-		_fps_label.position = Vector2(20, 122)
+		_fps_label.position = Vector2(20, 256)
 		_fps_label.size = Vector2(200, 24)
 		_fps_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		## 样式：白色半透明加粗字体 + 青色数值，性能调试友好
@@ -193,20 +191,17 @@ func _init_fps_display() -> void:
 		## 设置 process_mode 启用 _process 帧计数（HUD 根节点默认已是 INHERIT，这里仅记录）
 		set_process(true)
 
-## _process：FPS 计数 + 周期性刷新底部状态栏
-## FPS 只在 _show_fps=true 时跑计数逻辑；状态栏始终刷新（节流0.5秒）
+## _process：FPS 计数 + 周期性刷新顶部状态栏与护盾显示
+## FPS 只在 _show_fps=true 时跑计数逻辑；状态栏与护盾显示始终刷新（节流0.5秒）
 func _process(delta: float) -> void:
-	## ---------- 底部状态栏刷新（节流0.5秒） ----------
+	## ---------- 顶部状态栏与护盾显示刷新（节流0.5秒） ----------
 	if GameManager.is_playing():
 		_stat_refresh_timer += delta
 		if _stat_refresh_timer >= STAT_REFRESH_INTERVAL:
 			_stat_refresh_timer = 0.0
-			_refresh_bottom_status()
-		## 顶部居中计时刷新（节流0.25秒）
-		_center_time_timer += delta
-		if _center_time_timer >= CENTER_TIME_REFRESH_INTERVAL:
-			_center_time_timer = 0.0
-			_refresh_center_timer()
+			_refresh_top_status()
+			## 护盾耐久回盾是持续过程（无信号通知），靠节流轮询同步进度条
+			_refresh_shield_display()
 
 	## ---------- FPS 计数 ----------
 	if not _show_fps or _fps_label == null:
@@ -274,6 +269,22 @@ func _find_player() -> bool:
 	
 	## 获取玩家引用
 	_player = players[0] as Node2D
+
+	## ========== 装备护盾显示接管 ==========
+	## 获取装备护盾组件引用（护盾统计显示的数据源）
+	_equipment_shield = _player.get_node_or_null("EquipmentShieldComponent")
+	if _equipment_shield != null:
+		## 装备变更信号：拾取/替换/卸下护盾时立即刷新显示（含显隐切换）
+		if _equipment_shield.has_signal("shield_equipped"):
+			_equipment_shield.connect("shield_equipped", _on_shield_equipped_changed)
+		## 受击信号：耐久扣减立即刷新（避免等待节流轮询的视觉延迟）
+		if _equipment_shield.has_signal("shield_hit"):
+			_equipment_shield.connect("shield_hit", _on_shield_vital_changed)
+		## 破碎/回满信号：状态突变立即同步
+		if _equipment_shield.has_signal("shield_broken"):
+			_equipment_shield.connect("shield_broken", _on_shield_state_changed)
+		if _equipment_shield.has_signal("shield_regen_full"):
+			_equipment_shield.connect("shield_regen_full", _on_shield_state_changed)
 	
 	## 连接梦境碎片变化信号：当玩家收集梦境碎片时触发回调
 	if _player.has_signal("dream_fragment_changed"):
@@ -308,7 +319,11 @@ func _find_player() -> bool:
 	## 备用方案：直接读取玩家的 health 和 max_health 属性
 	elif "health" in _player and "max_health" in _player:
 		update_health(_player.health, _player.max_health)
-	
+
+	## 首次连接后立即刷新一次护盾显示（兜底HUD在护盾已装备后才创建的情况）
+	## 面板未构建时该调用被内部空引用保护跳过，_ready构建面板后会再次刷新
+	_refresh_shield_display()
+
 	return true
 
 ## ========== 血量更新方法 ==========
@@ -395,17 +410,22 @@ func _on_difficulty_changed(new_level: int) -> void:
 
 ## ========== Buff图标栏 ==========
 
-## 构建Buff图标栏容器（左上角，血量/经验条下方）
+## 构建Buff图标三行容器（左上角护盾显示区下方，按稀有度从高到低）
+## 行序：史诗(rarity=2)最上 → 稀有(1) → 普通(0)最下；空行不渲染任何内容
 func _build_buff_bar() -> void:
-	_buff_container = HBoxContainer.new()
-	_buff_container.name = "BuffBar"
-	_buff_container.add_theme_constant_override("separation", int(BUFF_ICON_GAP))
-	## 位置：左上角，经验条(72px)下方，留8px间隙
-	## 经验条在y=64，高8，所以buff栏起点y≈80
-	_buff_container.position = Vector2(20, 80)
-	## 不拦截鼠标（纯展示）
-	_buff_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_buff_container)
+	## 固定三行槽位：保证不同稀有度图标位置稳定（不会因获得顺序跳行）
+	for rarity: int in [2, 1, 0]:
+		var row: HBoxContainer = HBoxContainer.new()
+		## 行命名便于调试定位（Epic/Rare/Common）
+		row.name = "BuffRow_%s" % ["Epic", "Rare", "Common"][2 - rarity]
+		row.add_theme_constant_override("separation", int(BUFF_ICON_GAP))
+		## 行y坐标 = 起始y + 行索引×行距（史诗第0行/稀有第1行/普通第2行）
+		var row_index: int = 2 - rarity
+		row.position = Vector2(20, BUFF_ROWS_START_Y + BUFF_ROW_SPACING * float(row_index))
+		## 不拦截鼠标（纯展示）
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(row)
+		_buff_rows[rarity] = row
 
 ## 稀有度对应的图标底色（普通灰白/稀有蓝/史诗紫，与三选一面板配色一致）
 func _get_rarity_color(rarity: int) -> Color:
@@ -419,10 +439,10 @@ func _get_rarity_color(rarity: int) -> Color:
 
 ## 刷新Buff图标栏（响应UpgradeManager.upgrades_changed信号）
 ## 设计意图：增量更新——已存在的词条id保留节点（仅更新层数角标，避免闪烁），
-##           新增的创建图标，已移除的销毁节点
+##           新增的创建图标并放入其稀有度对应行，已移除的销毁节点
 ## 参数：acquired - get_acquired_upgrades()返回的词条信息字典数组
 func _refresh_buff_icons(acquired: Array) -> void:
-	if _buff_container == null:
+	if _buff_rows.is_empty():
 		return
 
 	## 构建当前词条id集合（用于判断哪些图标需要保留）
@@ -445,7 +465,9 @@ func _refresh_buff_icons(acquired: Array) -> void:
 			_update_buff_badge(_buff_icons[eid], int(info["stacks"]), int(info["max_stacks"]))
 			continue
 		var icon: Control = _create_buff_icon(info)
-		_buff_container.add_child(icon)
+		## 按词条稀有度放入对应行（史诗最上/稀有中/普通最下；同一id稀有度固定不会换行）
+		var row: HBoxContainer = _buff_rows[int(info["rarity"])]
+		row.add_child(icon)
 		_buff_icons[eid] = icon
 
 ## 创建单个Buff图标（稀有度底色+技能名首2字+右下角层数角标）
@@ -471,17 +493,37 @@ func _create_buff_icon(info: Dictionary) -> Control:
 	style.border_color = Color(1, 1, 1, 0.4)
 	icon.add_theme_stylebox_override("panel", style)
 
-	## 内层Label显示技能名称首2字符（中文游戏名的快速识别方式）
-	var label: Label = Label.new()
-	var skill_name: String = String(info["name"])
-	label.text = skill_name.substr(0, 2)
-	label.add_theme_color_override("font_color", Color(0, 0, 0, 0.85))
-	label.add_theme_font_size_override("font_size", 13)
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.add_child(label)
+	## 内层显示内容：优先真实图标（IconLibrary按id+稀有度加载），
+	## 图标缺失时回退技能名首2字文字（容错，游戏不因缺图报错）
+	var icon_tex: Texture2D = IconLibraryLib.get_upgrade_icon(String(info["id"]), int(info["rarity"]))
+	if icon_tex != null:
+		## 真实图标：TextureRect等比铺满（内缩1px露出稀有度边框色）
+		var tex_rect: TextureRect = TextureRect.new()
+		tex_rect.texture = icon_tex
+		## EXPAND_IGNORE_SIZE：忽略纹理原始1024px尺寸，按容器大小显示
+		tex_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		## KEEP_ASPECT_CENTERED：等比缩放居中，不拉伸变形
+		tex_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tex_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		## 四边内缩1px：露出底层Panel的白色描边与稀有度底色边线
+		tex_rect.offset_left = 1
+		tex_rect.offset_top = 1
+		tex_rect.offset_right = -1
+		tex_rect.offset_bottom = -1
+		tex_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon.add_child(tex_rect)
+	else:
+		## 回退：Label显示技能名称首2字符（中文游戏名的快速识别方式）
+		var label: Label = Label.new()
+		var skill_name_fallback: String = String(info["name"])
+		label.text = skill_name_fallback.substr(0, 2)
+		label.add_theme_color_override("font_color", Color(0, 0, 0, 0.85))
+		label.add_theme_font_size_override("font_size", 13)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon.add_child(label)
 
 	## 层数角标（右下角，Lv.2起显示；满级10用金色）
 	var badge: Label = Label.new()
@@ -497,7 +539,7 @@ func _create_buff_icon(info: Dictionary) -> Control:
 	_update_buff_badge(icon, int(info["stacks"]), int(info["max_stacks"]))
 
 	## Tooltip显示完整技能名与层数（鼠标悬停查看）
-	icon.tooltip_text = "%s  Lv.%d/%d" % [skill_name, int(info["stacks"]), int(info["max_stacks"])]
+	icon.tooltip_text = "%s  Lv.%d/%d" % [String(info["name"]), int(info["stacks"]), int(info["max_stacks"])]
 
 	return icon
 
@@ -524,17 +566,146 @@ func _update_buff_badge(icon: Control, stacks: int, max_stacks: int) -> void:
 func _on_upgrades_changed(acquired: Array) -> void:
 	_refresh_buff_icons(acquired)
 
+## ========== 装备护盾显示（类型图标 + 健康度） ==========
+
+## 构建护盾显示面板（左上角经验条下方，未装备时整体隐藏）
+## 结构：护盾面板(HBox) → 图标底板(Panel，底色随护盾色) + 信息列(VBox：名称耐久文字+耐久条)
+func _build_shield_display() -> void:
+	_shield_panel = HBoxContainer.new()
+	_shield_panel.name = "ShieldDisplay"
+	_shield_panel.add_theme_constant_override("separation", 6)
+	## 位置：经验条(72px+8高)下方，与碎片统计、经验条彻底分离
+	_shield_panel.position = Vector2(20, 84)
+	_shield_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_panel.visible = false  ## 初始无护盾，装备后由刷新逻辑显示
+	add_child(_shield_panel)
+
+	## 图标底板：36x36方块（尺寸与buff图标一致），底色随护盾颜色
+	_shield_icon_holder = Panel.new()
+	_shield_icon_holder.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
+	_shield_icon_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_panel.add_child(_shield_icon_holder)
+
+	## 信息列：名称耐久文字 + 耐久条（垂直排列）
+	var info_box: VBoxContainer = VBoxContainer.new()
+	info_box.add_theme_constant_override("separation", 2)
+	info_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_panel.add_child(info_box)
+
+	## 名称+耐久数值标签（如"冰霜护盾 45/60"），描边保证任意背景可读
+	_shield_name_label = Label.new()
+	_shield_name_label.add_theme_font_size_override("font_size", 12)
+	_shield_name_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_shield_name_label.add_theme_constant_override("outline_size", 3)
+	_shield_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	info_box.add_child(_shield_name_label)
+
+	## 耐久条（8px细条，颜色随护盾类型，关闭默认百分比文字）
+	_shield_durability_bar = ProgressBar.new()
+	_shield_durability_bar.custom_minimum_size = Vector2(150, 8)
+	_shield_durability_bar.show_percentage = false
+	_shield_durability_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	info_box.add_child(_shield_durability_bar)
+
+## 刷新护盾显示（显隐/图标/名称/耐久条全面同步）
+## 数据流：EquipmentShieldComponent(get_shield_data/get_current_hp) → 本方法写UI
+## 调用时机：护盾信号立即刷新 + _process节流轮询（回盾是持续过程无信号）
+func _refresh_shield_display() -> void:
+	## 面板未构建时直接返回（_find_player先于_ready构建面板执行的兜底）
+	if _shield_panel == null:
+		return
+	## 懒获取装备护盾组件（玩家可能在HUD之后创建）
+	if _equipment_shield == null and _player != null:
+		_equipment_shield = _player.get_node_or_null("EquipmentShieldComponent")
+
+	## 读取护盾数据与耐久（无护盾时隐藏面板并复位id缓存）
+	var data: Resource = null
+	var hp: float = 0.0
+	var max_hp: float = 0.0
+	if _equipment_shield != null and _equipment_shield.has_method("get_shield_data"):
+		data = _equipment_shield.get_shield_data()
+		if data != null:
+			hp = _equipment_shield.get_current_hp()
+			max_hp = _equipment_shield.get_max_hp()
+	_shield_panel.visible = data != null
+	if data == null:
+		_shield_display_id = ""
+		return
+
+	## 护盾颜色（缺属性时兜底默认青蓝色，与掉落物视觉一致）
+	var shield_color: Color = data.shield_color if "shield_color" in data else Color(0.3, 0.6, 1.0)
+	var shield_id: String = str(data.shield_id) if "shield_id" in data else ""
+
+	## 护盾类型变化时才重建图标与配色（节流轮询下避免每0.5秒重建节点）
+	if shield_id != _shield_display_id:
+		_shield_display_id = shield_id
+		## 图标底板底色=护盾颜色（白色细描边，与buff图标框风格统一）
+		var holder_style: StyleBoxFlat = StyleBoxFlat.new()
+		holder_style.bg_color = shield_color
+		holder_style.set_content_margin_all(0.0)
+		holder_style.corner_radius_top_left = 4
+		holder_style.corner_radius_top_right = 4
+		holder_style.corner_radius_bottom_left = 4
+		holder_style.corner_radius_bottom_right = 4
+		holder_style.border_width_left = 1
+		holder_style.border_width_right = 1
+		holder_style.border_width_top = 1
+		holder_style.border_width_bottom = 1
+		holder_style.border_color = Color(1, 1, 1, 0.4)
+		_shield_icon_holder.add_theme_stylebox_override("panel", holder_style)
+		## 名称与耐久条颜色随护盾类型
+		_shield_name_label.add_theme_color_override("font_color", shield_color)
+		_shield_durability_bar.tint_over = shield_color
+		_shield_durability_bar.tint_under = Color(0.3, 0.3, 0.3, 0.5)
+		## 类型图标：IconLibrary按icon_<shield_id>.png契约加载；缺失时隐藏贴图露出色块
+		var icon_tex: Texture2D = IconLibraryLib.get_shield_icon(shield_id)
+		if icon_tex != null:
+			## 首次用到时创建贴图矩形（等比缩放居中，内缩1px露出底板描边）
+			if _shield_icon_rect == null:
+				_shield_icon_rect = TextureRect.new()
+				_shield_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				_shield_icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+				_shield_icon_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+				_shield_icon_rect.offset_left = 1
+				_shield_icon_rect.offset_top = 1
+				_shield_icon_rect.offset_right = -1
+				_shield_icon_rect.offset_bottom = -1
+				_shield_icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				_shield_icon_holder.add_child(_shield_icon_rect)
+			_shield_icon_rect.texture = icon_tex
+			_shield_icon_rect.visible = true
+		elif _shield_icon_rect != null:
+			_shield_icon_rect.visible = false
+
+	## 名称+耐久数值与耐久条进度（每次刷新都更新——耐久是高频变化数据）
+	var display_name: String = str(data.display_name) if "display_name" in data else "护盾"
+	_shield_name_label.text = "%s %d/%d" % [display_name, int(ceilf(hp)), int(max_hp)]
+	_shield_durability_bar.max_value = max_hp
+	_shield_durability_bar.value = hp
+
+## 装备变更信号回调（拾取/替换/卸下护盾时触发）
+func _on_shield_equipped_changed(_data: Resource) -> void:
+	_refresh_shield_display()
+
+## 护盾受击信号回调（耐久扣减立即同步，参数不使用仅触发刷新）
+func _on_shield_vital_changed(_remaining_hp: float, _absorbed: float) -> void:
+	_refresh_shield_display()
+
+## 护盾破碎/回满信号回调（无参信号）
+func _on_shield_state_changed() -> void:
+	_refresh_shield_display()
+
 ## 玩家死亡回调：当玩家死亡时调用
 func _on_player_killed() -> void:
 	## 隐藏 HUD（游戏结束时不再显示）
 	visible = false
 
-## ========== 底部常驻状态栏（直播增强：观众可读性） ==========
+## ========== 顶部常驻状态栏（直播增强：观众可读性） ==========
 
-## 构建底部常驻状态栏（屏幕底部居中：存活时间 | 击杀数 | 最高连击）
-## 设计意图：非操作观众抬头就能看到本局核心数据，制造"主播很猛"的印象
-## 位置：屏幕底部居中，距底边 24px，三栏等宽
-func _build_bottom_status_bar() -> void:
+## 构建顶部常驻状态栏（屏幕顶部居中：存活时间 | 击杀数 | 最高连击）
+## 设计意图：非操作观众一眼看到本局核心数据，创造"主播很猛"的印象
+## 位置：屏幕顶部居中，距顶边 12px（原底部栏上移至此，时间信息不再重复出现）
+func _build_top_status_bar() -> void:
 	## 状态栏配置：[标签前缀, 颜色]
 	var configs: Array = [
 		["⏱", Color(0.75, 0.9, 1.0)],      ## 存活时间：淡蓝色
@@ -550,7 +721,7 @@ func _build_bottom_status_bar() -> void:
 
 	for i in range(3):
 		var label: Label = Label.new()
-		label.name = "BottomStat_%d" % i
+		label.name = "TopStat_%d" % i
 		label.text = "%s --" % configs[i][0]
 		label.add_theme_color_override("font_color", configs[i][1])
 		label.add_theme_font_size_override("font_size", 14)
@@ -558,10 +729,10 @@ func _build_bottom_status_bar() -> void:
 		label.add_theme_constant_override("outline_size", 4)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		## 位置：底部居中，三栏水平排列
+		## 位置：顶部居中，三栏水平排列（距顶12px）
 		var center_x: float = get_viewport_rect().size.x * 0.5
 		var col_x: float = center_x - bar_width * 0.5 + column_width * float(i)
-		label.position = Vector2(col_x, get_viewport_rect().size.y - bar_height - 24.0)
+		label.position = Vector2(col_x, 12.0)
 		label.size = Vector2(column_width, bar_height)
 		add_child(label)
 		labels.append(label)
@@ -570,8 +741,8 @@ func _build_bottom_status_bar() -> void:
 	_kills_label = labels[1]
 	_max_combo_label = labels[2]
 
-## 刷新底部状态栏文字（节流0.5秒调用一次，避免每帧读单例）
-func _refresh_bottom_status() -> void:
+## 刷新顶部状态栏文字（节流0.5秒调用一次，避免每帧读单例）
+func _refresh_top_status() -> void:
 	## 存活时间：从 RunStats 读取，格式 "MM:SS"
 	if _time_label and RunStats:
 		var total_sec: int = int(RunStats.elapsed_time)

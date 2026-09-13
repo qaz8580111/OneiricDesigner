@@ -40,10 +40,12 @@ var auto_shoot: bool = true
 var master_volume: float = 80.0
 
 ## 音频设置：音乐音量（0~100）
-var music_volume: float = 70.0
+## 调高让 BGM 占主导，与音效形成舒适主次
+var music_volume: float = 85.0
 
 ## 音频设置：音效音量（0~100）
-var sfx_volume: float = 90.0
+## 调低避免弹幕密集时盖过音乐
+var sfx_volume: float = 45.0
 
 ## 视频设置：分辨率索引（对应RESOLUTIONS数组的索引）
 ## 默认=1 → "1920x1280"，即项目默认 viewport 分辨率
@@ -395,23 +397,20 @@ func _on_master_volume_changed(value: float) -> void:
 		AudioManager.master_volume = value / 100.0
 
 ## 音乐音量变化回调：
-##   同步到 AudioServer Music 总线 + AudioManager 音乐通道
+##   同步到 AudioManager.bgm_volume（其内部写入 Music 总线，单一数据源避免双控）
 func _on_music_volume_changed(value: float) -> void:
 	music_volume = value
 	music_value.text = str(int(value))
-	## 实时应用（音乐音量只走 AudioServer 的 Music 总线；AudioManager 无音乐通道无需同步）
-	if AudioServer.get_bus_index("Music") != -1:
-		AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Music"), linear_to_db(value / 100.0))
+	## 实时应用：AudioManager.set_bgm_volume 会写入 Music 总线
+	if AudioManager:
+		AudioManager.set_bgm_volume(value / 100.0)
 
 ## 音效音量变化回调：
-##   同步到 AudioServer SFX 总线 + AudioManager sfx_volume（影响所有音效播放）
+##   同步到 AudioManager.sfx_volume（SFX 走 Master 总线 + 内部倍率，无独立 SFX 总线）
 func _on_sfx_volume_changed(value: float) -> void:
 	sfx_volume = value
 	sfx_value.text = str(int(value))
-	## 实时应用
-	if AudioServer.get_bus_index("SFX") != -1:
-		AudioServer.set_bus_volume_db(AudioServer.get_bus_index("SFX"), linear_to_db(value / 100.0))
-	## 同步 AudioManager 内部音量系数（直接赋值属性——AudioManager 没有setter方法）
+	## 实时应用：直接赋值 AudioManager.sfx_volume（影响所有音效播放）
 	if AudioManager:
 		AudioManager.sfx_volume = value / 100.0
 
@@ -447,9 +446,10 @@ func _reset_to_defaults() -> void:
 	if ThemeManager:
 		ThemeManager.set_theme(theme_id)
 	## ---- 音频默认值 ----
+	## BGM 调高(85) + 音效调低(45)，让背景音乐主导、音效辅助
 	master_volume = 80.0
-	music_volume = 70.0
-	sfx_volume = 90.0
+	music_volume = 85.0
+	sfx_volume = 45.0
 	## ---- 视频默认值（默认分辨率=1 → 1920x1280 项目默认） ----
 	resolution_index = 1
 	fullscreen = false
@@ -577,16 +577,15 @@ func _apply_volumes_immediate() -> void:
 	## Master 总线（必须存在）
 	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Master"), linear_to_db(master_volume / 100.0))
 
-	## Music 总线（存在则同步）
-	if AudioServer.get_bus_index("Music") != -1:
-		AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Music"), linear_to_db(music_volume / 100.0))
+	## Music 总线：通过 AudioManager.set_bgm_volume 写入（单一数据源）
+	if AudioManager:
+		AudioManager.set_bgm_volume(music_volume / 100.0)
 
-	## SFX 总线（存在则同步）
-	if AudioServer.get_bus_index("SFX") != -1:
-		AudioServer.set_bus_volume_db(AudioServer.get_bus_index("SFX"), linear_to_db(sfx_volume / 100.0))
+	## SFX：通过 AudioManager.sfx_volume 控制（SFX 走 Master 总线，无独立 SFX 总线）
+	## （已在下方 AudioManager 同步块中处理，此处无需重复设置总线）
 
 	## 同时同步 AudioManager 单例内部的 master/sfx 音量变量（供程序化音效播放使用；
-	## AudioManager 无音乐通道，音乐音量只由上方 Music 总线控制）
+	## 音乐音量已通过上方 AudioManager.set_bgm_volume 写入 Music 总线）
 	if AudioManager:
 		AudioManager.master_volume = master_volume / 100.0
 		AudioManager.sfx_volume = sfx_volume / 100.0

@@ -11,7 +11,7 @@
 ## 数据流：宿主状态变化 → 语义接口 → 内部状态 → _process 每帧写 sprite 的
 ##         scale/rotation/position/flip_h/modulate（或切换 AnimatedSprite2D 动画）
 class_name CharacterAnimator
-extends Node
+extends Node2D
 
 ## ========== 预加载资源 ==========
 
@@ -90,6 +90,9 @@ func _build_frames_sprite() -> void:
 		if tex != null and tex.get_width() > 0:
 			var fit_scale: float = _skin.target_size.x / float(tex.get_width())
 			_anim_sprite.scale = Vector2(fit_scale, fit_scale)
+	## 关键：创建后立即播放 idle，否则 AnimatedSprite2D 默认 animation 为 "default"（不存在），
+	## 启动时 set_moving(false) 因状态未变直接 return，不会触发 idle 播放 → 角色不可见
+	_play_frames("idle")
 
 ## ========== 语义接口（宿主唯一需要调用的四个动画入口 + 辅助） ==========
 
@@ -109,6 +112,9 @@ func set_facing(dir_x: float) -> void:
 	## 只取符号（0 保持原朝向）
 	if absf(dir_x) > 0.01:
 		_facing = signf(dir_x)
+	## FRAMES 模式：直接翻转序列帧精灵（PROCEDURAL 模式在 _process 中处理 sprite.flip_h）
+	if _anim_sprite != null and _skin != null:
+		_anim_sprite.flip_h = _skin.flip_with_direction and _facing < 0.0
 
 ## 播放攻击动画（宿主执行攻击动作时调用一次）
 func play_attack() -> void:
@@ -127,6 +133,11 @@ func play_hit_shake() -> void:
 	## FRAMES：播放 hit 槽位
 	if _anim_sprite != null:
 		_play_frames("hit")
+
+## 播放死亡动画（FRAMES 模式切到 death 槽位；PROCEDURAL 模式无动作，由宿主处理外观）
+func play_death() -> void:
+	if _anim_sprite != null:
+		_play_frames("death")
 
 ## ========== 每帧动画驱动 ==========
 

@@ -1,0 +1,61 @@
+[gd_resource type="SpriteFrames" load_steps=7 format=3]
+
+; ==============================================================================
+; player_frames.tres - 玩家序列帧资源
+; 帧来源：assets/art/roles/ 下的 PNG（delay/move1/move2/attack/hit/death）
+; 设计说明：用 ExtResource 引用外部 PNG，美术替换图片后无需重新生成本文件
+; 动画槽位命名与 CharacterSkin.CharacterAnimator 约定一致：idle/move/attack/hit/death
+; ==============================================================================
+
+[ext_resource type="Texture2D" path="res://assets/art/roles/delay.png" id="1_idle"]
+[ext_resource type="Texture2D" path="res://assets/art/roles/move1.png" id="2_move1"]
+[ext_resource type="Texture2D" path="res://assets/art/roles/move2.png" id="3_move2"]
+[ext_resource type="Texture2D" path="res://assets/art/roles/attack.png" id="4_attack"]
+[ext_resource type="Texture2D" path="res://assets/art/roles/hit.png" id="5_hit"]
+[ext_resource type="Texture2D" path="res://assets/art/roles/death.png" id="6_death"]
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("1_idle")
+}],
+"loop": true,
+"name": &"idle",
+"speed": 4.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("2_move1")
+}, {
+"duration": 1.0,
+"texture": ExtResource("3_move2")
+}],
+"loop": true,
+"name": &"move",
+"speed": 8.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("4_attack")
+}],
+"loop": false,
+"name": &"attack",
+"speed": 12.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("5_hit")
+}],
+"loop": false,
+"name": &"hit",
+"speed": 10.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("6_death")
+}],
+"loop": false,
+"name": &"death",
+"speed": 5.0
+}]

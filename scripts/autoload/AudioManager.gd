@@ -32,7 +32,20 @@ var _voice_index: int = 0
 ## 主音量（0.0~1.0线性值，设置界面可调，播放时经linear_to_db换算为分贝）
 @export var master_volume: float = 0.8
 ## 音效音量（0.0~1.0线性值，与主音量、单次播放倍率三者相乘后统一换算）
-@export var sfx_volume: float = 0.7
+## 调低音效让 BGM 占主导，避免弹幕密集时音效盖过音乐
+@export var sfx_volume: float = 0.45
+## 音乐音量（0.0~1.0线性值，写入 Music 总线；设置界面可调）
+## 调高 BGM 让背景音乐更突出，与音效形成舒适的主次层次
+@export var bgm_volume: float = 0.85
+
+## ========== BGM 通道（独立于音效池） ==========
+
+## 背景音乐播放器（独立通道，不占用音效池；挂 Music 总线）
+var _bgm_player: AudioStreamPlayer = null
+## 当前 BGM 流（缓存引用，避免重复 load）
+var _bgm_stream: AudioStream = null
+## BGM 资源路径（集中管理，换曲只需改此处常量）
+const BGM_PATH: String = "res://assets/audio/bgm/bgm.ogg"
 
 ## ========== 生命周期 ==========
 
@@ -51,6 +64,15 @@ func _ready() -> void:
 		_voice_pool.append(player)
 	## 生成全部音效
 	_generate_all_sfx()
+	## 初始化音频总线 + BGM 通道（顺序：先建总线再建播放器，确保 bus 名可解析）
+	_setup_audio_buses()
+	_setup_bgm()
+	## 监听游戏生命周期：开局播 BGM，结束停 BGM
+	## GameManager 在 autoload 顺序中先于 AudioManager 加载，此处可直接连接
+	GameManager.game_started.connect(_on_game_started)
+	GameManager.game_ended.connect(_on_game_ended)
+	## 启动即播放 BGM（菜单阶段也有背景音乐；game_started 时幂等不重启）
+	play_bgm()
 
 ## ========== 公共API ==========
 
@@ -89,6 +111,78 @@ func play_2d(name: String, global_pos: Vector2, vol_mult: float = 1.0, pitch_shi
 		var max_dist: float = 800.0
 		multiplier = clamp(1.0 - (dist / max_dist), 0.1, 1.0)
 	play(name, vol_mult * multiplier, pitch_shift)
+
+## ========== BGM 公共 API ==========
+
+## 播放背景音乐
+## 幂等：已在播放时不重启，避免场景切换/重开游戏时音乐被打断
+func play_bgm() -> void:
+	if _bgm_player == null or _bgm_stream == null:
+		return
+	if not _bgm_player.playing:
+		_bgm_player.play()
+
+## 停止背景音乐
+func stop_bgm() -> void:
+	if _bgm_player != null:
+		_bgm_player.stop()
+
+## 设置音乐音量（0.0~1.0，单一数据源：写入 Music 总线）
+## Settings 面板的音乐滑块调用此方法，确保 UI 与总线音量一致
+func set_bgm_volume(vol: float) -> void:
+	bgm_volume = clamp(vol, 0.0, 1.0)
+	var idx: int = AudioServer.get_bus_index("Music")
+	if idx != -1:
+		## maxf 兜底 0.001 避免 linear_to_db(0) 得到负无穷分贝
+		AudioServer.set_bus_volume_db(idx, linear_to_db(maxf(bgm_volume, 0.001)))
+
+## ========== 游戏生命周期回调 ==========
+
+## 游戏开始 → 确保 BGM 播放（幂等：已在播放则不重启，避免打断）
+## 设计意图：BGM 贯穿全程（主菜单→游戏中→结算），仅在被意外停止时恢复
+func _on_game_started() -> void:
+	play_bgm()
+
+## 游戏结束 → BGM 继续播放（用户要求贯穿全程，结算阶段不停音乐）
+## 保留回调接口以备未来扩展（如需在结算时切曲可在此处实现）
+func _on_game_ended() -> void:
+	pass
+
+## ========== 音频总线与 BGM 初始化 ==========
+
+## 确保 Music 总线存在（Settings 面板的音乐滑块控制此总线）
+## 设计意图：project.godot 未定义音频总线，此处程序化创建 Music 总线供 BGM 使用；
+## SFX 保持走 Master 总线 + AudioManager.sfx_volume 内部倍率（现有逻辑不变，避免双控）
+func _setup_audio_buses() -> void:
+	if AudioServer.get_bus_index("Music") == -1:
+		AudioServer.add_bus()
+		var idx: int = AudioServer.get_bus_count() - 1
+		AudioServer.set_bus_name(idx, "Music")
+		## 输出到 Master 总线（音乐最终汇入主音量，受主音量滑块控制）
+		AudioServer.set_bus_send(idx, "Master")
+	## 初始化 Music 总线音量为当前 bgm_volume
+	var music_idx: int = AudioServer.get_bus_index("Music")
+	if music_idx != -1:
+		AudioServer.set_bus_volume_db(music_idx, linear_to_db(maxf(bgm_volume, 0.001)))
+
+## 初始化 BGM 通道：创建播放器、加载音乐、设置循环
+func _setup_bgm() -> void:
+	_bgm_player = AudioStreamPlayer.new()
+	## 路由到 Music 总线（受音乐音量滑块控制）
+	_bgm_player.bus = "Music"
+	## 独立 BGM 不随场景树暂停停止（暂停菜单时音乐继续）
+	_bgm_player.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(_bgm_player)
+	## 加载 BGM 资源（首次 load 会触发 Godot 导入，生成 .import 文件）
+	_bgm_stream = load(BGM_PATH)
+	if _bgm_stream != null:
+		## 开启循环：BGM 默认无缝循环播放
+		## 注意：OGG 的 loop 属性可运行时设置，覆盖导入默认值
+		if "loop" in _bgm_stream:
+			_bgm_stream.loop = true
+		_bgm_player.stream = _bgm_stream
+	else:
+		push_warning("[AudioManager] BGM 资源加载失败：%s" % BGM_PATH)
 
 ## ========== 音效生成：合成所有游戏需要的音效 ==========
 

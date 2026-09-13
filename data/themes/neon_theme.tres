@@ -1,7 +1,8 @@
-[gd_resource type="Resource" script_class="GameTheme" load_steps=13 format=3]
+[gd_resource type="Resource" script_class="GameTheme" load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/skin/GameTheme.gd" id="1_theme"]
 [ext_resource type="Script" path="res://scripts/resources/skin/CharacterSkin.gd" id="2_skin"]
+[ext_resource type="SpriteFrames" path="res://assets/art/roles/player_frames.tres" id="3_player_frames"]
 
 ; ==============================================================================
 ; neon_theme.tres - "霓虹梦境"主题包
@@ -10,26 +11,14 @@
 ; ==============================================================================
 
 ; ------------------------------ 玩家皮肤 ------------------------------
-; 亮青圆球 + 霓虹剑 + 发光胸甲 + 荧光围巾（赛博勇者）
+; 序列帧模式：与默认主题共用同一套美术资源
 [sub_resource type="Resource" id="skin_player"]
 script = ExtResource("2_skin")
 skin_id = "neon_player"
-shape = "circle"
-main_color = Color(0.2, 1, 0.9, 1)
-accent_color = Color(0.85, 1, 1, 1)
+render_mode = 1
+frames = ExtResource("3_player_frames")
 target_size = Vector2(40, 40)
-move_bounce_scale = 0.16
-move_bounce_speed = 13.0
-weapon_type = "sword"
-weapon_color = Color(0.5, 1, 0.95, 1)
-hat_type = "none"
-hair_style = "spiky"
-hair_color = Color(0.05, 0.5, 0.6, 1)
-armor_style = "chestplate"
-armor_color = Color(0.1, 0.6, 0.75, 1)
-accessory_type = "scarf"
-accessory_color = Color(1, 0.2, 0.8, 1)
-outline_color = Color(0.3, 0.1, 0.5, 0.9)
+flip_with_direction = true
 
 ; ------------------------------ 敌人兜底皮肤 ------------------------------
 ; 霓虹品红方形 + 发光眼镜（赛博小兵）
