@@ -146,18 +146,22 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.physical_keycode == KEY_R:
 		_on_restart_pressed()
 
-## _process() - 手柄D-Pad左右导航 + A键确认
+## _process() - 手柄/键盘导航：LT/RT扳机与D-Pad左右切换按钮 + A键确认
 ## 设计意图：结算面板是死亡后唯一交互入口，必须支持手柄全操作；
-## 复用InputManager网关保证与升级/神庙面板一致的输入过滤
+## 复用InputManager网关保证与升级/神庙面板一致的输入过滤；
+## LT/RT走InputManager的扳机轴越阈边沿检测（game_choice_prev/next，SETTINGS上下文放行），
+## 与升级三选一切换语义完全一致——同一套肌肉记忆覆盖所有选择面板
 func _process(_delta: float) -> void:
 	## 构建未完成时不响应
 	if not _is_ready:
 		return
-	## D-Pad/方向键左：选中上一个按钮（左=再来一局，右=返回菜单，故左键选索引0）
-	if InputManager.is_action_just_pressed_safe("ui_left"):
+	## LT扳机/方向键左：选中"再来一局"（索引0）
+	if InputManager.is_action_just_pressed_safe("game_choice_prev") \
+			or InputManager.is_action_just_pressed_safe("ui_left"):
 		_set_selection(0)
-	## D-Pad/方向键右：选中下一个按钮
-	elif InputManager.is_action_just_pressed_safe("ui_right"):
+	## RT扳机/方向键右：选中"返回主菜单"（索引1）
+	elif InputManager.is_action_just_pressed_safe("game_choice_next") \
+			or InputManager.is_action_just_pressed_safe("ui_right"):
 		_set_selection(1)
 	## A键/空格/回车：确认当前选中按钮
 	elif InputManager.is_action_just_pressed_safe("ui_confirm") \
@@ -195,14 +199,14 @@ func _activate_current() -> void:
 ## ========== 内部方法 ==========
 
 ## 从RunStats构建本局统计文本
-## 返回：多行统计文本（存活时间/击杀/碎片/等级/难度/词条数）
+## 返回：多行统计文本（存活时间/击杀/碎片/难度/词条数）
 func _build_stats_text() -> String:
 	## 数据流：RunStats单例（各系统上报）→ 此方法 → 展示
 	var lines: Array[String] = []
 	lines.append("存活时间：%s" % RunStats.get_formatted_time())
 	lines.append("击杀敌人：%d" % RunStats.kills)
 	lines.append("梦境碎片：%d" % RunStats.fragments_total)
-	lines.append("最终等级：%d    最终难度：%d" % [RunStats.level_reached, RunStats.difficulty_reached])
+	lines.append("最终难度：%d" % RunStats.difficulty_reached)
 	lines.append("获得词条：%d" % RunStats.upgrades_taken)
 	return "\n".join(lines)
 

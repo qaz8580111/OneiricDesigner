@@ -149,6 +149,35 @@ var _wander_direction: Vector2 = Vector2.ZERO
 ## 当前敌人状态（漫游/追踪/攻击）
 var _current_state: EnemyState = EnemyState.WANDER
 
+## ========== 远距碰撞休眠（性能核心优化：修复8分钟后大敌潮卡顿） ==========
+
+## 设计意图（为什么需要）：
+##   敌人碰撞 mask=3 含"敌人层"——所有敌人涌向玩家会形成高密度"人堆"，
+##   堆内任意两只敌人都在做窄相碰撞解算，成本随堆密度 O(n²) 增长；
+##   8分钟后刷怪节奏追上击杀节奏，同屏~140只敌人挤在玩家周围时
+##   物理服务器每帧要做上万次圆形窄相检测 → 全画面掉帧。
+## 方案（为什么不删敌人间碰撞）：
+##   敌人互相推挤是近身玩法的一部分（在玩家周围形成包围圈而非叠成一格），
+##   不能直接去掉；但屏幕外的敌人玩家根本看不见，其碰撞纯属白算——
+##   远距敌人休眠碰撞（mask=0，直接位移无推挤），接近时恢复完整碰撞。
+## 迟滞双阈值：750px 休眠 / 650px 唤醒，两阈值相隔100px防止在边界来回抖动
+##   （单阈值下敌人恰好在阈值附近徘徊时每帧切换mask会疯狂触发物理服务器重建配对）
+
+## 触发休眠的距离（与玩家距离超过此值 → 关闭碰撞，纯位移追玩家）
+const COLLISION_DORMANT_DISTANCE: float = 750.0
+
+## 恢复唤醒的距离（与玩家距离回到此值内 → 恢复完整碰撞）
+const COLLISION_AWAKE_DISTANCE: float = 650.0
+
+## 完整碰撞掩码（玩家层1 + 敌人层2 = 3，与 Enemy.tscn 配置一致）
+const COLLISION_MASK_ACTIVE: int = 3
+
+## 休眠碰撞掩码（不与任何层碰撞，move_and_slide 退化为纯位移）
+const COLLISION_MASK_DORMANT: int = 0
+
+## 当前是否处于碰撞休眠状态（true=mask已置0；避免每帧重复写碰撞属性）
+var _collision_dormant: bool = false
+
 ## ========== 状态枚举（敌人AI状态机） ==========
 
 enum EnemyState {
@@ -541,10 +570,13 @@ func _update_state() -> void:
 	if _player == null:
 		_current_state = EnemyState.WANDER
 		return
-	
+
 	## 计算敌人与玩家之间的距离（使用全局坐标）
 	var distance: float = global_position.distance_to(_player.global_position)
-	
+
+	## 远距碰撞休眠判定（每帧利用现成的距离值，零额外开销）
+	_update_collision_hibernation(distance)
+
 	## 在攻击范围内 → 切换到攻击状态
 	if distance <= attack_range:
 		_current_state = EnemyState.ATTACK
@@ -552,6 +584,22 @@ func _update_state() -> void:
 		## 攻击范围外 → 始终切换到追踪状态（无论是否在检测范围内）
 		## 设计意图：简化AI逻辑，敌人始终追踪玩家
 		_current_state = EnemyState.CHASE
+
+## 更新远距碰撞休眠状态（迟滞双阈值切换，见常量区设计说明）
+## 数据流：_update_state 每帧传入与玩家的实时距离 → 与双阈值比较 →
+##         跨越阈值时才写一次 collision_mask（同值重复写会被跳过，无属性抖动）
+## 参数：distance - 敌人与玩家的当前距离（全局坐标，像素）
+func _update_collision_hibernation(distance: float) -> void:
+	if _collision_dormant:
+		## 休眠中：距离回到唤醒阈值内 → 恢复完整碰撞（重新加入玩家推挤+敌人互挤）
+		if distance <= COLLISION_AWAKE_DISTANCE:
+			_collision_dormant = false
+			collision_mask = COLLISION_MASK_ACTIVE
+	else:
+		## 活跃中：距离超过休眠阈值 → 关闭碰撞（屏幕外无需推挤，纯位移追玩家）
+		if distance > COLLISION_DORMANT_DISTANCE:
+			_collision_dormant = true
+			collision_mask = COLLISION_MASK_DORMANT
 
 ## ========== 状态处理方法 ==========
 

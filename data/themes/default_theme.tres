@@ -357,4 +357,9 @@ enemy_skins = {
 "rocketeer": SubResource("skin_rocketeer"),
 "elite_001": SubResource("skin_elite")
 }
-bg_color = Color(0.1, 0.1, 0.15, 1)
+; 世界背景色：提亮至0.14（旧值0.1在普通显示器上近纯黑、无空间感）；仍保持暗调梦境氛围
+bg_color = Color(0.14, 0.13, 0.19, 1)
+; 地面网格次线（64px小格，alpha0.5）
+grid_color = Color(0.23, 0.22, 0.3, 0.5)
+; 地面网格主线（每8格一条，alpha0.7，形成尺度层次）
+grid_major_color = Color(0.3, 0.29, 0.4, 0.7)

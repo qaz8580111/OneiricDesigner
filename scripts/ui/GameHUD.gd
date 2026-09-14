@@ -1,9 +1,9 @@
 ## GameHUD.gd - 游戏 HUD 界面脚本
-## 职责：显示玩家健康状态（血量）、梦境碎片数量、经验/等级、难度、装备护盾状态等实时游戏信息
+## 职责：显示玩家健康状态（血量）、梦境碎片数量、难度、装备护盾状态等实时游戏信息
 ## 继承：Control（Godot 4的UI控制节点，作为HUD容器）
 ## 数据流（被动刷新，HUD不持有游戏逻辑状态）：
 ##   Player.dream_fragment_changed / HealthController(health_changed, player_died) → 血量与碎片显示
-##   UpgradeManager(exp_changed, level_up) → 经验条与等级；DifficultyManager(difficulty_changed) → 难度文字
+##   DifficultyManager(difficulty_changed) → 难度文字
 ##   EquipmentShieldComponent(shield_equipped/shield_hit/...) → 护盾类型图标与耐久显示
 extends Control
 
@@ -17,12 +17,6 @@ const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
 ## 梦境碎片标签节点，用于显示玩家当前拥有的梦境碎片数量
 @onready var fragment_label: Label = $FragmentLabel
-
-## 经验条节点，显示升级进度（碎片即经验）
-@onready var exp_bar: ProgressBar = $ExpBar
-
-## 等级标签节点，显示玩家当前等级
-@onready var level_label: Label = $LevelLabel
 
 ## 难度标签节点，显示当前难度等级（随时间提升）
 @onready var diff_label: Label = $DiffLabel
@@ -108,14 +102,7 @@ func _ready() -> void:
 	if not _find_player():
 		call_deferred("_deferred_find_player")
 
-	## ========== 升级/难度系统信号连接 ==========
-
-	## 监听经验变化信号：碎片拾取时更新经验条
-	## 数据流：Player.add_dream_fragment → UpgradeManager.add_exp → exp_changed → 此回调
-	if UpgradeManager:
-		UpgradeManager.exp_changed.connect(_on_exp_changed)
-		## 监听等级提升信号：更新等级文字
-		UpgradeManager.level_up.connect(_on_level_up)
+	## ========== 难度/词条系统信号连接 ==========
 
 	## 监听难度变化信号：更新难度文字（颜色随难度加深，制造紧迫感）
 	if DifficultyManager:
@@ -231,14 +218,8 @@ func _process(delta: float) -> void:
 		_fps_timer = 0.0
 		_fps_frame_count = 0
 
-## 刷新等级/经验/难度显示（读取UpgradeManager和DifficultyManager的当前状态）
+## 刷新难度显示（读取DifficultyManager的当前状态）
 func _refresh_progress_displays() -> void:
-	## 经验条：0~1进度
-	if exp_bar and UpgradeManager:
-		exp_bar.value = UpgradeManager.get_exp_progress()
-	## 等级文字
-	if level_label and UpgradeManager:
-		level_label.text = "Lv %d" % UpgradeManager.level
 	## 难度文字
 	if diff_label and DifficultyManager:
 		diff_label.text = DifficultyManager.get_difficulty_label()
@@ -379,19 +360,6 @@ func _on_dream_fragment_changed(amount: int) -> void:
 	_dream_fragment = amount
 	## 更新显示
 	_update_fragment_display()
-
-## 经验变化回调：更新经验条进度（响应UpgradeManager.exp_changed）
-## 参数：current_exp - 当前经验，needed - 距下一级所需
-func _on_exp_changed(current_exp: int, needed: int) -> void:
-	if exp_bar:
-		## 进度=当前/所需（needed有0保护，Progress值域0~1）
-		exp_bar.value = float(current_exp) / float(maxi(needed, 1))
-
-## 等级提升回调：更新等级文字（响应UpgradeManager.level_up）
-## 参数：new_level - 新等级
-func _on_level_up(new_level: int) -> void:
-	if level_label:
-		level_label.text = "Lv %d" % new_level
 
 ## 难度变化回调：更新难度文字与颜色（响应DifficultyManager.difficulty_changed）
 ## 参数：new_level - 新难度等级

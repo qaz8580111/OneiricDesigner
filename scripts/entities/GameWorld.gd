@@ -173,19 +173,30 @@ func _ready() -> void:
 		## 清空上一局残留的事件队列（防止重开局时旧事件涌入）
 		LiveBridgeManager.clear_queue()
 
-## ========== 主题背景应用 ==========
+## ========== 主题背景应用（背景三层：纯色底 + 可选远景平铺图 + 世界网格地面） ==========
 
-## 应用主题的世界背景色（启动/主题切换时调用）
-## 数据流：GameTheme.bg_color → BgLayer/Background(ColorRect) → 全屏氛围随主题变化
-## 参数：theme - 主题包资源（含 bg_color 字段）
+## 应用主题的世界外观（启动/主题切换时调用）
+## 数据流：GameTheme.bg_color → BgLayer/Background(ColorRect)
+##         GameTheme.bg_texture → BgLayer/BgTexture(TextureRect平铺，null则隐藏)
+##         GameTheme.grid_color/grid_major_color → GridFloor(世界层无限网格)
+## 参数：theme - 主题包资源（含背景色/网格色/可选背景纹理）
 func _apply_theme_background(theme: GameThemeClass) -> void:
-	## 主题或背景色节点缺失时静默跳过（保持默认色，绝不因主题系统崩溃）
+	## 主题缺失时静默跳过（保持场景默认外观，绝不因主题系统崩溃）
 	if theme == null:
 		return
+	## 1) 纯色底（同步背景色；引擎清屏色已由 ThemeManager 统一设置，双重保险不露灰底）
 	var bg_rect: ColorRect = get_node_or_null("BgLayer/Background")
 	if bg_rect != null:
-		## 同步背景色（引擎清屏色已由 ThemeManager 统一设置，双重保险不露灰底）
 		bg_rect.color = theme.bg_color
+	## 2) 可选远景平铺图：有纹理→显示并注入（TextureRect自身配置为TILE+repeat），无纹理→隐藏
+	var bg_tex_rect: TextureRect = get_node_or_null("BgLayer/BgTexture")
+	if bg_tex_rect != null:
+		bg_tex_rect.texture = theme.bg_texture
+		bg_tex_rect.visible = theme.bg_texture != null
+	## 3) 世界网格地面：注入主次线颜色（GridFloor.set_colors内部强制下次重绘）
+	var grid_floor: Node2D = get_node_or_null("GridFloor")
+	if grid_floor != null and grid_floor.has_method("set_colors"):
+		grid_floor.set_colors(theme.grid_color, theme.grid_major_color)
 
 ## 主题切换回调（ThemeManager.theme_changed）：背景即时跟随新主题
 func _on_theme_changed(theme: GameThemeClass) -> void:
@@ -256,7 +267,7 @@ func _add_elite_drops() -> void:
 	if elite_enemy_data == null:
 		return
 	
-	## 创建大型梦境碎片掉落（50%概率掉落，手动拾取）
+	## 创建大型梦境碎片掉落（50%概率掉落；碎片类型默认自动吸附，auto_adsorb=false 不改变类型默认）
 	var fragment_drop: DropItemClass = DropItemClass.new()
 	fragment_drop.item_id = "elite_fragment"
 	fragment_drop.item_name = "Large Dream Fragment"
@@ -267,7 +278,7 @@ func _add_elite_drops() -> void:
 	fragment_drop.auto_adsorb = false
 	elite_enemy_data.drop_items.append(fragment_drop)
 
-	## 创建大型回血道具掉落（30%概率掉落，手动拾取）
+	## 创建大型回血道具掉落（30%概率掉落；血包类型默认自动吸附，auto_adsorb=false 不改变类型默认）
 	var health_drop: DropItemClass = DropItemClass.new()
 	health_drop.item_id = "elite_health"
 	health_drop.item_name = "Large Health Pack"
@@ -278,7 +289,8 @@ func _add_elite_drops() -> void:
 	health_drop.auto_adsorb = false
 	elite_enemy_data.drop_items.append(health_drop)
 
-	## 创建攻击增益道具掉落（15%概率掉落，稀有，手动拾取）
+	## 创建攻击增益道具（技能宝石）掉落（15%概率掉落，稀有；BUFF类型默认手动按E拾取，
+	## 拾取后打开三选一面板由玩家自选词条）
 	var buff_drop: DropItemClass = DropItemClass.new()
 	buff_drop.item_id = "elite_buff_attack"
 	buff_drop.item_name = "Power Boost"

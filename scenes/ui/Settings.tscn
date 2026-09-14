@@ -308,11 +308,14 @@ custom_minimum_size = Vector2(260, 0)
 theme_override_font_sizes/font_size = 22
 
 ; MasterSlider - 主音量滑块（0~100，11个刻度，Settings.gd拖动时实时应用音量）
+; step=5：手柄D-Pad左右键在焦点滑条上原生按step增减（每按一次±5，20档可调），
+;         鼠标拖动同样吸附5步进，与tick_count=11的10格刻度视觉对齐
 [node name="MasterSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/MasterHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 min_value = 0.0
 max_value = 100.0
+step = 5.0
 value = 80.0
 tick_count = 11
 ticks_on_borders = true
@@ -344,12 +347,13 @@ vertical_alignment = 1
 custom_minimum_size = Vector2(260, 0)
 theme_override_font_sizes/font_size = 22
 
-; MusicSlider - 音乐音量滑块（0~100，与主音量滑块格式统一）
+; MusicSlider - 音乐音量滑块（0~100，与主音量滑块格式统一；step=5同主音量：D-Pad每按±5）
 [node name="MusicSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/MusicHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 min_value = 0.0
 max_value = 100.0
+step = 5.0
 value = 70.0
 tick_count = 11
 ticks_on_borders = true
@@ -381,12 +385,13 @@ vertical_alignment = 1
 custom_minimum_size = Vector2(260, 0)
 theme_override_font_sizes/font_size = 22
 
-; SFXSlider - 音效音量滑块（0~100，与主音量滑块格式统一）
+; SFXSlider - 音效音量滑块（0~100，与主音量滑块格式统一；step=5同主音量：D-Pad每按±5）
 [node name="SFXSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/SFXHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 min_value = 0.0
 max_value = 100.0
+step = 5.0
 value = 90.0
 tick_count = 11
 ticks_on_borders = true

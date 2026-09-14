@@ -15,7 +15,7 @@ enum ItemType {
 	HEALTH,          ## 回血道具（自动吸附，恢复玩家核心血量）
 	WEAPON,          ## 武器（需要手动拾取，切换武器类型）
 	ITEM,            ## 普通物品（需要手动拾取，用于合成或任务）
-	BUFF,            ## 增益效果（需要手动拾取，临时或永久提升属性）
+	BUFF,            ## 技能书（需要手动按E拾取；拾取后打开三选一升级面板，由玩家自选词条）
 	EQUIPMENT        ## 装备（需要手动拾取，护盾等装备类型）
 }
 
@@ -49,7 +49,7 @@ enum ItemType {
 ## ========== 核心方法 ==========
 
 ## 获取是否自动吸附（考虑类型默认值）
-## 碎片和回血默认自动吸附，武器、物品、BUFF需要手动拾取（按空格键）
+## 碎片和回血默认自动吸附，武器、物品、BUFF需要手动拾取（按E键）
 ## 返回：true表示自动吸附，false表示需要手动拾取
 func get_auto_adsorb() -> bool:
 	## 如果显式设置了auto_adsorb，使用设置值
@@ -85,7 +85,8 @@ func apply(target: Node2D) -> bool:
 				target.heal(value)
 				return true
 		ItemType.BUFF:
-			## 添加增益效果（调用玩家的add_buff方法）
+			## 技能书：交给玩家 add_buff → UpgradeManager.open_level_up_choice
+			## 打开"三选一"升级面板由玩家自选词条（不是随机直接发放）
 			if target.has_method("add_buff"):
 				target.add_buff(item_id, value)
 				return true

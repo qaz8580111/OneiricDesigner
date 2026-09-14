@@ -20,9 +20,6 @@ var fragments_total: int = 0
 ## 本局存活时间（秒）
 var elapsed_time: float = 0.0
 
-## 本局达到的最高等级
-var level_reached: int = 1
-
 ## 本局达到的最高难度
 var difficulty_reached: int = 1
 
@@ -41,7 +38,6 @@ func reset_stats() -> void:
 	kills = 0
 	fragments_total = 0
 	elapsed_time = 0.0
-	level_reached = 1
 	difficulty_reached = 1
 	upgrades_taken = 0
 
@@ -64,11 +60,6 @@ func add_kill() -> void:
 ## 参数：amount - 本次获得的碎片数
 func add_fragment(amount: int) -> void:
 	fragments_total += amount
-
-## 上报等级提升（UpgradeManager升级时调用）
-## 参数：new_level - 新等级
-func report_level(new_level: int) -> void:
-	level_reached = max(level_reached, new_level)
 
 ## 上报难度提升（DifficultyManager难度变化时调用）
 ## 参数：new_difficulty - 新难度

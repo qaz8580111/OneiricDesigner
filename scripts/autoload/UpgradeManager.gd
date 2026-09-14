@@ -1,8 +1,10 @@
 ## UpgradeManager.gd - 升级词条管理单例
-## 职责：管理词条池加载、三选一随机抽取、词条应用、等级/经验（碎片）系统
+## 职责：管理词条池加载、三选一随机抽取、词条应用（技能宝石/神庙共用入口）
 ## 继承：Node（作为全局单例运行）
 ## 设计意图：
-##   1. 补全"梦境碎片→升级"的核心循环：碎片即经验，达到阈值自动弹出三选一面板
+##   1. 三选一统一入口：全游戏获得技能词条只有两条途径——手动按E拾取技能宝石、
+##      神庙"随机技能"选项，均调 open_level_up_choice() 弹面板由玩家自选；
+##      碎片只是收集计数（HUD+结算），与技能/升级完全无关（旧"碎片即经验"已删）
 ##   2. 数据驱动扩展：自动扫描 data/upgrades/ 目录加载词条，
 ##      新增词条只需创建.tres文件，无需修改任何代码
 ##   3. 特效词条复用已有的16种子弹特效.tres，把特效系统接入局内成长
@@ -18,14 +20,6 @@ const LEVEL_UP_PANEL_SCRIPT = preload("res://scripts/ui/LevelUpPanel.gd")
 
 ## ========== 信号定义 ==========
 
-## 等级提升信号：升级时发出（HUD更新等级显示）
-## 参数：new_level - 新等级
-signal level_up(new_level: int)
-
-## 经验变化信号：碎片累计变化时发出（HUD更新经验条）
-## 参数：current_exp - 当前经验（碎片），needed - 距下一级所需
-signal exp_changed(current_exp: int, needed: int)
-
 ## 词条应用信号：玩家选定词条后发出（HUD/日志等监听）
 ## 参数：upgrade - 被应用的词条数据
 signal upgrade_applied(upgrade: Resource)
@@ -33,17 +27,6 @@ signal upgrade_applied(upgrade: Resource)
 ## 已获得词条集合变化信号：层数增加时发出（GameHUD刷新buff图标栏与层数角标）
 ## 参数：acquired - 当前已获得词条信息数组（元素为{id,name,rarity,stacks,max}字典）
 signal upgrades_changed(acquired: Array)
-
-## ========== 等级与经验（碎片即经验） ==========
-
-## 当前等级（从1开始）
-var level: int = 1
-
-## 当前经验（累计获得的梦境碎片数，不消耗）
-var exp_total: int = 0
-
-## 下一级所需经验：10 + 8*(等级-1)，等级越高升级越慢
-var next_level_cost: int = 10
 
 ## 是否正在三选一选择中（Main.gd据此屏蔽ESC暂停，防止UI冲突）
 var is_choosing: bool = false
@@ -92,10 +75,7 @@ func _ready() -> void:
 
 ## 重置本局升级状态（响应GameManager.game_started）
 func _on_game_started() -> void:
-	## 重置等级/经验/层数/属性为初始值
-	level = 1
-	exp_total = 0
-	next_level_cost = 10
+	## 重置层数/属性/选择状态为初始值
 	is_choosing = false
 	_pending_upgrades = 0
 	player_stats = {
@@ -138,50 +118,11 @@ func _load_upgrade_pool() -> void:
 	dir.list_dir_end()
 	print("UpgradeManager: 已加载 %d 条升级词条" % _upgrade_pool.size())
 
-## 获取一条随机词条（神庙"随机技能"选项使用）
-## 与三选一不同：本方法不做可用性过滤（不检查满层/已拥有特效），
-## 完全随机——这正是神庙赌博性的来源（可能抽到已满层的"废"词条）
-## 返回：随机词条资源，词条池为空时返回null
-func get_random_upgrade() -> Resource:
-	if _upgrade_pool.is_empty():
-		return null
-	return _upgrade_pool[RandomManager.randi_range(0, _upgrade_pool.size() - 1)]
-
-## ========== 经验与等级系统 ==========
-
-## 添加经验（碎片）——由Player.add_dream_fragment转发调用
-## 数据流：敌人掉落碎片 → 玩家拾取 → add_dream_fragment → 此方法 → 检查升级
-## 参数：amount - 本次增加的碎片数
-func add_exp(amount: int) -> void:
-	## 只在游戏中生效
-	if not GameManager.is_playing():
-		return
-	exp_total += amount
-	## 广播经验变化（HUD更新经验条）
-	exp_changed.emit(exp_total, next_level_cost)
-	## 检查是否达到升级阈值（while处理一次拾取跨多级的情况）
-	while exp_total >= next_level_cost:
-		exp_total -= next_level_cost
-		level += 1
-		next_level_cost = 10 + 8 * (level - 1)
-		## 上报统计（结算面板展示本局达到的最高等级）
-		RunStats.report_level(level)
-		level_up.emit(level)
-		## 触发三选一选择（升级的核心奖励）
-		open_level_up_choice()
-
-## 获取当前升级进度（0.0~1.0，HUD经验条使用）
-## 返回：经验进度比例
-func get_exp_progress() -> float:
-	if next_level_cost <= 0:
-		return 1.0
-	return clamp(float(exp_total) / float(next_level_cost), 0.0, 1.0)
-
 ## ========== 三选一抽取与选择流程 ==========
 
 ## 打开三选一选择面板（升级触发入口）
 ## 流程：抽取3个可用词条 → 显示紧凑底栏面板（不暂停游戏）→ 玩家选择 → 应用 → 关闭
-## 队列设计：面板显示期间又触发升级（玩家边战斗边拾取碎片）时，排队等待，
+## 队列设计：面板显示期间又触发升级（玩家边战斗边捡宝石/神庙交互）时，排队等待，
 ##           当前面板关闭后自动展示下一组选项，避免连续弹出多个面板
 func open_level_up_choice() -> void:
 	## 正在选择中：排队等待，不重复打开
@@ -298,9 +239,6 @@ func _process_pending() -> void:
 	else:
 		## 无排队，解锁选择状态
 		is_choosing = false
-		## 检查碎片可能已跨过下一级阈值（连升/战斗中又拾取了碎片），再次触发选择
-		if exp_total >= next_level_cost:
-			add_exp(0)
 
 ## 关闭并销毁选择面板（连同 CanvasLayer 一起清理）
 func _close_panel() -> void:
@@ -350,21 +288,6 @@ func apply_upgrade(upgrade: Resource) -> void:
 	## 应用音效
 	if AudioManager:
 		AudioManager.play_2d("upgrade_pick", _get_player().global_position if _get_player() != null else Vector2.ZERO, 0.8)
-
-## BUFF掉落道具的随机词条入口
-## 数据流：敌人掉落BUFF → 玩家拾取 → DropItem.apply → player.add_buff → 此方法
-## 设计意图：BUFF道具=随机直接获得一个可用词条（不需要三选一，即时奖励）
-## 返回：获得的词条数据（无可用词条时返回null）
-func grant_random_upgrade() -> Resource:
-	## 抽取1个可用词条
-	var choices: Array = _roll_three_upgrades()
-	if choices.is_empty():
-		return null
-	## 从抽到的候选中再随机取1个（复用三选一的加权抽取，保证稀有度分布一致）
-	var upgrade: Resource = choices[RandomManager.randi_range(0, choices.size() - 1)]
-	## 直接应用（不开面板，BUFF是即时奖励）
-	apply_upgrade(upgrade)
-	return upgrade
 
 ## ========== 辅助方法 ==========
 

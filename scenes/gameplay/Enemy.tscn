@@ -52,10 +52,13 @@ shape = SubResource("3")
 
 ; Hitbox (Area2D) - 伤害检测区域
 ; 使用较小的碰撞体（半径15），只检测碰撞掩码（不参与物理碰撞）
-; collision_layer=2：设置在敌人层，供玩家子弹检测（area_entered信号）
+; collision_layer=0：不加入任何层！玩家子弹只需与敌人本体（CharacterBody2D，layer=2）配对检测；
+;   若 Hitbox 也在 layer=2，玩家子弹（mask=2）会与每个敌人产生身体+Hitbox 双重物理配对，
+;   后期百只敌人×多颗子弹时配对数翻倍白耗物理服务器（性能修复：8分钟卡顿主因之一）；
+;   子弹命中伤害走 body_entered（敌人本体的 CollisionShape2D 完全够用），Hitbox 层归零不影响任何战斗判定
 ; collision_mask=1：检测玩家层（body_entered信号，用于触碰伤害检测玩家CharacterBody2D）
 [node name="Hitbox" type="Area2D" parent="."]
-collision_layer = 2
+collision_layer = 0
 collision_mask = 1
 
 ; CollisionShape2D - 伤害检测碰撞体

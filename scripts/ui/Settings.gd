@@ -327,12 +327,46 @@ func _connect_signals() -> void:
 	master_slider.value_changed.connect(_on_master_volume_changed)
 	music_slider.value_changed.connect(_on_music_volume_changed)
 	sfx_slider.value_changed.connect(_on_sfx_volume_changed)
+	## 标签页切换（含鼠标点击与LT/RT切换两种来源）：刷新导航器焦点列表
+	## （旧页控件被隐藏、新页控件需纳入导航，不刷新会导致焦点落在隐藏控件上）
+	tab_container.tab_changed.connect(_on_tab_changed)
 	## 底部按钮
 	back_button.pressed.connect(_on_back_button_pressed)
 	reset_button.pressed.connect(_on_reset_button_pressed)
 	apply_button.pressed.connect(_on_apply_button_pressed)
 	## 翻译变化 → 刷新所有文本和下拉项
 	TranslationManager.language_changed.connect(_on_language_changed)
+
+## _process() - 手柄LT/RT扳机循环切换标签页（每帧轮询，无按键时零开销）
+## 设计意图：设置页四大标签页手柄可切换——LT/RT轴事件由InputManager做越阈边沿检测
+##           转为 game_choice_prev/next 动作（PAUSE_MENU/SETTINGS上下文均放行），
+##           键盘Q/E绑定同动作，桌面端等效可用；与升级三选一切换共用同一套手感
+func _process(_delta: float) -> void:
+	if tab_container == null:
+		return
+	var tab_count: int = tab_container.get_tab_count()
+	if tab_count <= 0:
+		return
+	## RT扳机/键盘E：下一页（右循环，最后一页→回第一页）
+	if InputManager and InputManager.is_action_just_pressed_safe("game_choice_next"):
+		tab_container.current_tab = (tab_container.current_tab + 1) % tab_count
+		_on_tab_switched_by_trigger()
+	## LT扳机/键盘Q：上一页（左循环，第一页→回最后一页）
+	elif InputManager and InputManager.is_action_just_pressed_safe("game_choice_prev"):
+		tab_container.current_tab = (tab_container.current_tab - 1 + tab_count) % tab_count
+		_on_tab_switched_by_trigger()
+
+## LT/RT扳机切页回调：播放点击反馈音
+## （焦点列表刷新由 tab_changed 信号统一处理，鼠标与扳机两条切页路径共用一处逻辑）
+func _on_tab_switched_by_trigger() -> void:
+	if AudioManager:
+		AudioManager.play("ui_click", 0.5)
+
+## 标签页切换回调（tab_changed）：刷新菜单导航器的可聚焦控件列表
+## 导航器可能尚未完成激活（_ready中有await一帧），判空+方法存在性双重保护
+func _on_tab_changed(_tab_index: int) -> void:
+	if _navigator != null and _navigator.has_method("refresh_controls"):
+		_navigator.refresh_controls()
 
 ## 更新界面文本（支持多语言）
 ## 数据流：用户切换语言 → TranslationManager.language_changed 信号发出 → 此处重绘所有文本

@@ -96,6 +96,9 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		_mouse_left_pressed = event.pressed
 		## 仅在 GAMEPLAY 上下文中将鼠标左键按下缓存为 game_shoot 动作
+		## 铁律：鼠标左键在 project.godot 中只绑定 game_shoot，绝不能再绑 game_interact——
+		## 否则战斗中开枪会同时触发拾取，路过技能书/护盾时被"自动捡走"（玩家没按E却拾取）。
+		## 手动拾取的 game_interact 只用 E/空格/Enter/手柄A（见 project.godot 绑定）
 		if event.pressed and get_current_context() == "GAMEPLAY":
 			_just_pressed_actions["game_shoot"] = true
 		## 注意：不使用 return，让事件继续传递给UI系统
@@ -379,8 +382,10 @@ func _is_action_allowed_in_context(action: String) -> bool:
 		# game_pause：手柄START/键盘Pause呼出暂停；瞄准为网关内轮询轴，game_aim_仅作文档化标注
 		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot", "game_pause", "game_aim_"],
 		# game_pause：暂停菜单中再按START恢复游戏（ui_cancel=B/ESC由菜单导航器处理恢复）
-		"PAUSE_MENU": ["ui_", "game_interact", "game_pause"],
-		"SETTINGS": ["ui_"],
+		# game_choice_prev/next：手柄LT/RT扳机（设置页切换标签页）；键盘Q/E同动作
+		"PAUSE_MENU": ["ui_", "game_interact", "game_pause", "game_choice_prev", "game_choice_next"],
+		# game_choice_prev/next：死亡结算面板用LT/RT（键盘Q/E同动作）在两个按钮间切换
+		"SETTINGS": ["ui_", "game_choice_prev", "game_choice_next"],
 		"EVENT_POPUP": ["game_confirm", "game_cancel"],
 		"DIALOGUE": ["game_advance", "game_skip"],
 		"INVENTORY": ["ui_navigate", "ui_confirm", "ui_cancel"],

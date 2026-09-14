@@ -46,6 +46,19 @@ const CharacterSkinClass = preload("res://scripts/resources/skin/CharacterSkin.g
 ## 让整个"世界氛围"随主题一起换——不只是角色换色）
 @export var bg_color: Color = Color(0.1, 0.1, 0.15, 1)
 
+## 地面网格次线颜色（含alpha；GridFloor 的 64px 小格线，随主题换色）
+## alpha 建议 0.35~0.5：太亮抢眼、太暗失去空间参照作用
+@export var grid_color: Color = Color(0.20, 0.19, 0.27, 0.45)
+
+## 地面网格主线颜色（含alpha；每8格一条的尺度线，比次线亮一档形成层次）
+@export var grid_major_color: Color = Color(0.27, 0.26, 0.36, 0.65)
+
+## 可选远景背景纹理（null=纯色+网格；非null时在BgLayer平铺填充作为远景层）
+## 使用方式：把无缝平铺图（seamless tile）放入 assets/art/bg/，在主题.tres中
+## 拖入本字段即可，无需改代码；TextureRect 自动 TILE 平铺铺满屏幕（屏幕固定层，
+## 网格在世界层跟随相机流动——两层构成"远景+地面"的视差感）
+@export var bg_texture: Texture2D = null
+
 ## ========== 核心方法 ==========
 
 ## 获取指定敌人的皮肤（精确匹配 → 兜底皮肤 → null）

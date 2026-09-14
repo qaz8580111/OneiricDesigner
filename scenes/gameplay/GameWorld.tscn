@@ -1,21 +1,24 @@
-[gd_scene load_steps=3 format=3 uid="uid://bgameworld"]
+[gd_scene load_steps=4 format=3 uid="uid://bgameworld"]
 
 ; ==============================================================================
 ; GameWorld.tscn - 游戏世界场景
 ; 职责：定义游戏世界的根节点，作为所有游戏实体（玩家、敌人、物品）的容器
 ; 所属脚本：GameWorld.gd (根节点) - 游戏世界管理器，处理敌人生成、场景管理等
 ;
-; 场景结构：
+; 场景结构（背景三层视觉，由远到近）：
 ;   GameWorld (Node2D)
-;   ├── BgLayer (CanvasLayer, layer=-1) - 背景层（固定屏幕，不随相机移动）
-;   │   └── Background (ColorRect) - 游戏背景（深灰蓝色，全屏锚点）
-;   └── [动态添加] Player, Enemy, PickUp 等游戏实体
+;   ├── BgLayer (CanvasLayer, layer=-1) - 远景层（固定屏幕，不随相机移动）
+;   │   ├── Background (ColorRect) - 主题背景纯色底
+;   │   └── BgTexture (TextureRect) - 可选平铺背景图（主题bg_texture，无图时隐藏）
+;   ├── GridFloor (Node2D, z_index=-1) - 无限网格地面（世界层，随相机流动，提供空间感）
+;   └── [动态添加] Player, Enemy, PickUp 等游戏实体（z_index=0，在网格之上）
 ;
 ; 使用方式：在Main.tscn中作为子节点加载，玩家和敌人通过脚本动态生成到此节点下
 ; ==============================================================================
 
 [ext_resource type="Script" path="res://scripts/entities/GameWorld.gd" id="1_world"]
 [ext_resource type="BulletData" path="res://data/bullet/player_default_bullet.tres" id="2_playerbullet"]
+[ext_resource type="Script" path="res://scripts/world/GridFloor.gd" id="3_gridfloor"]
 
 ; ------------------------------ 根节点 ------------------------------
 ; GameWorld (Node2D) - 游戏世界根节点
@@ -25,17 +28,15 @@
 script = ExtResource("1_world")
 default_bullet_data = ExtResource("2_playerbullet")
 
-; ------------------------------ 背景 ------------------------------
+; ------------------------------ 远景背景（屏幕固定层） ------------------------------
 ; BgLayer (CanvasLayer) - 背景层
 ; layer=-1：绘制在游戏世界之下；CanvasLayer不随相机移动，
 ; 背景永远铺满屏幕（玩家移动到任何位置都不会露出默认清屏色）
-; 注意：project.godot 的 default_clear_color 与本背景同色(0.1,0.1,0.15)，
-; 双重保证世界无限大时看不到任何背景色分界；若修改背景色需同步修改清屏色
 [node name="BgLayer" type="CanvasLayer" parent="."]
 layer = -1
 
-; Background (ColorRect) - 游戏背景
-; 颜色：深灰蓝 (0.1, 0.1, 0.15, 1)，营造梦境氛围
+; Background (ColorRect) - 游戏背景纯色底
+; 颜色由主题 bg_color 在运行时覆盖（场景值仅为无主题时的兜底）
 ; 全屏锚点（anchors_preset=15）：相对视口自适应，任意分辨率下都铺满
 [node name="Background" type="ColorRect" parent="BgLayer"]
 anchors_preset = 15
@@ -43,4 +44,25 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.1, 0.1, 0.15, 1)
+color = Color(0.13, 0.12, 0.18, 1)
+
+; BgTexture (TextureRect) - 可选平铺远景图（主题 GameTheme.bg_texture 注入）
+; 无纹理时代码隐藏；有纹理时 TILE 无缝平铺铺满屏幕（texture_repeat=1启用重复采样）
+; mouse_filter=2(IGNORE)：纯视觉层，绝不拦截鼠标事件（项目UI铁律）
+[node name="BgTexture" type="TextureRect" parent="BgLayer"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture_repeat = 1
+stretch_mode = 1
+
+; ------------------------------ 网格地面（世界层，随相机流动） ------------------------------
+; GridFloor (Node2D) - 程序化无限网格
+; z_index=-1：在所有游戏实体(z_index=0)之下；脚本内按相机可视范围绘制64px网格
+[node name="GridFloor" type="Node2D" parent="."]
+z_index = -1
+script = ExtResource("3_gridfloor")

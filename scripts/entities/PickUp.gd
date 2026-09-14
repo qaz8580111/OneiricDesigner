@@ -137,10 +137,11 @@ func _physics_process(delta: float) -> void:
 			## 更新道具位置（方向 × 速度 × 乘数 × 时间）
 			position += direction * adsorb_speed * speed_multiplier * delta
 
-	## 如果玩家在手动拾取范围内且按交互键，执行拾取
-	if _player != null and is_player_in_range():
-		if InputManager.is_action_just_pressed_safe("game_interact"):
-			pickup(_player)
+	## 注意：手动拾取（BUFF技能书/护盾等）不在本节点轮询交互键——
+	## 统一由 GameWorld._handle_manual_pickup() 处理（神庙交互优先级 > 拾取）。
+	## 旧实现在此与GameWorld双重轮询同一个game_interact边沿（读取即消费），
+	## 谁先执行不确定，可能抢在神庙前吞掉按键；且game_interact曾误绑鼠标左键，
+	## 导致玩家开枪路过时"自动捡走"技能书。现单一入口，本节点只负责自动吸附位移。
 
 ## ========== 生命周期管理（性能修复核心） ==========
 

@@ -9,9 +9,7 @@
 ;   GameHUD (Control) - 全屏覆盖
 ;   ├── HealthBar (ProgressBar) - 血量条（左上角）
 ;   ├── FragmentLabel (Label) - 梦境碎片数量显示（血量条下方）
-;   ├── ExpBar (ProgressBar) - 经验条（碎片即经验，升级进度）
-;   ├── LevelLabel (Label) - 玩家等级显示（右上角）
-;   └── DiffLabel (Label) - 难度等级显示（右上角，等级下方）
+;   └── DiffLabel (Label) - 难度等级显示（右上角，血量条下方偏移）
 ;
 ; 以下UI由 GameHUD.gd 代码动态创建（不在本场景文件中）：
 ;   顶部状态栏（时间/击杀/最高连击，顶部居中 y=12，原底部栏上移合并）
@@ -60,34 +58,6 @@ size = Vector2(200, 20)
 text = "梦境碎片: 0"
 custom_minimum_size = Vector2(200, 0)
 theme_override_colors/font_color = Color(1, 0.8, 0, 1)
-
-; ------------------------------ 经验条 ------------------------------
-; ExpBar (ProgressBar) - 升级经验条（碎片即经验）
-; 位置：碎片标签下方 (20, 72)，尺寸：200x8（细条不占空间）
-; tint_over=青色：经验填充颜色，tint_under=灰色半透明：背景颜色
-[node name="ExpBar" type="ProgressBar" parent="."]
-position = Vector2(20, 72)
-size = Vector2(200, 8)
-max_value = 1.0
-value = 0.0
-tint_over = Color(0.3, 0.9, 1, 1)
-tint_under = Color(0.3, 0.3, 0.3, 0.5)
-
-; ------------------------------ 等级显示 ------------------------------
-; LevelLabel (Label) - 玩家等级
-; 锚点右上角（anchor_left/right=1.0，距右边缘20px），任意分辨率下贴右上
-[node name="LevelLabel" type="Label" parent="."]
-anchors_preset = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -140.0
-offset_top = 20.0
-offset_right = -20.0
-offset_bottom = 40.0
-grow_horizontal = 0
-text = "Lv 1"
-horizontal_alignment = 2
-theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
 
 ; ------------------------------ 难度显示 ------------------------------
 ; DiffLabel (Label) - 难度等级（随时间提升）

@@ -83,6 +83,17 @@ func set_focus_index(index: int) -> void:
 	if index >= 0 and index < focusable_controls.size():
 		_set_focus(index)
 
+## 刷新可聚焦控件列表并把焦点重置到首项（TabContainer 切换标签页后调用）
+## 背景：控件列表仅在 activate() 时收集一次；切换标签页后旧页控件被隐藏但仍留在列表中，
+##       新页控件可见却不在列表里——不刷新会导致焦点落在隐藏控件上（"选中"了看不见的东西）
+## 数据流：设置页 LT/RT（或鼠标点击）切换 Tab → tab_changed → 本方法重新收集 → 焦点回首控件
+func refresh_controls() -> void:
+	if _parent == null:
+		return
+	_collect_focusable_controls(_parent)
+	if focusable_controls.size() > 0:
+		_set_focus(0)
+
 ## 手动设置焦点到指定控件
 func set_focus_control(control: Control) -> void:
 	var idx: int = focusable_controls.find(control)
@@ -110,7 +121,10 @@ func _scan_children(node: Node) -> void:
 			## 用has_method探测而非硬转类型：兼容禁用接口不同的控件子类
 			if child.has_method("is_disabled"):
 				is_disabled = child.is_disabled()
-			if child.visible and not is_disabled:
+			## 必须用is_visible_in_tree()（树内有效可见）而非visible（自身标志）：
+			## TabContainer仅隐藏非当前页的"页容器"，页内控件自身visible仍为true——
+			## 用visible会把隐藏页的控件也收进导航，切页后焦点落到看不见的控件上
+			if child.is_visible_in_tree() and not is_disabled:
 				focusable_controls.append(child as Control)
 		## 无条件继续下钻：容器/嵌套面板内部的控件也要被找到
 		_scan_children(child)

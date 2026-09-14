@@ -190,4 +190,9 @@ enemy_skins = {
 "tank": SubResource("skin_tank"),
 "elite_001": SubResource("skin_elite")
 }
-bg_color = Color(0.07, 0.05, 0.13, 1)
+; 世界背景色：提亮至约0.11（旧值0.07近纯黑），保持紫调霓虹氛围
+bg_color = Color(0.11, 0.08, 0.18, 1)
+; 地面网格次线（紫调，alpha0.45）
+grid_color = Color(0.32, 0.2, 0.48, 0.45)
+; 地面网格主线（亮紫，alpha0.6）
+grid_major_color = Color(0.45, 0.25, 0.65, 0.6)

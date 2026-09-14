@@ -352,14 +352,16 @@ func apply_max_hp_bonus(amount: int) -> void:
 	if core_comp != null and core_comp.has_method("expand_max_hp"):
 		core_comp.expand_max_hp(float(amount))
 
-## 添加增益BUFF（BUFF道具拾取时由DropItem.apply调用）
-## 数据流：敌人掉落BUFF → 玩家手动拾取 → DropItem.apply → 此方法
-## 设计意图：BUFF=随机直接获得一个可用词条（即时奖励，不走三选一面板）
-## 参数：item_id - 道具id（预留：未来可区分不同BUFF类型），value - 数值（预留扩展）
+## 拾取技能书（青绿宝珠BUFF道具，手动按E拾取后由DropItem.apply调用）
+## 数据流：敌人掉落技能书 → 玩家手动按E拾取 → DropItem.apply → 此方法
+## 设计意图：技能书=立即获得一次"三选一"升级机会（打开与经验升级完全相同的选择面板，
+##           由玩家自选词条），而非随机直接塞一个——玩家对Build有控制权，体验与捡碎片升级一致，
+##           不会再出现"捡了书却莫名获得技能"的困惑。open_level_up_choice自带is_choosing锁与
+##           _pending_upgrades排队：连捡多本或与经验升级同时触发时会依次排队弹出，不会叠加/丢帧
+## 参数：item_id - 道具id（预留：未来可区分不同品质技能书），value - 数值（预留扩展）
 func add_buff(item_id: String, value: int) -> void:
-	## 委托UpgradeManager随机发放一个可用词条（内部已处理应用与音效）
 	if UpgradeManager:
-		UpgradeManager.grant_random_upgrade()
+		UpgradeManager.open_level_up_choice()
 
 ## ========== 物理帧更新方法 ==========
 
@@ -667,10 +669,8 @@ func add_dream_fragment(amount: int) -> void:
 
 	## 上报统计（结算面板展示的碎片总数）
 	RunStats.add_fragment(amount)
-	## 碎片即经验：转发给UpgradeManager（达到阈值自动触发升级三选一）
-	## 数据流：碎片拾取 → 此方法 → UpgradeManager.add_exp → level_up → 三选一面板
-	if UpgradeManager:
-		UpgradeManager.add_exp(amount)
+	## 碎片=纯收集计数（HUD显示+结算统计），与技能/升级完全无关——
+	## 获得技能词条仅两条途径：手动按E拾取技能宝石、神庙"随机技能"（均走三选一面板）
 
 ## 获取玩家当前生存状态（对外接口）
 ## 返回：包含护盾、核心血、无敌状态等信息的字典
