@@ -18,10 +18,11 @@ extends Resource
 ##   player   - 玩家节点（用于获取位置、发射反射弹等）
 ##   amount   - 本次伤害值
 ##   context  - 上下文字典（可包含 is_bullet、bullet_data、damage_source 等）
+##   stack    - 护盾叠层数（1~3，决定debuff强度：层数越高效果越强/持续越久）
 ## 子类实现示例：
-##   PoisonShieldEffect: 对 attacker 施加中毒持续伤害
-##   FrostShieldEffect:  对 attacker 施加减速
-##   ReflectShieldEffect: 销毁 attacker（子弹）并向反方向发射玩家子弹
-func apply(_attacker: Node, _player: Node, _amount: float, _context: Dictionary) -> void:
+##   PoisonShieldEffect: 对 attacker 施加中毒持续伤害（stack决定伤害/时长倍率）
+##   FrostShieldEffect:  对 attacker 施加减速（stack决定减速程度/时长倍率）
+##   ReflectShieldEffect: 销毁 attacker（子弹）并向反方向发射玩家子弹（stack决定反射弹数/伤害）
+func apply(_attacker: Node, _player: Node, _amount: float, _context: Dictionary, _stack: int = 1) -> void:
 	## 基类空实现，子类重写
 	pass

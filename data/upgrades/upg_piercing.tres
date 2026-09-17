@@ -7,7 +7,7 @@
 script = ExtResource("1")
 upgrade_id = "upg_piercing"
 display_name = "贯穿之矛"
-description = "子弹可穿透3名敌人，每次穿透伤害衰减15%"
+description = "子弹可穿透3名敌人，每次穿透伤害衰减15%；每级穿透+1人、衰减减少2%"
 rarity = 1
 max_stacks = 10
 bullet_effect = ExtResource("2")

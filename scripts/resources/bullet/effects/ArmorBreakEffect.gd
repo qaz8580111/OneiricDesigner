@@ -13,7 +13,16 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## 破甲系数（1.0=100%无视护甲/护盾）
 @export var ignore_shield: float = 1.0
 
+## 每级叠层附加的核心伤害（运行时成长值，_on_stack_grown递增；基础为0）
+## 设计意图：破甲系数已是100%满值无法再乘算放大，改为每级追加固定核心伤害
+var core_damage_bonus: int = 0
+
 ## ========== 实现方法 ==========
+
+## 每级叠层成长：追加核心伤害+4（1.0破甲系数已满，改走固定加成路线）
+## 设计意图：满级10层时每发子弹额外+40点无视护盾的核心伤害，专克高盾精英/Boss
+func _on_stack_grown() -> void:
+	core_damage_bonus += 4
 
 ## 应用破甲特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
@@ -29,7 +38,8 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 	
 	var bullet_data = bullet.get_bullet_data() if bullet.has_method("get_bullet_data") else null
 	var dmg: int = bullet_data.get_final_damage() if bullet_data else 10
-	var core_damage: int = int(dmg * ignore_shield)
+	## 核心伤害 = 子弹伤害×破甲系数 + 叠层固定加成（词条等级成长部分）
+	var core_damage: int = int(dmg * ignore_shield) + core_damage_bonus
 	if core_damage <= 0:
 		return
 	

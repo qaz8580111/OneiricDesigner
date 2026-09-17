@@ -18,6 +18,11 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 
 ## ========== 实现方法 ==========
 
+## 每级叠层成长：吸血系数+0.08（钳制≤0.9防超过伤害本身的治疗量）
+## 设计意图：满级10层时30%→90%，站撸续航能力随等级质变（前中期救命词条）
+func _on_stack_grown() -> void:
+	steal_percent = minf(steal_percent + 0.08, 0.9)
+
 ## 应用吸血特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例（取最终伤害作吸血基数）；target - 被命中的目标（血珠起点，可空）

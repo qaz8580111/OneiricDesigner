@@ -28,8 +28,10 @@ script = ExtResource("1_main")
 
 ; ------------------------------ UI层 ------------------------------
 ; CanvasLayer - UI层容器
-; CanvasLayer会自动将其子节点渲染在所有其他内容之上，不受相机影响
+; layer=10：层级显式高于游戏内暗角层(VignetteLayer=5)与世界画布(0)，
+; CanvasLayer自动将子节点渲染在这些内容之上，不受相机影响
 [node name="CanvasLayer" type="CanvasLayer" parent="."]
+layer = 10
 
 ; UIStack (Control) - UI栈容器
 ; anchors_preset=15：全屏锚定，作为所有UI界面的父容器

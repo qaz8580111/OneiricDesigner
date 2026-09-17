@@ -46,17 +46,17 @@ const CharacterSkinClass = preload("res://scripts/resources/skin/CharacterSkin.g
 ## 让整个"世界氛围"随主题一起换——不只是角色换色）
 @export var bg_color: Color = Color(0.1, 0.1, 0.15, 1)
 
-## 地面网格次线颜色（含alpha；GridFloor 的 64px 小格线，随主题换色）
-## alpha 建议 0.35~0.5：太亮抢眼、太暗失去空间参照作用
+## 地面网格次线颜色（含alpha；ArenaBackground/LayerGrid 视差网格shader的64px小格线，随主题换色）
+## alpha 建议 0.35~0.5：太亮抢眼、太暗失去空间参照作用；整体必须极暗（参照物不抢实体）
 @export var grid_color: Color = Color(0.20, 0.19, 0.27, 0.45)
 
-## 地面网格主线颜色（含alpha；每8格一条的尺度线，比次线亮一档形成层次）
+## 地面网格主线颜色（含alpha；512px(每8格)一条的尺度线，比次线亮一档形成层次）
 @export var grid_major_color: Color = Color(0.27, 0.26, 0.36, 0.65)
 
-## 可选远景背景纹理（null=纯色+网格；非null时在BgLayer平铺填充作为远景层）
+## 可选远景背景纹理（null=纯色+三层视差；非null时在BgLayer平铺填充作为最远屏幕固定层）
 ## 使用方式：把无缝平铺图（seamless tile）放入 assets/art/bg/，在主题.tres中
 ## 拖入本字段即可，无需改代码；TextureRect 自动 TILE 平铺铺满屏幕（屏幕固定层，
-## 网格在世界层跟随相机流动——两层构成"远景+地面"的视差感）
+## 星云/碎片/网格三层视差在其上按0.2/0.5/1.0速率跟随相机——共同构成纵深）
 @export var bg_texture: Texture2D = null
 
 ## ========== 核心方法 ==========

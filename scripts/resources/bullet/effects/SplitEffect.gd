@@ -32,6 +32,12 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
 ## ========== 实现方法 ==========
 
+## 每级叠层成长：分裂弹数+1、分裂弹伤害系数+0.05
+## 设计意图：满级10层时3→12发、伤害50%→95%，子弹死亡爆破的弹幕密度随等级翻4倍
+func _on_stack_grown() -> void:
+	split_count += 1
+	damage_multiplier += 0.05
+
 ## 应用分裂特效（重写基类方法）
 ## 触发时机：ON_DESTROY（子弹销毁时，通常在命中致死或超时销毁瞬间）
 ## 参数：bullet - 即将销毁的宿主子弹实例（提供方向/伤害/速度基准与阵营）；target/context 未使用

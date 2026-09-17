@@ -43,6 +43,14 @@ var _regenerating: bool = false
 ## 受击闪光计时器（>0时护盾环显示为白色闪光）
 var _flash_timer: float = 0.0
 
+## 当前护盾叠层（同类型护盾拾取叠加，最多3层；不同类型重置为1层）
+## 设计意图：同类型护盾重复拾取让数值累计放大（max_hp/absorb_per_hit乘以层数），
+##           不同类型替换则回到1层基础值——鼓励玩家专精一种护盾
+var _shield_stack: int = 1
+
+## 护盾叠层上限
+const MAX_SHIELD_STACK: int = 3
+
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 初始状态：无护盾，隐藏
@@ -64,23 +72,31 @@ func _process(delta: float) -> void:
 	## 回盾计时
 	_time_since_hit += delta
 
+	## 回盾延迟改为5秒（用户需求：不被伤害5秒内回盾满值）
+	## 旧值 ShieldEquipmentData.regen_delay=10秒太慢，改为固定5秒
+	var regen_delay: float = 5.0
+
 	## 检查是否开始回盾（脱战 regen_delay 秒后）
-	if not _regenerating and _time_since_hit >= _shield_data.regen_delay:
-		if _current_hp < _shield_data.max_hp:
+	if not _regenerating and _time_since_hit >= regen_delay:
+		if _current_hp < _get_effective_max_hp():
 			_regenerating = true
 
-	## 回盾中：每秒恢复 regen_rate
+	## 回盾中：每秒恢复 effective_max_hp / 5 （即5秒回满，无论护盾多大）
+	## 旧逻辑用固定 regen_rate，大护盾回盾慢；改为按比例5秒回满
 	if _regenerating:
-		_current_hp = minf(_current_hp + _shield_data.regen_rate * delta, _shield_data.max_hp)
+		var effective_max: float = _get_effective_max_hp()
+		var regen_per_sec: float = effective_max / 5.0
+		_current_hp = minf(_current_hp + regen_per_sec * delta, effective_max)
 		queue_redraw()
 		## 回满通知
-		if _current_hp >= _shield_data.max_hp:
+		if _current_hp >= effective_max:
 			_regenerating = false
 			shield_regen_full.emit()
 
-## _draw() - 绘制护盾环（仅当有护盾且耐久>0时显示）
+## _draw() - 绘制护盾环（有护盾数据就画，耐久为0时画淡色破盾状态——图标不消失）
 func _draw() -> void:
-	if _shield_data == null or _current_hp <= 0.0:
+	## 有护盾数据就绘制（即使耐久为0也画淡色环表示护盾存在但破碎，等待回盾）
+	if _shield_data == null:
 		return
 
 	## 护盾环颜色：正常=护盾数据颜色，闪光=白色
@@ -88,9 +104,13 @@ func _draw() -> void:
 	if _flash_timer > 0.0:
 		draw_color = Color.WHITE
 
-	## 耐久比例影响透明度（越低越透明）
-	var hp_ratio: float = _current_hp / _shield_data.max_hp
-	draw_color.a *= clampf(hp_ratio * 0.5 + 0.3, 0.3, 0.9)
+	## 耐久为0时显示极淡的破碎状态（玩家知道护盾还在，只是碎了等回盾）
+	if _current_hp <= 0.0:
+		draw_color.a = 0.15
+	else:
+		## 耐久比例影响透明度（越低越透明）
+		var hp_ratio: float = _current_hp / _get_effective_max_hp()
+		draw_color.a *= clampf(hp_ratio * 0.5 + 0.3, 0.3, 0.9)
 
 	## 绘制护盾环（空心圆，线宽=visual_thickness）
 	var radius: float = _shield_data.visual_radius
@@ -105,14 +125,33 @@ func _draw() -> void:
 ## ========== 对外接口 ==========
 
 ## 装备护盾（拾取后由 Player 调用）
+## 叠层规则：同类型护盾（shield_id相同）叠加层数+1（最多3层），max_hp/absorb_per_hit按层数放大；
+##           不同类型护盾替换，重置为1层基础值
 ## 参数：data - 护盾数据资源
 func equip(data: Resource) -> void:
-	_shield_data = data
-	_current_hp = data.max_hp if data != null else 0.0
+	if data == null:
+		unequip()
+		return
+
+	## 判断是否同类型护盾（shield_id相同=同类型）
+	var is_same_type: bool = (_shield_data != null
+			and _shield_data.shield_id == data.shield_id)
+
+	if is_same_type:
+		## 同类型叠加：层数+1（不超过上限），保留当前耐久并补满差额
+		_shield_stack = minf(_shield_stack + 1, MAX_SHIELD_STACK)
+		## 耐久值补满到新的有效最大值（拾取同类型护盾=强化，应该立即生效）
+		_current_hp = _get_effective_max_hp()
+	else:
+		## 不同类型：替换为新护盾，重置为1层
+		_shield_data = data
+		_shield_stack = 1
+		_current_hp = data.max_hp
+
 	_time_since_hit = 999.0
 	_regenerating = false
 	_flash_timer = 0.0
-	visible = data != null
+	visible = true
 	queue_redraw()
 	shield_equipped.emit(data)
 
@@ -120,22 +159,42 @@ func equip(data: Resource) -> void:
 func unequip() -> void:
 	_shield_data = null
 	_current_hp = 0.0
+	_shield_stack = 1
 	visible = false
 	shield_equipped.emit(null)
 
 ## 是否有装备护盾（Player.take_damage 调用前检查）
+## 注意：护盾数据存在但耐久为0时仍返回false（不吸收伤害），但HUD图标保持显示
 func has_shield() -> bool:
 	return _shield_data != null and _current_hp > 0.0
 
 ## 获取当前耐久比例（0.0~1.0，UI用）
 func get_hp_ratio() -> float:
-	if _shield_data == null or _shield_data.max_hp <= 0.0:
+	var max_hp: float = _get_effective_max_hp()
+	if max_hp <= 0.0:
 		return 0.0
-	return _current_hp / _shield_data.max_hp
+	return _current_hp / max_hp
 
 ## 获取当前装备的护盾数据（UI显示用）
 func get_shield_data() -> Resource:
 	return _shield_data
+
+## 获取当前护盾叠层（UI显示用）
+func get_shield_stack() -> int:
+	return _shield_stack
+
+## 获取有效最大耐久值（基础值 × 叠层倍数）
+## 叠层2层=2倍max_hp，3层=3倍——同类型护盾越叠越厚
+func _get_effective_max_hp() -> float:
+	if _shield_data == null:
+		return 0.0
+	return _shield_data.max_hp * float(_shield_stack)
+
+## 获取有效单次吸收值（基础值 × 叠层倍数）
+func _get_effective_absorb() -> float:
+	if _shield_data == null:
+		return 0.0
+	return _shield_data.absorb_per_hit * float(_shield_stack)
 
 ## 吸收伤害（Player.take_damage 调用）
 ## 参数：amount - 原始伤害值, attacker - 攻击者节点, context - 上下文字典
@@ -144,8 +203,8 @@ func absorb_damage(amount: float, attacker: Node, context: Dictionary = {}) -> f
 	if _shield_data == null or _current_hp <= 0.0:
 		return amount
 
-	## 本护盾吸收的伤害量 = min(单次吸收上限, 剩余耐久, 伤害值)
-	var absorb: float = minf(_shield_data.absorb_per_hit, _current_hp)
+	## 本护盾吸收的伤害量 = min(有效单次吸收上限, 剩余耐久, 伤害值)
+	var absorb: float = minf(_get_effective_absorb(), _current_hp)
 	absorb = minf(absorb, amount)
 
 	## 扣减耐久
@@ -160,14 +219,14 @@ func absorb_damage(amount: float, attacker: Node, context: Dictionary = {}) -> f
 	_flash_timer = 0.15
 	queue_redraw()
 
-	## 触发护盾特效（对攻击者施加效果）
+	## 触发护盾特效（对攻击者施加效果，层数决定debuff强度）
 	if _shield_data.shield_effect != null:
-		_shield_data.shield_effect.apply(attacker, get_parent(), amount, context)
+		_shield_data.shield_effect.apply(attacker, get_parent(), amount, context, _shield_stack)
 
 	## 发出受击信号
 	shield_hit.emit(_current_hp, absorb)
 
-	## 耐久归零 → 护盾破碎
+	## 耐久归零 → 护盾破碎（但_data不置null，保持HUD图标显示，等待5秒回盾）
 	if _current_hp <= 0.0:
 		shield_broken.emit()
 
@@ -178,6 +237,6 @@ func absorb_damage(amount: float, attacker: Node, context: Dictionary = {}) -> f
 func get_current_hp() -> float:
 	return _current_hp
 
-## 获取最大耐久值（UI用）
+## 获取有效最大耐久值（UI用，考虑叠层）
 func get_max_hp() -> float:
-	return _shield_data.max_hp if _shield_data != null else 0.0
+	return _get_effective_max_hp()

@@ -21,6 +21,12 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 
 ## ========== 实现方法 ==========
 
+## 每级叠层成长：攻击削弱系数-0.05（钳制≥0.15防零攻越界）、持续+0.5秒
+## 设计意图：满级10层时敌人攻击50%→15%、4→8.5秒，高难敌潮下的保命核心词条
+func _on_stack_grown() -> void:
+	damage_factor = maxf(damage_factor - 0.05, 0.15)
+	duration += 0.5
+
 ## 应用诅咒特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例；target - 被诅咒的目标节点；context - 额外上下文（本特效未使用）

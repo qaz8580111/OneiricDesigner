@@ -36,6 +36,9 @@ const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
 ## 残影/粒子节点类（对象池管理）：Boss 出场特效复用，遵守性能约定
 const TrailGhostClass = preload("res://scripts/entities/TrailGhost.gd")
 
+## 竞技场常量：Boss出生点必须钳制在物理墙内（防止刷在场外被墙隔开）
+const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
+
 ## ========== 调参常量（阶段曲线的核心配置，集中管理便于平衡调整） ==========
 
 ## 每个阶段的时长（秒）：阶段 N 事件在 N*210 秒，阶段 N.5 在 N*210+105 秒
@@ -463,10 +466,13 @@ func _pick_boss_spawn_position(world: Node2D) -> Vector2:
 	if "player" in world and world.player != null and is_instance_valid(world.player):
 		player = world.player
 	if player == null:
-		## 玩家未就绪的兜底：屏幕中心（autoload 是纯 Node，需经 get_viewport() 取视口尺寸）
-		return get_viewport().get_visible_rect().size * 0.5
+		## 玩家未就绪的兜底：竞技场中心（autoload 是纯 Node，需经 get_viewport() 取视口尺寸）
+		return Vector2.ZERO
 	var angle: float = randf() * TAU
-	return player.global_position + Vector2(cos(angle), sin(angle)) * BOSS_SPAWN_DISTANCE
+	## 玩家周围环形随机点，再钳制进竞技场（预留120px墙内边距，Boss体积大避免贴墙卡模型）
+	var ring_point: Vector2 = player.global_position \
+			+ Vector2(cos(angle), sin(angle)) * BOSS_SPAWN_DISTANCE
+	return ArenaConfigClass.clamp_inside(ring_point, 120.0)
 
 ## ========== Boss 事件回调（后置通知） ==========
 

@@ -21,6 +21,12 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 
 ## ========== 实现方法 ==========
 
+## 每级叠层成长：中毒每秒伤害+4、持续时间+0.6秒
+## 设计意图：满级10层时5→41dps、3→8.4秒，与燃烧同构的成长曲线（毒略慢但更持久）
+func _on_stack_grown() -> void:
+	damage_per_second += 4
+	duration += 0.6
+
 ## 应用中毒特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例；target - 被命中的目标节点；context - 额外上下文（本特效未使用）

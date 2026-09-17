@@ -6,9 +6,9 @@
 script = ExtResource("1")
 upgrade_id = "upg_max_hp"
 display_name = "梦境之心"
-description = "核心血量上限 +15（并立即治疗15点）"
+description = "核心血量上限 +25（并立即治疗25点）"
 rarity = 0
 max_stacks = 10
 stat_modifiers = {
-"max_hp_bonus": 15
+"max_hp_bonus": 25
 }

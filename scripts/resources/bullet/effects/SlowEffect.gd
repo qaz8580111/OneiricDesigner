@@ -21,6 +21,12 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 
 ## ========== 实现方法 ==========
 
+## 每级叠层成长：减速系数-0.05（减得更狠，钳制≥0.05防定身bug）、持续+0.3秒
+## 设计意图：满级10层时50%→接近定身（0.05下限）、1.5→4.2秒，控场价值随等级显著提升
+func _on_stack_grown() -> void:
+	slow_factor = maxf(slow_factor - 0.05, 0.05)
+	duration += 0.3
+
 ## 应用减速特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例；target - 被减速的目标节点；context - 额外上下文（本特效未使用）

@@ -18,8 +18,8 @@ extends ShieldEffect
 ## 特效生效半径（当攻击者是子弹时，在此半径内减速所有敌人）
 @export var effect_radius: float = 200.0
 
-## 重写：护盾被击中时触发冰霜减速
-func apply(attacker: Node, player: Node, _amount: float, _context: Dictionary) -> void:
+## 重写：护盾被击中时触发冰霜减速（叠层放大减速程度和持续时间）
+func apply(attacker: Node, player: Node, _amount: float, _context: Dictionary, stack: int = 1) -> void:
 	if player == null:
 		return
 
@@ -28,10 +28,15 @@ func apply(attacker: Node, player: Node, _amount: float, _context: Dictionary) -
 	if targets.is_empty():
 		return
 
+	## 叠层放大：减速程度加深（speed_multiplier更低），持续时间延长
+	## 1层=0.4速度3秒，2层=0.25速度6秒，3层=0.15速度9秒（每层-0.1速度、×2时长）
+	var effective_multiplier: float = maxf(speed_multiplier - 0.1 * float(stack - 1), 0.05)
+	var effective_duration: float = duration * float(stack)
+
 	## 对每个目标施加减速
 	for target in targets:
 		if is_instance_valid(target) and target.has_method("apply_slowdown"):
-			target.apply_slowdown(duration, speed_multiplier, frost_color)
+			target.apply_slowdown(effective_duration, effective_multiplier, frost_color)
 
 ## 确定减速目标：直接攻击者 + 周围敌人
 func _resolve_targets(attacker: Node, player: Node) -> Array:

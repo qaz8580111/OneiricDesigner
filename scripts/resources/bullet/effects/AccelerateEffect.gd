@@ -19,6 +19,12 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 
 ## ========== 实现方法 ==========
 
+## 每级叠层成长：加速度+20/s、速度上限倍数+0.4
+## 设计意图：满级10层时50→230每秒加速、上限3→6.6倍原速，"越飞越快"的爽感随等级翻倍
+func _on_stack_grown() -> void:
+	acceleration += 20.0
+	max_speed_mult += 0.4
+
 ## 应用加速特效（重写基类方法）
 ## 触发时机：ON_TRAVEL（飞行中每物理帧触发一次，性能热点路径）
 ## 参数：bullet - 飞行中的子弹实例；target/context 对本特效无意义（始终为null/空）

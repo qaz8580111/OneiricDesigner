@@ -7,7 +7,7 @@
 script = ExtResource("1")
 upgrade_id = "upg_armorbreak"
 display_name = "碎甲弹头"
-description = "命中削减敌人防御，使其后续受到的伤害提高"
+description = "命中造成无视护盾的核心伤害（克制护盾敌人）；每级追加4点核心伤害"
 rarity = 1
 max_stacks = 10
 bullet_effect = ExtResource("2")

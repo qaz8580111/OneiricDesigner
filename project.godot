@@ -193,6 +193,6 @@ game_choice_next={
 
 textures/canvas_textures/default_texture_filter=0
 ; 默认清屏色与游戏背景(GameWorld的BgLayer)同色（深灰蓝）
-; 主场景世界无限大且无边界，清屏色与背景色一致后，
+; 竞技场为固定大小(5760×3840，1920×1280视口的3×3屏)且相机limit不会拍到墙外，清屏色与背景色一致后，
 ; 任何分辨率/窗口尺寸下都不会露出默认灰色、看不到背景色分界
 environment/defaults/default_clear_color=Color(0.14, 0.13, 0.19, 1)

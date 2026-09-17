@@ -1,43 +1,80 @@
-[gd_scene load_steps=4 format=3 uid="uid://bgameworld"]
+[gd_scene load_steps=13 format=3 uid="uid://bgameworld"]
 
 ; ==============================================================================
-; GameWorld.tscn - 游戏世界场景
-; 职责：定义游戏世界的根节点，作为所有游戏实体（玩家、敌人、物品）的容器
-; 所属脚本：GameWorld.gd (根节点) - 游戏世界管理器，处理敌人生成、场景管理等
+; GameWorld.tscn - 游戏世界场景（梦境竞技场 Dreamscape Arena）
+; 职责：固定大小竞技场（5760×3840，=1920×1280视口的3×3屏），提供三层视差背景、物理边界、边缘预警与Glow后处理
+; 所属脚本：GameWorld.gd (根节点) - 敌人生成、子弹/掉落管理、主题注入、边缘红光驱动
 ;
-; 场景结构（背景三层视觉，由远到近）：
+; 场景结构（绘制顺序由远到近）：
 ;   GameWorld (Node2D)
-;   ├── BgLayer (CanvasLayer, layer=-1) - 远景层（固定屏幕，不随相机移动）
-;   │   ├── Background (ColorRect) - 主题背景纯色底
-;   │   └── BgTexture (TextureRect) - 可选平铺背景图（主题bg_texture，无图时隐藏）
-;   ├── GridFloor (Node2D, z_index=-1) - 无限网格地面（世界层，随相机流动，提供空间感）
-;   └── [动态添加] Player, Enemy, PickUp 等游戏实体（z_index=0，在网格之上）
+;   ├── BgLayer (CanvasLayer, layer=-10) - 固定屏幕纯色底/可选主题平铺图
+;   │   ├── Background (ColorRect) - 主题 bg_color
+;   │   └── BgTexture (TextureRect) - 主题 bg_texture（无缝平铺，null隐藏）
+;   ├── ArenaBackground (ParallaxBackground, layer=-9) - 三层视差（脚本ParallaxSetup.gd）
+;   │   ├── LayerNebula (ParallaxLayer 0.2)  - 星云深层（程序化shader，1024镜像）
+;   │   ├── LayerDebris (ParallaxLayer 0.5)  - 漂浮碎片（程序化shader，768镜像）
+;   │   └── LayerGrid  (ParallaxLayer 1.0)   - 64/512网格（世界1:1参照物，512镜像）
+;   ├── ArenaWalls (Node2D) - 竞技场边界（中心原点，半宽2880/半高1920）
+;   │   ├── WallTop/WallBottom/WallLeft/WallRight (StaticBody2D, layer=16)
+;   │   └── DreamBarrier (Line2D, z=-1, 闭环HDR蓝线) - 物理墙内侧的发光梦境屏障
+;   ├── WorldEnvironment - Glow后处理（让HDR屏障线发光；2D无内置Vignette，暗角用渐变纹理）
+;   ├── VignetteLayer (CanvasLayer, layer=5) - 屏幕暗角（在游戏实体之上、HUD(layer=10)之下）
+;   │   ├── DarkVignette (TextureRect) - 常驻轻微黑色暗角（运行时生成径向渐变）
+;   │   └── EdgeWarning (TextureRect) - 距墙<200px泛红预警（运行时生成红色径向渐变）
+;   └── [动态添加] Player, Enemy, Bullet, PickUp 等游戏实体（默认画布层0，z_index=0）
 ;
-; 使用方式：在Main.tscn中作为子节点加载，玩家和敌人通过脚本动态生成到此节点下
+; 碰撞层：墙=16(bit5)，玩家/敌人 mask=19(1+2+16)；子弹/拾取物 mask 不含16，对墙无感知
 ; ==============================================================================
 
 [ext_resource type="Script" path="res://scripts/entities/GameWorld.gd" id="1_world"]
 [ext_resource type="BulletData" path="res://data/bullet/player_default_bullet.tres" id="2_playerbullet"]
-[ext_resource type="Script" path="res://scripts/world/GridFloor.gd" id="3_gridfloor"]
+[ext_resource type="Script" path="res://scripts/world/ParallaxSetup.gd" id="3_parallax"]
+[ext_resource type="Shader" path="res://shaders/parallax_nebula.gdshader" id="4_shd_nebula"]
+[ext_resource type="Shader" path="res://shaders/parallax_debris.gdshader" id="5_shd_debris"]
+[ext_resource type="Shader" path="res://shaders/parallax_grid.gdshader" id="6_shd_grid"]
+
+; ------------------------------ 子资源：视差材质 ------------------------------
+; Layer0星云材质（颜色/密度参数取shader内置默认，保持极暗氛围）
+[sub_resource type="ShaderMaterial" id="mat_nebula"]
+shader = ExtResource("4_shd_nebula")
+
+; Layer1漂浮碎片材质
+[sub_resource type="ShaderMaterial" id="mat_debris"]
+shader = ExtResource("5_shd_debris")
+
+; Layer2网格材质（默认#1A1A24极暗；运行时由主题grid_color/grid_major_color覆盖）
+[sub_resource type="ShaderMaterial" id="mat_grid"]
+shader = ExtResource("6_shd_grid")
+
+; ------------------------------ 子资源：Glow后处理 ------------------------------
+; 阈值1.0：仅HDR颜色（屏障线蓝通道1.8）产生辉光，普通LDR游戏画面不受影响
+[sub_resource type="Environment" id="env_arena"]
+glow_enabled = true
+glow_intensity = 0.8
+glow_strength = 1.05
+glow_bloom = 0.1
+glow_hdr_threshold = 1.0
+
+; ------------------------------ 子资源：墙体形状 ------------------------------
+; 水平墙：宽度比竞技场多一个墙厚，与垂直墙在四角重叠，杜绝角落缝隙
+[sub_resource type="RectangleShape2D" id="shape_wall_h"]
+size = Vector2(5800, 40)
+
+; 垂直墙：同理上下各多出20px
+[sub_resource type="RectangleShape2D" id="shape_wall_v"]
+size = Vector2(40, 3880)
 
 ; ------------------------------ 根节点 ------------------------------
-; GameWorld (Node2D) - 游戏世界根节点
-; 作为所有游戏实体的父容器，提供统一的坐标空间
-; default_bullet_data: 玩家发射子弹的默认配置（引用资源文件）
 [node name="GameWorld" type="Node2D"]
 script = ExtResource("1_world")
 default_bullet_data = ExtResource("2_playerbullet")
 
-; ------------------------------ 远景背景（屏幕固定层） ------------------------------
-; BgLayer (CanvasLayer) - 背景层
-; layer=-1：绘制在游戏世界之下；CanvasLayer不随相机移动，
-; 背景永远铺满屏幕（玩家移动到任何位置都不会露出默认清屏色）
+; ------------------------------ 固定屏幕底色层（最远） ------------------------------
+; BgLayer layer=-10：在视差层(-9)之下；CanvasLayer不随相机移动，任何位置不露清屏色
 [node name="BgLayer" type="CanvasLayer" parent="."]
-layer = -1
+layer = -10
 
-; Background (ColorRect) - 游戏背景纯色底
-; 颜色由主题 bg_color 在运行时覆盖（场景值仅为无主题时的兜底）
-; 全屏锚点（anchors_preset=15）：相对视口自适应，任意分辨率下都铺满
+; 纯色底（主题 bg_color 运行时覆盖，此值仅兜底）；全屏锚定自适应任意分辨率
 [node name="Background" type="ColorRect" parent="BgLayer"]
 anchors_preset = 15
 anchor_right = 1.0
@@ -46,9 +83,7 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.13, 0.12, 0.18, 1)
 
-; BgTexture (TextureRect) - 可选平铺远景图（主题 GameTheme.bg_texture 注入）
-; 无纹理时代码隐藏；有纹理时 TILE 无缝平铺铺满屏幕（texture_repeat=1启用重复采样）
-; mouse_filter=2(IGNORE)：纯视觉层，绝不拦截鼠标事件（项目UI铁律）
+; 可选主题平铺远景图（TILE+repeat，无纹理时代码隐藏）；mouse_filter=2不拦截事件
 [node name="BgTexture" type="TextureRect" parent="BgLayer"]
 visible = false
 anchors_preset = 15
@@ -60,9 +95,125 @@ mouse_filter = 2
 texture_repeat = 1
 stretch_mode = 1
 
-; ------------------------------ 网格地面（世界层，随相机流动） ------------------------------
-; GridFloor (Node2D) - 程序化无限网格
-; z_index=-1：在所有游戏实体(z_index=0)之下；脚本内按相机可视范围绘制64px网格
-[node name="GridFloor" type="Node2D" parent="."]
+; ------------------------------ 三层视差背景 ------------------------------
+; ParallaxBackground layer=-9：自动读取活动Camera2D做视差滚动
+[node name="ArenaBackground" type="ParallaxBackground" parent="."]
+layer = -9
+script = ExtResource("3_parallax")
+
+; Layer0星云深层：移动速度仅为相机的20%，缓慢暗示纵深；1024镜像周期与shader平铺周期一致
+[node name="LayerNebula" type="ParallaxLayer" parent="ArenaBackground"]
+motion_mirroring = Vector2(1024, 1024)
+motion_scale = Vector2(0.2, 0.2)
+
+; 1024×1024色块以世界原点为中心（offset四边±512），shader内部噪声周期无缝
+[node name="NebulaRect" type="ColorRect" parent="ArenaBackground/LayerNebula"]
+offset_left = -512.0
+offset_top = -512.0
+offset_right = 512.0
+offset_bottom = 512.0
+mouse_filter = 2
+color = Color(1, 1, 1, 1)
+material = SubResource("mat_nebula")
+
+; Layer1漂浮碎片：50%视差速度，768镜像
+[node name="LayerDebris" type="ParallaxLayer" parent="ArenaBackground"]
+motion_mirroring = Vector2(768, 768)
+motion_scale = Vector2(0.5, 0.5)
+
+[node name="DebrisRect" type="ColorRect" parent="ArenaBackground/LayerDebris"]
+offset_left = -384.0
+offset_top = -384.0
+offset_right = 384.0
+offset_bottom = 384.0
+mouse_filter = 2
+color = Color(1, 1, 1, 1)
+material = SubResource("mat_debris")
+
+; Layer2网格：100%视差（与世界1:1），512镜像=8个64px小格，主线恰在镜像接缝
+[node name="LayerGrid" type="ParallaxLayer" parent="ArenaBackground"]
+motion_mirroring = Vector2(512, 512)
+motion_scale = Vector2(1, 1)
+
+[node name="GridRect" type="ColorRect" parent="ArenaBackground/LayerGrid"]
+offset_left = -256.0
+offset_top = -256.0
+offset_right = 256.0
+offset_bottom = 256.0
+mouse_filter = 2
+color = Color(1, 1, 1, 1)
+material = SubResource("mat_grid")
+
+; ------------------------------ 物理边界（4堵静态墙） ------------------------------
+[node name="ArenaWalls" type="Node2D" parent="."]
+
+; collision_layer=16(世界墙bit5)，collision_mask=0（墙不检测任何对象，只被角色mask=19撞上）
+; 墙中心线与竞技场边界y=-1920重合（40厚各占内外20px）
+[node name="WallTop" type="StaticBody2D" parent="ArenaWalls"]
+collision_layer = 16
+collision_mask = 0
+position = Vector2(0, -1920)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ArenaWalls/WallTop"]
+shape = SubResource("shape_wall_h")
+
+[node name="WallBottom" type="StaticBody2D" parent="ArenaWalls"]
+collision_layer = 16
+collision_mask = 0
+position = Vector2(0, 1920)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ArenaWalls/WallBottom"]
+shape = SubResource("shape_wall_h")
+
+[node name="WallLeft" type="StaticBody2D" parent="ArenaWalls"]
+collision_layer = 16
+collision_mask = 0
+position = Vector2(-2880, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ArenaWalls/WallLeft"]
+shape = SubResource("shape_wall_v")
+
+[node name="WallRight" type="StaticBody2D" parent="ArenaWalls"]
+collision_layer = 16
+collision_mask = 0
+position = Vector2(2880, 0)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ArenaWalls/WallRight"]
+shape = SubResource("shape_wall_v")
+
+; 梦境屏障：沿边界内侧的闭环发光线（蓝通道1.8为HDR色，超过Glow阈值1.0产生辉光）
+; z_index=-1压在游戏实体之下；width=3屏幕可见细光带
+[node name="DreamBarrier" type="Line2D" parent="ArenaWalls"]
 z_index = -1
-script = ExtResource("3_gridfloor")
+width = 3.0
+default_color = Color(0.4, 0.7, 1.8, 0.95)
+closed = true
+points = PackedVector2Array(-2880, -1920, 2880, -1920, 2880, 1920, -2880, 1920)
+
+; ------------------------------ Glow后处理 ------------------------------
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env_arena")
+
+; ------------------------------ 屏幕暗角层（实体之上/HUD之下） ------------------------------
+[node name="VignetteLayer" type="CanvasLayer" parent="."]
+layer = 5
+
+; 常驻轻微黑色暗角（纹理由GameWorld._ready代码生成256径向渐变，拉伸全屏）
+[node name="DarkVignette" type="TextureRect" parent="VignetteLayer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+; 边界红色预警（默认全透明；玩家距墙<200px时GameWorld每帧把modulate.a推向≤0.5）
+[node name="EdgeWarning" type="TextureRect" parent="VignetteLayer"]
+visible = true
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+modulate = Color(1, 1, 1, 0)

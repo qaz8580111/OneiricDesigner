@@ -26,6 +26,27 @@ enum TriggerType {
 ## 该特效的触发时机（决定何时执行特效逻辑）
 @export var trigger_type: TriggerType = TriggerType.ON_HIT
 
+## 当前叠层层数（运行时状态：玩家重复获得同一特效词条时由add_stack递增）
+## 数据流：UpgradeManager.apply_upgrade → Player.apply_bullet_effect（已拥有时）→ add_stack
+## 注意：玩家持有的是bullet_data.duplicate(true)深拷贝出的独立特效实例，
+##       在实例上放大的参数只影响本玩家，绝不会污染data/bullet/effect/下的共享.tres
+var stack_count: int = 1
+
+## ========== 叠层成长机制 ==========
+
+## 叠加一层并应用成长（重复获得同一特效词条时调用）
+## 设计意图：特效词条从"只能拥有一次"升级为"每级数值成长"——
+##           重复抽到不再是无效层数，而是让特效关键参数肉眼可见地变强
+func add_stack() -> void:
+	stack_count += 1
+	## 通知子类按新层数放大参数（成长策略由各特效自定义）
+	_on_stack_grown()
+
+## 每级成长虚方法（扩展插槽）：子类重写以放大自己的关键参数
+## 参数约定：调用时stack_count已更新为当前层数（从2开始，1级=基础值不调用）
+func _on_stack_grown() -> void:
+	pass  ## 默认无成长（未重写的特效保持原行为）
+
 ## ========== 核心方法（扩展插槽） ==========
 
 ## 应用特效（扩展插槽）

@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 ; ==============================================================================
 ; Player.tscn - 玩家角色场景
@@ -15,7 +15,7 @@
 ;   ├── CollisionShape2D - 玩家物理碰撞体（半径20）
 ;   ├── Hitbox (Area2D) - 伤害检测区域（半径18，略小于物理碰撞体）
 ;   │   └── CollisionShape2D
-;   ├── Camera2D - 跟随玩家的相机（平滑跟随）
+;   ├── Camera2D - 跟随玩家的相机（Godot4平滑跟随 + drag死区 + 竞技场limit，挂CameraShake）
 ;   └── HealthController (Node) - 健康系统容器
 ;       ├── ShieldComponent (Node) - 护盾组件
 ;       │   ├── RegenDelayTimer (Timer) - 护盾恢复延迟计时器（5秒）
@@ -24,8 +24,8 @@
 ;           └── InvincibleTimer (Timer) - 无敌帧计时器（0.5秒）
 ;
 ; 碰撞层配置：
-;   - Player (CharacterBody2D): collision_layer=1, collision_mask=1
-;   - Hitbox (Area2D): collision_mask=1（只检测与玩家层的碰撞）
+;   - Player (CharacterBody2D): collision_layer=1, collision_mask=19（1玩家+2敌人+16世界墙）
+;   - Hitbox (Area2D): collision_layer=1, collision_mask=8（检测敌人子弹层）
 ; ==============================================================================
 
 [ext_resource type="Script" path="res://scripts/entities/Player.gd" id="1_player"]
@@ -34,6 +34,7 @@
 [ext_resource type="Script" path="res://scripts/components/CoreHealthComponent.gd" id="4_core"]
 [ext_resource type="BulletData" path="res://data/bullet/player_default_bullet.tres" id="5_bullet"]
 [ext_resource type="Script" path="res://scripts/components/EquipmentShieldComponent.gd" id="6_eq_shield"]
+[ext_resource type="Script" path="res://scripts/world/CameraShake.gd" id="7_shake"]
 
 ; 物理碰撞体形状 - 用于角色移动和碰撞检测（半径20像素）
 [sub_resource type="CircleShape2D" id="CircleShape2D_1"]
@@ -45,13 +46,13 @@ radius = 18.0
 
 ; ------------------------------ 根节点 ------------------------------
 ; Player (CharacterBody2D) - 玩家物理角色根节点
-; 碰撞层：1（玩家层），碰撞掩码：1+2（检测玩家层和敌人层，实现物理碰撞排斥）
+; 碰撞层：1（玩家层），碰撞掩码：19（1玩家+2敌人+16世界墙，可撞墙并保留敌人间互挤）
 ; 所属组：player（用于查找玩家引用）
 ; bullet_data：玩家发射子弹的配置数据（引用资源文件）
 [node name="Player" type="CharacterBody2D"]
 script = ExtResource("1_player")
 collision_layer = 1
-collision_mask = 3
+collision_mask = 19
 groups = PackedStringArray("player")
 bullet_data = ExtResource("5_bullet")
 
@@ -80,14 +81,30 @@ collision_mask = 8
 shape = SubResource("CircleShape2D_2")
 
 ; ------------------------------ 相机 ------------------------------
-; Camera2D - 跟随玩家的相机
-; 设置：平滑跟随启用，平滑速度0.1（较慢的跟随速度，产生流畅的视觉效果）
+; Camera2D - 跟随玩家的相机（挂CameraShake.gd，受击震动由该脚本驱动offset/rotation）
+; 竞技场5760×3840（1920×1280视口的3×3屏）：
+;   Godot4的limit钳制"视野边缘"世界坐标，直接填竞技场四边±2880/±1920；
+;   引擎自动内缩半视口，相机中心实际可移动 3840×2560，且永远拍不到墙外
+;   （tscn值仅编辑器预览兜底，运行时由Player._ready从ArenaConfig注入同源值）
 [node name="Camera2D" type="Camera2D" parent="."]
 position = Vector2(0, 0)
 current = true
-smooth_enabled = true
-smooth_follow = true
-smooth_speed = 0.1
+script = ExtResource("7_shake")
+; Godot4位置平滑（旧smooth_*属性在Godot4已失效，必须用position_smoothing_*）
+position_smoothing_enabled = true
+position_smoothing_speed = 8.0
+; drag死区：玩家在屏幕中部70%区域移动时相机不动，越过死区才跟随（幸存者类手感）
+drag_horizontal_enabled = true
+drag_vertical_enabled = true
+drag_left_margin = 0.15
+drag_top_margin = 0.15
+drag_right_margin = 0.15
+drag_bottom_margin = 0.15
+; 相机视野边界=竞技场四边（物理墙中心线所在位置）
+limit_left = -2880
+limit_right = 2880
+limit_top = -1920
+limit_bottom = 1920
 
 ; ------------------------------ 装备护盾组件 ------------------------------
 ; EquipmentShieldComponent (Node2D) - 装备护盾组件

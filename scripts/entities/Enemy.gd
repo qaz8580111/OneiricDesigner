@@ -7,12 +7,15 @@
 ##   - 信号：killed → GameWorld 移除管理列表并计数；drops_generated → GameWorld 生成拾取物；
 ##           damaged/attacked 预留给受击/攻击动画
 ##   - 数据：enemy_data.tres 由 GameWorld 深拷贝并难度缩放后注入（apply_to_enemy 覆盖下方导出默认值）
-## 碰撞层：本体 layer=2(敌人层)/mask=3；Hitbox layer=2/mask=1（检测玩家层，实现贴身接触伤害）
+## 碰撞层：本体 layer=2(敌人层)/mask=19（1玩家+2敌人+16竞技场墙）；Hitbox layer=0/mask=1（检测玩家层）
 ## 设计意图：三态状态机(WANDER/CHASE/ATTACK)按与玩家距离驱动；子弹就地生成
 ##           （与玩家"只发信号由GameWorld创建"不同——敌人数量多，就地实例化链路最短）
 extends CharacterBody2D
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========
+
+## 竞技场碰撞掩码常量（世界墙层位单一数据源，与GameWorld.tscn墙体保持一致）
+const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
 
 ## 敌人数据资源类，用于加载配置数据
 const EnemyDataClass = preload("res://scripts/resources/enemy/EnemyData.gd")
@@ -126,6 +129,17 @@ var _skill_timer: float = 0.0
 ## 技能释放中标记（冲锋/传送/自爆等技能执行期间为true，暂停普通AI）
 var _skill_active: bool = false
 
+## 死亡标记（防重入：_die()调用后置true，take_damage/_physics_process据此跳过）
+## 设计意图：敌人血量归零到call_deferred("queue_free")真正执行之间有一帧间隙，
+##           期间子弹仍可命中导致take_damage重复触发_die()，引发重复掉落/异常中断
+var _is_dying: bool = false
+
+## AI节流计数器：远距敌人每5物理帧才更新一次_update_state（距离计算+状态切换），
+## 近距（CHASE/ATTACK）每帧更新。140敌人×5帧节流=等效28敌人AI开销
+## 设计意图：后期140敌人在场，80%在WANDER远距，节流后CPU开销降为1/5
+var _ai_throttle_counter: int = 0
+const AI_THROTTLE_INTERVAL: int = 5
+
 ## ========== 技能HUD（头顶技能名称+冷却进度条） ==========
 
 ## 技能名称标签（显示在敌人头顶）
@@ -169,13 +183,15 @@ const COLLISION_DORMANT_DISTANCE: float = 750.0
 ## 恢复唤醒的距离（与玩家距离回到此值内 → 恢复完整碰撞）
 const COLLISION_AWAKE_DISTANCE: float = 650.0
 
-## 完整碰撞掩码（玩家层1 + 敌人层2 = 3，与 Enemy.tscn 配置一致）
-const COLLISION_MASK_ACTIVE: int = 3
+## 完整碰撞掩码（玩家层1 + 敌人层2 + 世界墙层16 = 19，与 Enemy.tscn 配置一致；
+## 世界墙层位定义在 ArenaConfig，休眠唤醒后敌人仍会被竞技场墙挡住）
+const COLLISION_MASK_ACTIVE: int = ArenaConfigClass.MASK_ENTITY_BLOCKING
 
-## 休眠碰撞掩码（不与任何层碰撞，move_and_slide 退化为纯位移）
-const COLLISION_MASK_DORMANT: int = 0
+## 休眠碰撞掩码（仅世界墙16）：关闭敌人间互挤/玩家碰撞（消除O(n²)窄相），
+## 但保留对4堵静态墙的碰撞（O(1)成本），防止被击退弹到墙外的敌人唤醒后回不进场
+const COLLISION_MASK_DORMANT: int = ArenaConfigClass.MASK_DORMANT
 
-## 当前是否处于碰撞休眠状态（true=mask已置0；避免每帧重复写碰撞属性）
+## 当前是否处于碰撞休眠状态（true=mask已切到仅墙16；避免每帧重复写碰撞属性）
 var _collision_dormant: bool = false
 
 ## ========== 状态枚举（敌人AI状态机） ==========
@@ -497,6 +513,9 @@ func _create_elite_glow_effect() -> void:
 
 ## _physics_process() - 每物理帧调用一次（默认60次/秒），用于处理敌人AI逻辑
 func _physics_process(delta: float) -> void:
+	## 死亡后不再执行AI逻辑（_die()到queue_free执行间的一帧间隙内防跑尸体）
+	if _is_dying:
+		return
 	## 如果玩家引用为空，尝试查找玩家
 	if _player == null:
 		_find_player()
@@ -522,8 +541,18 @@ func _physics_process(delta: float) -> void:
 			_perform_skill()
 			_skill_timer = skill_cooldown
 
-	## 根据与玩家的距离更新当前状态
-	_update_state()
+	## 根据与玩家的距离更新当前状态（AI节流：远距敌人每5帧更新一次）
+	## 性能优化：140敌人在场时_update_state每帧×140次distance_to+状态切换开销大；
+	##           WANDER态敌人远距时不需要每帧精确距离，5帧≈83ms仍够响应状态切换
+	_ai_throttle_counter += 1
+	if _current_state == EnemyState.WANDER:
+		## 远距漫游态：节流更新（每5帧一次）
+		if _ai_throttle_counter >= AI_THROTTLE_INTERVAL:
+			_ai_throttle_counter = 0
+			_update_state()
+	else:
+		## 近距追踪/攻击态：每帧更新（保证战斗精度）
+		_update_state()
 	
 	## 根据当前状态执行对应逻辑
 	match _current_state:
@@ -887,6 +916,9 @@ func _skill_aoe_slam(skill: Resource, dmg: int, color: Color) -> void:
 	_do_screen_shake(4.0, 0.15)
 	## 延迟0.1秒后造成伤害（给玩家闪避窗口）
 	await get_tree().create_timer(0.1, false).timeout
+	## 敌人可能在此await期间死亡被queue_free，协程恢复时引用已无效——守卫退出
+	if not is_instance_valid(self) or _is_dying:
+		return
 	## 检查玩家是否在范围内
 	if _player != null and is_instance_valid(_player):
 		var dist: float = global_position.distance_to(_player.global_position)
@@ -924,6 +956,9 @@ func _skill_barrage(skill: Resource, dmg: int, color: Color) -> void:
 	var interval: float = skill.barrage_interval
 	for i in range(count):
 		await get_tree().create_timer(interval * i, false).timeout
+		## 敌人可能在此await期间死亡，守卫退出
+		if not is_instance_valid(self) or _is_dying:
+			return
 		if _player == null or not is_instance_valid(_player):
 			return
 		var dir: Vector2 = (_player.global_position - global_position).normalized()
@@ -942,6 +977,9 @@ func _skill_teleport_strike(skill: Resource, dmg: int, color: Color) -> void:
 		sprite.modulate.a = 0.3
 	_create_cast_flash(Vector2.ZERO, 35.0, color)
 	await get_tree().create_timer(0.15, false).timeout
+	## 敌人可能在此await期间死亡，守卫退出
+	if not is_instance_valid(self) or _is_dying:
+		return
 	## 传送到玩家身后
 	var behind_dir: Vector2 = (_player.global_position - global_position).normalized()
 	global_position = _player.global_position + behind_dir * skill.teleport_distance
@@ -991,6 +1029,9 @@ func _skill_suicide_bomb(skill: Resource, dmg: int, color: Color) -> void:
 		tw.tween_property(sprite, "modulate", Color.WHITE, 0.075)
 	## 倒计时
 	await get_tree().create_timer(skill.bomb_fuse, false).timeout
+	## 敌人可能在此await期间被玩家击杀，守卫退出避免协程引用已销毁节点
+	if not is_instance_valid(self) or _is_dying:
+		return
 	## 爆炸：AOE伤害
 	if _player != null and is_instance_valid(_player):
 		var dist: float = global_position.distance_to(_player.global_position)
@@ -1045,7 +1086,9 @@ func _create_aoe_visual(radius: float, color: Color) -> Node2D:
 	## 绘制AOE圆环（通过绑定方法，避免多行lambda语法问题）
 	visual.draw.connect(_draw_aoe_ring.bind(visual, radius, color))
 	## 动画：放大+淡出后销毁
-	var tw: Tween = create_tween()
+	## 关键修复：Tween必须挂在visual节点自身而非Enemy(create_tween=挂self)，
+	## 否则Enemy死亡queue_free后Tween被连带销毁，queue_free回调永不执行→红圈残留
+	var tw: Tween = visual.create_tween()
 	tw.set_parallel(true)
 	tw.tween_property(visual, "scale", Vector2(1.3, 1.3), 0.3)
 	tw.tween_property(visual, "modulate:a", 0.0, 0.3)
@@ -1073,7 +1116,8 @@ func _create_cast_flash(direction: Vector2, offset: float, color: Color) -> void
 	## 绘制实心圆+外环
 	flash.draw.connect(_draw_cast_flash.bind(flash, color))
 	## 动画：快速放大+淡出
-	var tw: Tween = create_tween()
+	## 关键修复：Tween挂在flash节点自身，Enemy销毁后不影响动画完成和节点回收
+	var tw: Tween = flash.create_tween()
 	tw.set_parallel(true)
 	tw.tween_property(flash, "scale", Vector2(2.0, 2.0), 0.15)
 	tw.tween_property(flash, "modulate:a", 0.0, 0.15)
@@ -1095,7 +1139,8 @@ func _create_nova_flash(start_radius: float, color: Color) -> void:
 	get_parent().add_child(ring)
 	ring.draw.connect(_draw_nova_ring.bind(ring, start_radius, color))
 	## 动画：快速扩大+淡出
-	var tw: Tween = create_tween()
+	## 关键修复：Tween挂在ring节点自身，Enemy销毁后不影响动画完成和节点回收
+	var tw: Tween = ring.create_tween()
 	tw.set_parallel(true)
 	tw.tween_property(ring, "scale", Vector2(3.0, 3.0), 0.2)
 	tw.tween_property(ring, "modulate:a", 0.0, 0.2)
@@ -1124,7 +1169,8 @@ func _spawn_charge_ghost(dir: Vector2, charge_speed: float, index: int) -> void:
 	ghost.z_index = sprite.z_index - 1
 	get_parent().add_child(ghost)
 	## 残影快速淡出
-	var tw: Tween = create_tween()
+	## 关键修复：Tween挂在ghost节点自身，Enemy销毁后不影响动画完成和节点回收
+	var tw: Tween = ghost.create_tween()
 	tw.tween_property(ghost, "modulate:a", 0.0, 0.3)
 	tw.chain().tween_callback(ghost.queue_free)
 
@@ -1152,6 +1198,9 @@ func _do_screen_shake(intensity: float, duration: float) -> void:
 ## 敌人受到伤害时调用（对外接口）
 ## 参数：amount - 受到的伤害数值
 func take_damage(amount: int) -> void:
+	## 已进入死亡流程的敌人不再受击（防重入：_die()后到queue_free执行间的一帧间隙内子弹仍可命中）
+	if _is_dying:
+		return
 	## 如果伤害小于等于0，不执行任何操作
 	if amount <= 0:
 		return
@@ -1211,6 +1260,9 @@ func _flash_hit() -> void:
 	## 计时冻结，避免暂停期间恢复回调与恢复后的新受击闪烁交错错乱
 	await get_tree().create_timer(0.1, false).timeout
 
+	## 敌人可能在此await期间死亡，守卫退出避免协程引用已销毁节点
+	if not is_instance_valid(self) or _is_dying:
+		return
 	## 窗口关闭（即使精灵已销毁也无需担心：标记随实例一起回收）
 	_flash_active = false
 	if is_instance_valid(sprite):
@@ -1238,6 +1290,9 @@ func apply_slowdown(duration: float, speed_multiplier: float, effect_color: Colo
 	## 否则三选一面板停留期间减速照样倒计时，恢复游戏时效果已凭空过期
 	await get_tree().create_timer(duration, false).timeout
 	
+	## 敌人可能在此await期间死亡，守卫退出避免协程引用已销毁节点
+	if not is_instance_valid(self) or _is_dying:
+		return
 	## 恢复原始速度
 	speed = original_speed
 	wander_speed = original_wander_speed
@@ -1248,6 +1303,14 @@ func apply_slowdown(duration: float, speed_multiplier: float, effect_color: Colo
 
 ## 敌人死亡逻辑
 func _die() -> void:
+	## 防重入：已进入死亡流程则跳过（敌人血量归零到queue_free真正执行间有一帧间隙，
+	## 期间子弹仍可命中触发重复_die()，导致重复掉落/重复特效/异常中断）
+	if _is_dying:
+		return
+	_is_dying = true
+	## 立即调度销毁——放在最前面确保无论后续逻辑是否异常，节点一定会被回收
+	## （call_deferred仅调度一次，重复调用安全但上面_is_dying已挡住）
+	call_deferred("queue_free")
 	## ---------- 死亡音效 ----------
 	if AudioManager:
 		var is_elite: bool = (enemy_data != null and enemy_data.is_elite) or max_health >= 15
@@ -1283,8 +1346,6 @@ func _die() -> void:
 
 	## 发出死亡信号（用于统计、清理等）
 	killed.emit()
-	## 使用call_deferred延迟销毁，避免物理回调中修改场景树导致错误
-	call_deferred("queue_free")
 
 ## 神庙掉落判定：掷骰命中则通知GameWorld在死亡位置生成神庙
 func _try_spawn_temple() -> void:
@@ -1426,15 +1487,21 @@ func _generate_default_drops() -> Array:
 		sd.shield_equipment = shield_data
 		drops.append(sd)
 
-	## 特效护盾：0.5%概率所有怪，精英怪 3%
-	var chance_special_shield: float = 0.005 if not is_elite else 0.03
+	## 特效护盾：2%概率所有怪，精英怪 8%（旧0.5%/3%太低，实测几乎看不到特效护盾掉落）
+	var chance_special_shield: float = 0.02 if not is_elite else 0.08
 	if randf() < chance_special_shield:
 		## 随机选择一种特效护盾
 		var special_types: Array = ["shield_poison", "shield_frost", "shield_reflect"]
 		var chosen: String = special_types[randi() % special_types.size()]
+		## 真实护盾名映射（旧版统一写"特效护盾"，玩家捡到也不认识是哪种）
+		var display_names: Dictionary = {
+			"shield_poison": "毒雾护盾",
+			"shield_frost": "冰霜护盾",
+			"shield_reflect": "反击护盾",
+		}
 		var sd2: DropItemClass = DropItemClass.new()
 		sd2.item_id = chosen
-		sd2.item_name = "特效护盾"
+		sd2.item_name = display_names[chosen]
 		sd2.item_type = DropItemClass.ItemType.EQUIPMENT
 		sd2.value = 0
 		sd2.drop_chance = 1.0

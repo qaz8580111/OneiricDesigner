@@ -586,15 +586,19 @@ func _refresh_shield_display() -> void:
 	if _equipment_shield == null and _player != null:
 		_equipment_shield = _player.get_node_or_null("EquipmentShieldComponent")
 
-	## 读取护盾数据与耐久（无护盾时隐藏面板并复位id缓存）
+	## 读取护盾数据与耐久（有护盾数据就显示，耐久为0也保持显示——等待5秒回盾）
 	var data: Resource = null
 	var hp: float = 0.0
 	var max_hp: float = 0.0
+	var stack: int = 1
 	if _equipment_shield != null and _equipment_shield.has_method("get_shield_data"):
 		data = _equipment_shield.get_shield_data()
 		if data != null:
 			hp = _equipment_shield.get_current_hp()
 			max_hp = _equipment_shield.get_max_hp()
+			if _equipment_shield.has_method("get_shield_stack"):
+				stack = _equipment_shield.get_shield_stack()
+	## 有护盾数据就显示面板（即使耐久为0也保持——护盾会在5秒后回盾满值）
 	_shield_panel.visible = data != null
 	if data == null:
 		_shield_display_id = ""
@@ -646,10 +650,18 @@ func _refresh_shield_display() -> void:
 			_shield_icon_rect.visible = false
 
 	## 名称+耐久数值与耐久条进度（每次刷新都更新——耐久是高频变化数据）
+	## 叠层显示：2层以上在名称后加×N；耐久为0时显示"回盾中"提示
 	var display_name: String = str(data.display_name) if "display_name" in data else "护盾"
-	_shield_name_label.text = "%s %d/%d" % [display_name, int(ceilf(hp)), int(max_hp)]
-	_shield_durability_bar.max_value = max_hp
-	_shield_durability_bar.value = hp
+	if stack > 1:
+		display_name += " ×%d" % stack
+	if hp <= 0.0:
+		## 护盾破碎等待回盾：显示"回盾中"替代数值
+		_shield_name_label.text = "%s 回盾中..." % display_name
+		_shield_durability_bar.value = 0.0
+	else:
+		_shield_name_label.text = "%s %d/%d" % [display_name, int(ceilf(hp)), int(max_hp)]
+		_shield_durability_bar.max_value = max_hp
+		_shield_durability_bar.value = hp
 
 ## 装备变更信号回调（拾取/替换/卸下护盾时触发）
 func _on_shield_equipped_changed(_data: Resource) -> void:

@@ -202,7 +202,11 @@ func _physics_process(delta: float) -> void:
 	position += velocity * delta
 
 	## 触发子弹飞行时的特效（ON_TRAVEL类型）
-	_bullet_data.trigger_effects(BulletEffectClass.TriggerType.ON_TRAVEL, self)
+	## 性能优化：先检查effects数组是否非空且含ON_TRAVEL类型，避免每帧空遍历
+	## 后期满级技能时子弹可能带16个特效，其中ON_TRAVEL类型的可能仅1~2个；
+	## 每帧×每子弹×16次遍历=百发子弹×60帧=96000次/秒无意义循环
+	if _bullet_data.effects.size() > 0:
+		_bullet_data.trigger_effects(BulletEffectClass.TriggerType.ON_TRAVEL, self)
 
 	## 追踪弹逻辑：检查是否被标记为追踪弹（由Enemy._skill_homing_shot设置meta）
 	_update_homing(delta)

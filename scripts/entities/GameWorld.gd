@@ -29,6 +29,9 @@ const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
 ## 神庙场景预加载（高级怪死亡后概率生成）
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/gameplay/Temple.tscn")
 
+## 竞技场尺寸/碰撞层/边缘预警常量（墙坐标、刷怪钳制、红光距离的单一数据源）
+const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
+
 ## ========== 敌人数据池预加载（18种敌人，带权重） ==========
 ## 键：敌人数据资源路径，值：生成权重（权重越大越常见）
 const ENEMY_POOL: Dictionary = {
@@ -79,6 +82,15 @@ var _enemy_pool_total_weight: float = 0.0
 
 ## 玩家引用，用于传递给敌人生成时使用
 @onready var player: CharacterBody2D = null
+
+## 边界红色预警遮罩（距墙<200px时由_process推高modulate.alpha）
+@onready var _edge_warning_rect: TextureRect = $VignetteLayer/EdgeWarning
+
+## 常驻黑色暗角遮罩（纹理在_ready中代码生成，静态不变）
+@onready var _dark_vignette_rect: TextureRect = $VignetteLayer/DarkVignette
+
+## 红色预警当前alpha（向目标值平滑插值，避免突现/突灭）
+var _edge_warning_alpha: float = 0.0
 
 ## ========== 场景预加载（避免运行时重复加载） ==========
 
@@ -173,12 +185,15 @@ func _ready() -> void:
 		## 清空上一局残留的事件队列（防止重开局时旧事件涌入）
 		LiveBridgeManager.clear_queue()
 
-## ========== 主题背景应用（背景三层：纯色底 + 可选远景平铺图 + 世界网格地面） ==========
+	## 代码生成暗角渐变纹理（常驻黑暗角 + 边界红色预警，无需任何美术资源）
+	_setup_vignette_textures()
+
+## ========== 主题背景应用（视差三层：纯色底 + 可选远景平铺图 + 1:1网格层） ==========
 
 ## 应用主题的世界外观（启动/主题切换时调用）
 ## 数据流：GameTheme.bg_color → BgLayer/Background(ColorRect)
 ##         GameTheme.bg_texture → BgLayer/BgTexture(TextureRect平铺，null则隐藏)
-##         GameTheme.grid_color/grid_major_color → GridFloor(世界层无限网格)
+##         GameTheme.grid_color/grid_major_color → ArenaBackground/ParallaxSetup(Layer2网格shader)
 ## 参数：theme - 主题包资源（含背景色/网格色/可选背景纹理）
 func _apply_theme_background(theme: GameThemeClass) -> void:
 	## 主题缺失时静默跳过（保持场景默认外观，绝不因主题系统崩溃）
@@ -193,14 +208,70 @@ func _apply_theme_background(theme: GameThemeClass) -> void:
 	if bg_tex_rect != null:
 		bg_tex_rect.texture = theme.bg_texture
 		bg_tex_rect.visible = theme.bg_texture != null
-	## 3) 世界网格地面：注入主次线颜色（GridFloor.set_colors内部强制下次重绘）
-	var grid_floor: Node2D = get_node_or_null("GridFloor")
-	if grid_floor != null and grid_floor.has_method("set_colors"):
-		grid_floor.set_colors(theme.grid_color, theme.grid_major_color)
+	## 3) 视差Layer2网格（与世界1:1移动的参照物）：经ParallaxSetup门面注入shader配色
+	var parallax: ParallaxBackground = get_node_or_null("ArenaBackground")
+	if parallax != null and parallax.has_method("set_grid_colors"):
+		parallax.set_grid_colors(theme.grid_color, theme.grid_major_color)
 
 ## 主题切换回调（ThemeManager.theme_changed）：背景即时跟随新主题
 func _on_theme_changed(theme: GameThemeClass) -> void:
 	_apply_theme_background(theme)
+
+## ========== 屏幕暗角与边界红光（纯代码纹理，零美术资源） ==========
+
+## 生成两张径向渐变纹理并挂到VignetteLayer：常驻黑暗角 + 边界红色预警
+## GradientTexture2D(FILL_RADIAL)以纹理中心为圆心，圆外自动保持末色→四角也被覆盖
+func _setup_vignette_textures() -> void:
+	## ---- 常驻轻微黑暗角：提升画面纵深，中心透明、四边alpha最高约0.4 ----
+	var dark_gradient := Gradient.new()
+	dark_gradient.set_color(0, Color(0.0, 0.0, 0.0, 0.0))
+	dark_gradient.add_point(0.68, Color(0.0, 0.0, 0.0, 0.0))
+	dark_gradient.set_color(dark_gradient.get_point_count() - 1, Color(0.0, 0.0, 0.0, 0.4))
+	var dark_texture := GradientTexture2D.new()
+	dark_texture.gradient = dark_gradient
+	dark_texture.width = 256   ## 256小图拉伸全屏即可，渐变是连续信号无锯齿
+	dark_texture.height = 256
+	dark_texture.fill = GradientTexture2D.FILL_RADIAL
+	dark_texture.fill_from = Vector2(0.5, 0.5)  ## 圆心：屏幕中心
+	dark_texture.fill_to = Vector2(0.5, 0.0)    ## 半径：到纹理顶边（四角落圆外保持末色）
+	_dark_vignette_rect.texture = dark_texture
+
+	## ---- 边界红色预警：中心透明，90%半径处开始泛红，边缘alpha最高约0.85 ----
+	## 最终屏幕alpha由EdgeWarning.modulate.a二次控制（贴墙也不超过WARN_MAX_ALPHA=0.5）
+	var red_gradient := Gradient.new()
+	red_gradient.set_color(0, Color(1.0, 0.05, 0.0, 0.0))
+	red_gradient.add_point(0.62, Color(1.0, 0.05, 0.0, 0.0))
+	red_gradient.add_point(0.9, Color(1.0, 0.08, 0.05, 0.55))
+	red_gradient.set_color(red_gradient.get_point_count() - 1, Color(1.0, 0.1, 0.08, 0.85))
+	var red_texture := GradientTexture2D.new()
+	red_texture.gradient = red_gradient
+	red_texture.width = 256
+	red_texture.height = 256
+	red_texture.fill = GradientTexture2D.FILL_RADIAL
+	red_texture.fill_from = Vector2(0.5, 0.5)
+	red_texture.fill_to = Vector2(0.5, 0.0)
+	_edge_warning_rect.texture = red_texture
+	_edge_warning_rect.modulate.a = 0.0
+
+## 每帧更新边界红光：计算玩家到最近一面物理墙的距离，<200px时线性推高红色alpha
+## 参数：delta - 帧间隔（秒），用于alpha平滑速率（每秒最多变化2.0）
+func _update_edge_warning(delta: float) -> void:
+	## 玩家未就绪/已释放时跳过（重开局窗口期）
+	if player == null or not is_instance_valid(player):
+		return
+	var p: Vector2 = player.global_position
+	## 到左/右/上/下四面墙的距离取最小值（竞技场以原点为中心）
+	var dist_x: float = minf(p.x + ArenaConfigClass.HALF_WIDTH, ArenaConfigClass.HALF_WIDTH - p.x)
+	var dist_y: float = minf(p.y + ArenaConfigClass.HALF_HEIGHT, ArenaConfigClass.HALF_HEIGHT - p.y)
+	var dist_to_wall: float = minf(dist_x, dist_y)
+	## 进入预警距离：贴墙→0.5，200px处→0，线性过渡
+	var target_alpha: float = 0.0
+	if dist_to_wall < ArenaConfigClass.WARN_DISTANCE:
+		target_alpha = (1.0 - dist_to_wall / ArenaConfigClass.WARN_DISTANCE) \
+				* ArenaConfigClass.WARN_MAX_ALPHA
+	## 向目标值平滑逼近（每秒2.0档变化率，约0.25秒完成淡入淡出）
+	_edge_warning_alpha = move_toward(_edge_warning_alpha, target_alpha, delta * 2.0)
+	_edge_warning_rect.modulate.a = _edge_warning_alpha
 
 ## ========== 敌人池初始化 ==========
 
@@ -326,12 +397,15 @@ func _find_player() -> void:
 func _process(delta: float) -> void:
 	## 处理普通敌人生成
 	_spawn_enemies(delta)
-	
+
 	## 处理精英敌人生成
 	_spawn_elite_enemies(delta)
-	
+
 	## 处理手动拾取输入（按E键拾取道具）
 	_handle_manual_pickup()
+
+	## 更新边界红色预警（玩家接近物理墙时屏幕四边泛红）
+	_update_edge_warning(delta)
 
 ## ========== 敌人生成系统 ==========
 
@@ -360,25 +434,32 @@ func _spawn_enemy(is_elite: bool = false, override_data: EnemyDataClass = null) 
 	## 实例化敌人节点
 	var enemy: CharacterBody2D = ENEMY_SCENE.instantiate()
 
-	## 设置敌人生成位置（屏幕边缘随机位置）
-	var margin: float = 100.0          # 生成位置距屏幕边缘的距离
-	var screen_size: Vector2 = get_viewport_rect().size  # 获取屏幕尺寸
-	var side: int = RandomManager.randi_range(0, 3)       # 随机选择生成边（上/右/下/左）
+	## 设置敌人生成位置（竞技场四边内侧的随机点）
+	## 固定竞技场5760×3840：敌人必须在墙内刷出，否则会被物理墙永久挡在场外；
+	## margin=100保证距墙有缓冲，相机被limit限制在场内时多数出生点仍在视野外
+	var margin: float = 100.0
+	var half_w: float = ArenaConfigClass.HALF_WIDTH
+	var half_h: float = ArenaConfigClass.HALF_HEIGHT
+	var side: int = RandomManager.randi_range(0, 3)  ## 随机选择生成边（上/右/下/左）
 
-	## 根据随机选择的边设置敌人位置
+	## 根据随机选择的边设置敌人位置（坐标相对GameWorld原点，即竞技场中心）
 	match side:
 		0:
-			## 上边：随机X位置，Y在屏幕上方
-			enemy.position = Vector2(RandomManager.randf_range(0, screen_size.x), -margin)
+			## 上边：X在墙内全段随机，Y贴近顶墙内侧
+			enemy.position = Vector2(
+				RandomManager.randf_range(-half_w + margin, half_w - margin), -half_h + margin)
 		1:
-			## 右边：X在屏幕右方，随机Y位置
-			enemy.position = Vector2(screen_size.x + margin, RandomManager.randf_range(0, screen_size.y))
+			## 右边：X贴近右墙内侧，Y在墙内全段随机
+			enemy.position = Vector2(
+				half_w - margin, RandomManager.randf_range(-half_h + margin, half_h - margin))
 		2:
-			## 下边：随机X位置，Y在屏幕下方
-			enemy.position = Vector2(RandomManager.randf_range(0, screen_size.x), screen_size.y + margin)
+			## 下边：X在墙内全段随机，Y贴近底墙内侧
+			enemy.position = Vector2(
+				RandomManager.randf_range(-half_w + margin, half_w - margin), half_h - margin)
 		3:
-			## 左边：X在屏幕左方，随机Y位置
-			enemy.position = Vector2(-margin, RandomManager.randf_range(0, screen_size.y))
+			## 左边：X贴近左墙内侧，Y在墙内全段随机
+			enemy.position = Vector2(
+				-half_w + margin, RandomManager.randf_range(-half_h + margin, half_h - margin))
 
 	## 直播事件/外部指定敌人数据优先：用 override_data 覆盖随机池
 	## 数据流：LiveBridgeManager 信号 → spawn_live_enemy(path) → _spawn_enemy(false, data) → 此分支
@@ -479,7 +560,15 @@ func _handle_manual_pickup() -> void:
 				return
 
 	## 优先级2：遍历所有拾取物，查找玩家附近可手动拾取的道具
+	## 性能优化：先用global_position.distance_to快速预筛选，跳过远距拾取物
+	## 旧逻辑每帧对所有_pickups调用has_method×2+is_player_in_range（内部又算距离），
+	## 拾取物多时（百级）每帧上百次方法调用+距离计算；预筛选只用一次distance_to
+	var player_pos: Vector2 = player.global_position
 	for pickup in _pickups:
+		## 快速距离预筛选：超过200像素一定不在拾取范围内，跳过
+		## （拾取范围通常50~100像素，200像素安全余量）
+		if pickup.global_position.distance_to(player_pos) > 200.0:
+			continue
 		## 检查拾取物是否有必要的方法
 		if pickup.has_method("is_player_in_range") and pickup.has_method("pickup"):
 			## 如果玩家在拾取范围内，执行拾取
@@ -547,13 +636,21 @@ func _on_player_shot(position: Vector2, direction: Vector2, bullet_data: BulletD
 	if bullet.has_method("reset_physics_interpolation"):
 		bullet.reset_physics_interpolation()
 
-	## 使用玩家传递的子弹数据，如果为空则使用默认子弹数据
+	## 复制子弹数据（每个子弹独立一份，避免共享数据被修改）
+	## 性能优化：无特效的子弹直接共享原始数据（只读），避免无意义深拷贝
+	## 满级技能后子弹可能带16个特效，duplicate(true)深拷贝每个子资源开销大；
+	## 无特效子弹的damage/speed在创建后不会被修改，共享安全
 	var bullet_data_to_use: BulletDataClass = bullet_data
 	if bullet_data_to_use == null:
 		bullet_data_to_use = default_bullet_data
-	
-	## 复制子弹数据（每个子弹独立一份，避免共享数据被修改）
-	var bullet_data_copy: BulletDataClass = bullet_data_to_use.duplicate()
+
+	var bullet_data_copy: BulletDataClass
+	if bullet_data_to_use.effects.is_empty():
+		## 无特效：直接引用共享数据（只读，不会被子弹逻辑修改）
+		bullet_data_copy = bullet_data_to_use
+	else:
+		## 有特效：深拷贝确保特效叠层状态独立（stack_count等运行时字段）
+		bullet_data_copy = bullet_data_to_use.duplicate()
 	## 设置子弹数据
 	if bullet.has_method("set_bullet_data"):
 		bullet.set_bullet_data(bullet_data_copy)

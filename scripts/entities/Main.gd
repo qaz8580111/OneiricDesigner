@@ -252,8 +252,9 @@ func _spawn_game_elements() -> void:
 	## 应用保存的自动射击设置
 	_apply_saved_auto_shoot_setting(player)
 	
-	## 设置玩家初始位置（屏幕中心）
-	player.position = Vector2(get_viewport_rect().size.x / 2, get_viewport_rect().size.y / 2)
+	## 设置玩家初始位置：竞技场正中心(0,0)（固定竞技场5760×3840的几何中心，
+	## 相机limit以此为对称中心；旧屏幕中心(960,640)会让开局相机即被钳在右下角）
+	player.position = Vector2.ZERO
 	## 将玩家添加到容器中
 	game_world_container.add_child(player)
 

@@ -21,6 +21,12 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 
 ## ========== 实现方法 ==========
 
+## 每级叠层成长：跳跃次数+1、跳跃半径+25px
+## 设计意图：满级10层时3→12跳、半径150→375px，闪电链进化为全场弹射的清场技能
+func _on_stack_grown() -> void:
+	max_jumps += 1
+	jump_radius += 25.0
+
 ## 应用闪电链特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例（提供伤害基准、阵营与场景树入口）；target - 首个被命中的目标

@@ -29,14 +29,17 @@ const CharacterAnimatorClass = preload("res://scripts/components/CharacterAnimat
 ## 浮动伤害数字组件（玩家受伤时弹出，直播增强）
 const DamageNumberClass = preload("res://scripts/components/DamageNumber.gd")
 
+## 竞技场常量（相机limit边界必须与物理墙同源，改战场大小时只改ArenaConfig）
+const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
+
 ## ========== 导出变量（编辑器可配置） ==========
 
-## 玩家移动速度（像素/秒）
-@export var speed: float = 150.0
+## 玩家移动速度（像素/秒）；初始180，前期走位更轻快（原150上调约20%）
+@export var speed: float = 180.0
 
 ## 射击冷却时间（秒），控制射速
-## 初始0.8秒一颗，前期节奏适中；通过升级词条（fire_rate_mult）逐步提升到中后期速度
-@export var shoot_cooldown: float = 0.8
+## 初始0.6秒一颗，前期火力更密集（原0.8）；通过升级词条（fire_rate_mult）逐步提升到中后期速度
+@export var shoot_cooldown: float = 0.6
 
 ## 玩家子弹配置（决定子弹伤害、速度、形态、特效等）
 @export var bullet_data: BulletDataClass = null
@@ -54,6 +57,9 @@ const DamageNumberClass = preload("res://scripts/components/DamageNumber.gd")
 
 ## 装备护盾组件节点（独立于分段护盾，额外吸收伤害+特效触发）
 @onready var equipment_shield: Node2D = $EquipmentShieldComponent
+
+## 相机节点（挂CameraShake.gd；受击时按伤害幅度调用shake()，has_method防御无脚本场景）
+@onready var _camera: Camera2D = $Camera2D
 
 ## ========== 成员变量（运行时数据） ==========
 
@@ -144,7 +150,18 @@ signal health_changed(state: Dictionary)
 func _ready() -> void:
 	## 初始化梦境碎片为0
 	dream_fragment = 0
-	
+
+	## ========== 相机活动边界（竞技场世界坐标） ==========
+	## Godot4的Camera2D.limit_*钳制的是"视野边缘"的世界坐标（不是相机中心），
+	## 因此直接填物理墙所在的竞技场四边；引擎会自动内缩半个视口，保证不露墙外。
+	## 运行时从ArenaConfig注入：Player.tscn里的值仅作编辑器预览兜底，
+	## 真正以常量为准，避免日后调整战场尺寸时场景与代码漂移
+	if _camera != null:
+		_camera.limit_left = -int(ArenaConfigClass.HALF_WIDTH)
+		_camera.limit_right = int(ArenaConfigClass.HALF_WIDTH)
+		_camera.limit_top = -int(ArenaConfigClass.HALF_HEIGHT)
+		_camera.limit_bottom = int(ArenaConfigClass.HALF_HEIGHT)
+
 	## ========== 外观：主题皮肤（优先）→ 占位方块（回退） ==========
 	## 数据流：ThemeManager(autoload) 启动时已加载主题 → 此处按需索取玩家皮肤
 	## 有皮肤：皮肤生成纹理（内部缓存）+ 创建动画器（呼吸/弹跳/攻击/受击动画）
@@ -318,8 +335,11 @@ func apply_bullet_effect(effect: Resource) -> void:
 	## 空特效或副本未初始化时拒绝
 	if effect == null or _private_bullet_data == null:
 		return
-	## 按effect_id去重：同一特效只能拥有一次（重复追加会多次触发）
+	## 按effect_id去重：同一特效不重复挂载（重复挂载会多次触发）
+	## 已拥有时改为叠层成长：调用已拥有实例的add_stack放大其关键参数
+	## （特效词条从"只能拥有一次"升级为"每级数值成长"，重复抽取不再无效）
 	if has_bullet_effect(effect.effect_id if "effect_id" in effect else ""):
+		_stack_owned_effect(effect)
 		return
 	## 追加到私有子弹副本的特效列表（每发子弹都会携带）
 	_private_bullet_data.effects.append(effect)
@@ -339,6 +359,24 @@ func has_bullet_effect(effect_id: String) -> bool:
 		if effect != null and effect.effect_id == effect_id:
 			return true
 	return false
+
+## 给已拥有的特效叠层（重复获得同一特效词条时调用）
+## 数据流：apply_bullet_effect去重分支 → 找到私有副本中已拥有的实例 → add_stack成长
+## 设计意图：放大的对象是玩家私有副本中的特效实例（duplicate(true)深拷贝产物），
+##           绝不修改共享.tres；子弹发射时duplicate()浅拷贝共享该实例，
+##           新参数下一发子弹立即生效；子弹运行时状态全存bullet.meta（互不干扰）
+## 参数：effect - 新获得的特效词条引用的资源（用其effect_id定位已拥有实例）
+func _stack_owned_effect(effect: Resource) -> void:
+	var target_id: String = effect.effect_id if "effect_id" in effect else ""
+	if target_id == "":
+		return
+	## 遍历私有副本特效列表，找到同id实例并叠层
+	for owned in _private_bullet_data.effects:
+		if owned != null and owned.effect_id == target_id:
+			## add_stack内部会递增层数并触发_on_stack_grown参数放大
+			if owned.has_method("add_stack"):
+				owned.add_stack()
+			break
 
 ## 应用核心血量上限加值（UpgradeManager血量词条调用）
 ## 数据流：UpgradeManager.apply_upgrade(max_hp_bonus词条) → 此方法 → 血量组件扩容
@@ -622,6 +660,15 @@ func take_damage(amount: float) -> void:
 	## 护盾吸收：蓝色（让玩家知道护盾在挡伤害）
 	if shield_absorbed > 0.0:
 		DamageNumberClass.pop(global_position + Vector2(-15, -30), int(shield_absorbed), false, Color(0.4, 0.7, 1.0))
+
+	## ---------- 受击镜头震动（幅度随伤害缩放） ----------
+	## 核心血受伤：强度=伤害/20映射到0.15~0.9（2点小伤轻震，15+大伤接近满震），持续0.28s
+	## 仅护盾吸收未掉血：小幅轻震0.22/0.16s，告知"被打中但挡住了"
+	if _camera != null and _camera.has_method("shake"):
+		if core_damage > 0.0:
+			_camera.shake(clampf(core_damage / 20.0, 0.15, 0.9), 0.28)
+		elif shield_absorbed > 0.0:
+			_camera.shake(0.22, 0.16)
 
 ## 恢复核心血量（对外接口）
 ## 参数：amount - 恢复的血量值

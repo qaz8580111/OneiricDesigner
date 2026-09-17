@@ -56,7 +56,8 @@ enum Rarity {
 
 ## 子弹特效资源引用（复用data/bullet/effect/下的16种特效.tres）
 ## 非空时表示这是特效词条：应用后特效被追加到玩家子弹的effects数组
-## 同一特效只能拥有一次（UpgradeManager按effect_id去重过滤）
+## 同一特效不重复挂载（UpgradeManager按effect_id去重），重复获得改为
+## 调用已拥有特效实例的add_stack()叠层成长（每级放大关键参数）
 @export var bullet_effect: Resource = null
 
 ## ========== 核心方法 ==========

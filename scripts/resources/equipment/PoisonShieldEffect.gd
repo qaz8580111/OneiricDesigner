@@ -18,8 +18,8 @@ extends ShieldEffect
 ## 特效生效半径（当攻击者是子弹时，在此半径内找最近的敌人施加中毒）
 @export var effect_radius: float = 200.0
 
-## 重写：护盾被击中时触发中毒特效
-func apply(attacker: Node, player: Node, _amount: float, _context: Dictionary) -> void:
+## 重写：护盾被击中时触发中毒特效（叠层放大伤害和持续时间）
+func apply(attacker: Node, player: Node, _amount: float, _context: Dictionary, stack: int = 1) -> void:
 	if player == null:
 		return
 
@@ -28,8 +28,8 @@ func apply(attacker: Node, player: Node, _amount: float, _context: Dictionary) -
 	if target == null:
 		return
 
-	## 施加中毒持续伤害（每秒扣血，持续 duration 秒）
-	_apply_dot(target)
+	## 施加中毒持续伤害（按叠层放大：1层=基础值，2层=2倍，3层=3倍）
+	_apply_dot(target, stack)
 
 ## 确定中毒目标：优先直接攻击者，子弹攻击时找最近敌人
 func _resolve_target(attacker: Node, player: Node) -> Node:
@@ -51,24 +51,32 @@ func _resolve_target(attacker: Node, player: Node) -> Node:
 			nearest = enemy
 	return nearest
 
-## 施加持续伤害（每秒一次，持续 duration 秒）
+## 施加持续伤害（每秒一次，持续 duration 秒，叠层放大伤害和时长）
 ## 使用 async 模式，不阻塞调用方
-func _apply_dot(target: Node) -> void:
+## 参数：target - 中毒目标，stack - 叠层数（伤害/时长乘以stack）
+func _apply_dot(target: Node, stack: int = 1) -> void:
 	if not is_instance_valid(target) or not target.has_method("take_damage"):
 		return
 
-	## 染色提示
+	## 染色提示（original_modulate 提到 if 外，避免作用域问题导致 else 分支引用未声明变量）
+	var original_modulate: Color = Color.WHITE
 	if "sprite" in target and target.sprite != null:
-		var original_modulate: Color = target.sprite.modulate
+		original_modulate = target.sprite.modulate
 		target.sprite.modulate = poison_color
 
+	## 叠层放大：伤害和持续时长都乘以stack（3层=3倍伤害+3倍时长）
+	var effective_dot: float = dot_damage * float(stack)
+	var effective_duration: float = duration * float(stack)
+
 	## 每秒扣血
-	var ticks: int = int(duration)
+	var ticks: int = int(effective_duration)
 	for i in range(ticks):
 		await target.get_tree().create_timer(1.0, false).timeout
 		if not is_instance_valid(target) or not target.has_method("take_damage"):
 			return
-		target.take_damage(int(dot_damage))
+		if "_is_dying" in target and target._is_dying:
+			return
+		target.take_damage(int(effective_dot))
 
 	## 恢复颜色
 	if is_instance_valid(target) and "sprite" in target and target.sprite != null:
