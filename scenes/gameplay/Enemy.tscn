@@ -13,7 +13,7 @@
 ;       └── CollisionShape2D
 ;
 ; 碰撞层配置：
-;   - Enemy (CharacterBody2D): collision_layer=2, collision_mask=19（1玩家+2敌人+16世界墙）
+;   - Enemy (CharacterBody2D): collision_layer=2, collision_mask=17（1玩家+16世界墙，不含敌人层→敌人互不推挤）
 ;   - Hitbox (Area2D): collision_layer=0, collision_mask=1（只检测玩家层，不感知世界墙）
 ; ==============================================================================
 
@@ -29,12 +29,12 @@ radius = 16.0
 
 ; ------------------------------ 根节点 ------------------------------
 ; Enemy (CharacterBody2D) - 敌人物理角色根节点
-; 碰撞层：2（敌人层），碰撞掩码：19（1玩家+2敌人+16世界墙，撞墙被挡且保留敌人间互挤）
+; 碰撞层：2（敌人层），碰撞掩码：17（1玩家+16世界墙，撞墙被挡但敌人之间互不推挤）
 ; 所属组：enemy（用于查找敌人引用和子弹碰撞检测）
 [node name="Enemy" type="CharacterBody2D"]
 script = ExtResource("1")
 collision_layer = 2
-collision_mask = 19
+collision_mask = 17
 groups = PackedStringArray("enemy")
 
 ; ------------------------------ 外观与碰撞 ------------------------------

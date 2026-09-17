@@ -23,7 +23,7 @@
 ;   │   └── EdgeWarning (TextureRect) - 距墙<200px泛红预警（运行时生成红色径向渐变）
 ;   └── [动态添加] Player, Enemy, Bullet, PickUp 等游戏实体（默认画布层0，z_index=0）
 ;
-; 碰撞层：墙=16(bit5)，玩家/敌人 mask=19(1+2+16)；子弹/拾取物 mask 不含16，对墙无感知
+; 碰撞层：墙=16(bit5)，玩家 mask=19(1+2+16)、敌人 mask=17(1+16，敌人互不推挤)；子弹/拾取物 mask 不含16，对墙无感知
 ; ==============================================================================
 
 [ext_resource type="Script" path="res://scripts/entities/GameWorld.gd" id="1_world"]
@@ -147,7 +147,7 @@ material = SubResource("mat_grid")
 ; ------------------------------ 物理边界（4堵静态墙） ------------------------------
 [node name="ArenaWalls" type="Node2D" parent="."]
 
-; collision_layer=16(世界墙bit5)，collision_mask=0（墙不检测任何对象，只被角色mask=19撞上）
+; collision_layer=16(世界墙bit5)，collision_mask=0（墙不检测任何对象，只被玩家mask=19、敌人mask=17撞上）
 ; 墙中心线与竞技场边界y=-1920重合（40厚各占内外20px）
 [node name="WallTop" type="StaticBody2D" parent="ArenaWalls"]
 collision_layer = 16

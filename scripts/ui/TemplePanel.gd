@@ -1,10 +1,10 @@
-## TemplePanel.gd - 神庙选项面板（紧凑底栏样式，不暂停游戏）
+## TemplePanel.gd - 神庙选项面板（紧凑底栏样式，与升级三选一同款横向排版）
 ## 职责：展示神庙的4个选项（随机技能/随机护盾/强化伤害/生命上限），玩家选定后发信号
 ## 设计意图：
-##   1. 与 LevelUpPanel 同风格：屏幕底部居中小面板，无全屏蒙层，不暂停游戏
-##   2. 鼠标点击/数字键1-4/手柄D-Pad上下+A选择；描述走tooltip减小占用
+##   1. 与 LevelUpPanel 同风格：屏幕底部居中小面板，选项横向一行排开，无全屏蒙层
+##   2. 鼠标点击/数字键1-4/手柄D-Pad左右+A选择；描述走tooltip减小占用
 ##   3. 赌博式选项带"赌"角标，稳妥式带"稳"角标，玩家可预判风险
-## 输入架构：选择输入全部经InputManager网关（TEMPLE_CHOICE上下文放行ui_up/down/confirm）；
+## 输入架构：选择输入全部经InputManager网关（TEMPLE_CHOICE上下文放行ui_left/right/confirm）；
 ##           按钮FOCUS_NONE，选中态由_selected_index统一管理，避免内置焦点双重移动
 ## 数据流：Temple.interact() → 创建面板 → setup(options)
 ##         → 玩家选定 option_chosen 信号 → Temple 应用效果并消失
@@ -20,7 +20,8 @@ signal option_chosen(option: Resource)
 
 var _options: Array = []          ## 全部选项（TempleOption资源）
 var _buttons: Array[Button] = []  ## 选项按钮列表（动画用）
-var _vbox: VBoxContainer = null   ## 内部垂直容器
+var _vbox: VBoxContainer = null   ## 内部垂直容器（标题在上，选项行在下）
+var _hbox: HBoxContainer = null   ## 选项水平容器（4个选项一行排开）
 var _locked: bool = false         ## 防重复选择锁
 
 ## 当前选中选项索引（鼠标悬停/D-Pad上下共用一个选中态，A键确认）
@@ -51,7 +52,7 @@ func _ready() -> void:
 	## 锚定到屏幕底部居中，底部留出 56px 安全区（底部状态栏高28px + 间距28px）
 	## 避免与 GameHUD 底部常驻状态栏重叠，同时保证面板完整显示不贴边
 	panel_bg.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	panel_bg.offset_top = -150.0  ## 面板自身高度约92px（4选项+标题）
+	panel_bg.offset_top = -112.0  ## 面板自身高度约54px（标题+单行选项）
 	panel_bg.offset_bottom = -58.0  ## 距屏幕底边 58px
 
 	## 面板背景样式：半透明深色 + 金色细边框 + 圆角（与升级面板一致）
@@ -72,7 +73,7 @@ func _ready() -> void:
 	sb.content_margin_bottom = 6
 	panel_bg.add_theme_stylebox_override("panel", sb)
 
-	## ---------- 内部垂直布局：标题 + 选项行 ----------
+	## ---------- 内部布局：标题在上，选项横向一行 ----------
 	_vbox = VBoxContainer.new()
 	_vbox.add_theme_constant_override("separation", 3)
 	panel_bg.add_child(_vbox)
@@ -84,22 +85,28 @@ func _ready() -> void:
 	title.add_theme_color_override("font_color", Color(0.75, 0.6, 1.0))
 	_vbox.add_child(title)
 
+	## 选项水平容器（与升级三选一同款横向排版，4个选项一行排开不溢出）
+	_hbox = HBoxContainer.new()
+	_hbox.add_theme_constant_override("separation", 6)
+	_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	_vbox.add_child(_hbox)
+
 	## 入场动画初始状态
 	panel_bg.modulate.a = 0.0
 	var tween: Tween = create_tween()
 	tween.tween_property(panel_bg, "modulate:a", 1.0, 0.15)
 
 ## _process() - 手柄D-Pad/键盘方向键导航与确认（经InputManager网关轮询消费）
-## 面板为垂直列表，用ui_up/ui_down移动选中项
+## 面板为横向一行，用ui_left/ui_right移动选中项（与升级三选一同款横向导航）
 func _process(_delta: float) -> void:
 	## 已锁定选择后不响应，防重复触发
 	if _locked or _buttons.is_empty():
 		return
-	## D-Pad上/上方向键：选中上一项（边界夹取不循环）
-	if InputManager.is_action_just_pressed_safe("ui_up"):
+	## D-Pad左/左方向键：选中上一项（边界夹取不循环）
+	if InputManager.is_action_just_pressed_safe("ui_left"):
 		_set_selection(_selected_index - 1)
-	## D-Pad下/下方向键：选中下一项
-	elif InputManager.is_action_just_pressed_safe("ui_down"):
+	## D-Pad右/右方向键：选中下一项
+	elif InputManager.is_action_just_pressed_safe("ui_right"):
 		_set_selection(_selected_index + 1)
 	## A键/Space/Enter：确认当前选中项
 	if InputManager.is_action_just_pressed_safe("ui_confirm"):
@@ -131,7 +138,7 @@ func setup(options: Array) -> void:
 	_selected_index = -1
 	for i in range(options.size()):
 		var btn: Button = _create_option_button(options[i], i)
-		_vbox.add_child(btn)
+		_hbox.add_child(btn)
 		_buttons.append(btn)
 	## 默认高亮第一项（Temple.push_context自带0.2s屏蔽期，已替输入防抖，无需额外动画锁）
 	_set_selection(0)
@@ -147,7 +154,7 @@ func _create_option_button(option: Resource, index: int) -> Button:
 	btn.text = "[%s] %s %s" % [key_hint, gamble_tag, option.display_name]
 	## 描述走tooltip（减小面板占用）
 	btn.tooltip_text = option.description
-	btn.custom_minimum_size = Vector2(150, 34)
+	btn.custom_minimum_size = Vector2(150, 32)
 	btn.focus_mode = Control.FOCUS_NONE
 
 	## 按钮样式：深色底 + 选项主题色边框
@@ -218,5 +225,5 @@ func _choose(index: int) -> void:
 	_locked = true
 	var chosen: Resource = _options[index]
 	if AudioManager:
-		AudioManager.play_ui("ui_click", 0.7)
+		AudioManager.play("ui_click", 0.7)
 	option_chosen.emit(chosen)

@@ -3,6 +3,12 @@
 [ext_resource type="Script" path="res://scripts/resources/equipment/ShieldEquipmentData.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/resources/equipment/ReflectShieldEffect.gd" id="2"]
 
+[sub_resource type="Resource" id="ShieldEffect_1"]
+script = ExtResource("2")
+reflect_damage = 3
+reflect_speed = 500.0
+knockback_force = 300.0
+
 [resource type="ShieldEquipmentData" script_class="ShieldEquipmentData"]
 script = ExtResource("1")
 shield_id = "shield_reflect"
@@ -16,9 +22,3 @@ is_special = true
 shield_effect = SubResource("ShieldEffect_1")
 visual_radius = 36.0
 visual_thickness = 3.0
-
-[sub_resource type="Resource" id="ShieldEffect_1"]
-script = ExtResource("2")
-reflect_damage = 3
-reflect_speed = 500.0
-knockback_force = 300.0

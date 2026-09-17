@@ -7,7 +7,7 @@
 ##   - 信号：killed → GameWorld 移除管理列表并计数；drops_generated → GameWorld 生成拾取物；
 ##           damaged/attacked 预留给受击/攻击动画
 ##   - 数据：enemy_data.tres 由 GameWorld 深拷贝并难度缩放后注入（apply_to_enemy 覆盖下方导出默认值）
-## 碰撞层：本体 layer=2(敌人层)/mask=19（1玩家+2敌人+16竞技场墙）；Hitbox layer=0/mask=1（检测玩家层）
+## 碰撞层：本体 layer=2(敌人层)/mask=17（1玩家+16竞技场墙，敌人间互不推挤）；Hitbox layer=0/mask=1（检测玩家层）
 ## 设计意图：三态状态机(WANDER/CHASE/ATTACK)按与玩家距离驱动；子弹就地生成
 ##           （与玩家"只发信号由GameWorld创建"不同——敌人数量多，就地实例化链路最短）
 extends CharacterBody2D
@@ -163,31 +163,27 @@ var _wander_direction: Vector2 = Vector2.ZERO
 ## 当前敌人状态（漫游/追踪/攻击）
 var _current_state: EnemyState = EnemyState.WANDER
 
-## ========== 远距碰撞休眠（性能核心优化：修复8分钟后大敌潮卡顿） ==========
+## ========== 远距碰撞休眠（次级优化：减少屏幕外敌人与玩家的碰撞） ==========
 
-## 设计意图（为什么需要）：
-##   敌人碰撞 mask=3 含"敌人层"——所有敌人涌向玩家会形成高密度"人堆"，
-##   堆内任意两只敌人都在做窄相碰撞解算，成本随堆密度 O(n²) 增长；
-##   8分钟后刷怪节奏追上击杀节奏，同屏~140只敌人挤在玩家周围时
-##   物理服务器每帧要做上万次圆形窄相检测 → 全画面掉帧。
-## 方案（为什么不删敌人间碰撞）：
-##   敌人互相推挤是近身玩法的一部分（在玩家周围形成包围圈而非叠成一格），
-##   不能直接去掉；但屏幕外的敌人玩家根本看不见，其碰撞纯属白算——
-##   远距敌人休眠碰撞（mask=0，直接位移无推挤），接近时恢复完整碰撞。
+## 设计意图（为什么还需要）：
+##   敌人互挤已在 ArenaConfig.MASK_ENTITY_BLOCKING 中移除（mask=17 不含敌人层2），
+##   8分钟大敌潮的 O(n²) 互挤开销已从根上消除，休眠不再承担该职责。
+##   剩余意义：屏幕外敌人仍会与玩家做碰撞解算（并可能在玩家周围堆叠推挤玩家），
+##   远距敌人休眠碰撞（mask=仅墙16，不撞玩家），接近时再恢复玩家碰撞。
 ## 迟滞双阈值：750px 休眠 / 650px 唤醒，两阈值相隔100px防止在边界来回抖动
 ##   （单阈值下敌人恰好在阈值附近徘徊时每帧切换mask会疯狂触发物理服务器重建配对）
 
-## 触发休眠的距离（与玩家距离超过此值 → 关闭碰撞，纯位移追玩家）
+## 触发休眠的距离（与玩家距离超过此值 → 关闭玩家碰撞，纯位移追玩家）
 const COLLISION_DORMANT_DISTANCE: float = 750.0
 
-## 恢复唤醒的距离（与玩家距离回到此值内 → 恢复完整碰撞）
+## 恢复唤醒的距离（与玩家距离回到此值内 → 恢复玩家碰撞）
 const COLLISION_AWAKE_DISTANCE: float = 650.0
 
-## 完整碰撞掩码（玩家层1 + 敌人层2 + 世界墙层16 = 19，与 Enemy.tscn 配置一致；
-## 世界墙层位定义在 ArenaConfig，休眠唤醒后敌人仍会被竞技场墙挡住）
+## 活跃碰撞掩码（玩家层1 + 世界墙层16 = 17，与 Enemy.tscn 配置一致；
+## 不含敌人层2 → 敌人之间永不相撞，世界墙层位定义在 ArenaConfig）
 const COLLISION_MASK_ACTIVE: int = ArenaConfigClass.MASK_ENTITY_BLOCKING
 
-## 休眠碰撞掩码（仅世界墙16）：关闭敌人间互挤/玩家碰撞（消除O(n²)窄相），
+## 休眠碰撞掩码（仅世界墙16）：关闭屏幕外敌人与玩家的碰撞，
 ## 但保留对4堵静态墙的碰撞（O(1)成本），防止被击退弹到墙外的敌人唤醒后回不进场
 const COLLISION_MASK_DORMANT: int = ArenaConfigClass.MASK_DORMANT
 
@@ -620,12 +616,12 @@ func _update_state() -> void:
 ## 参数：distance - 敌人与玩家的当前距离（全局坐标，像素）
 func _update_collision_hibernation(distance: float) -> void:
 	if _collision_dormant:
-		## 休眠中：距离回到唤醒阈值内 → 恢复完整碰撞（重新加入玩家推挤+敌人互挤）
+		## 休眠中：距离回到唤醒阈值内 → 恢复与玩家的碰撞
 		if distance <= COLLISION_AWAKE_DISTANCE:
 			_collision_dormant = false
 			collision_mask = COLLISION_MASK_ACTIVE
 	else:
-		## 活跃中：距离超过休眠阈值 → 关闭碰撞（屏幕外无需推挤，纯位移追玩家）
+		## 活跃中：距离超过休眠阈值 → 关闭与玩家的碰撞（屏幕外纯位移追玩家）
 		if distance > COLLISION_DORMANT_DISTANCE:
 			_collision_dormant = true
 			collision_mask = COLLISION_MASK_DORMANT
