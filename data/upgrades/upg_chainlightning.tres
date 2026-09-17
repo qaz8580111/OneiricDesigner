@@ -9,5 +9,5 @@ upgrade_id = "upg_chainlightning"
 display_name = "雷霆连锁"
 description = "子弹命中时释放闪电链，跳跃攻击附近3名敌人；每级跳跃+1次、范围+25"
 rarity = 2
-max_stacks = 10
+max_stacks = 5
 bullet_effect = ExtResource("2")

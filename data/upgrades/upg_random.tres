@@ -9,5 +9,5 @@ upgrade_id = "upg_random"
 display_name = "混沌弹幕"
 description = "子弹发射时附加2枚随机方向小子弹（50%伤害）；每级弹数+1、伤害+5%"
 rarity = 1
-max_stacks = 10
+max_stacks = 5
 bullet_effect = ExtResource("2")

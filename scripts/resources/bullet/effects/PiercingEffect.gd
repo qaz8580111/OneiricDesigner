@@ -19,7 +19,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 实现方法 ==========
 
 ## 每级叠层成长：穿透数+1、穿透伤害衰减减少2%（伤害保留更多）
-## 设计意图：满级10层时穿透3→12人、衰减0.8→0.98接近无衰减直线贯穿
+## 设计意图：满级5层时穿透3→7人、衰减0.8→0.88接近无衰减直线贯穿
 func _on_stack_grown() -> void:
 	pierce_count += 1
 	damage_decay = minf(damage_decay + 0.02, 0.98)

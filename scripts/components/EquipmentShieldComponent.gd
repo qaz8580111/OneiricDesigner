@@ -45,10 +45,11 @@ var _flash_timer: float = 0.0
 
 ## 当前护盾叠层（同类型护盾拾取叠加，最多3层；不同类型重置为1层）
 ## 设计意图：同类型护盾重复拾取让数值累计放大（max_hp/absorb_per_hit乘以层数），
-##           不同类型替换则回到1层基础值——鼓励玩家专精一种护盾
+##           不同类型替换则回到1层基础值——鼓励玩家专精一种护盾；
+##           神庙"随机护盾"强化可突破 MAX_SHIELD_STACK 上限（理论最高6层）
 var _shield_stack: int = 1
 
-## 护盾叠层上限
+## 护盾叠层上限（常规拾取叠加的上限；神庙强化可突破此值）
 const MAX_SHIELD_STACK: int = 3
 
 ## ========== 生命周期方法 ==========
@@ -154,6 +155,26 @@ func equip(data: Resource) -> void:
 	visible = true
 	queue_redraw()
 	shield_equipped.emit(data)
+
+## 强化护盾叠层（神庙"随机护盾"选项用）
+## 规则：叠层 +amount（1~3）层，突破 MAX_SHIELD_STACK 上限（理论最高6层）；
+##       耐久立即补满到新的有效上限，与"同类型拾取叠加"的强化体验一致
+## 返回：是否强化成功（无装备护盾时返回 false）
+func add_stack(amount: int) -> bool:
+	if _shield_data == null:
+		return false
+	## 直接累加层数（突破上限，不做 MAX_SHIELD_STACK 钳制）
+	_shield_stack += amount
+	## 耐久补满到新的有效最大值（强化立即生效）
+	_current_hp = _get_effective_max_hp()
+	_time_since_hit = 999.0
+	_regenerating = false
+	_flash_timer = 0.0
+	visible = true
+	queue_redraw()
+	## 复用装备变更信号通知 HUD 刷新叠层角标/耐久显示
+	shield_equipped.emit(_shield_data)
+	return true
 
 ## 卸下护盾（替换或移除时调用）
 func unequip() -> void:

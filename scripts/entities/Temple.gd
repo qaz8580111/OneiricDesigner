@@ -1,7 +1,7 @@
 ## Temple.gd - 远古神庙世界物体
 ## 职责：神庙的视觉呈现、玩家交互、选项面板管理、选定后消失
 ## 继承：Area2D（与PickUp同类的世界交互物体）
-## 出现方式：GameWorld.spawn_temple() 在高级怪死亡位置生成（固定概率0.001%，全局同时仅一座）
+## 出现方式：GameWorld.spawn_temple() 在高级怪死亡位置生成（固定概率1%，全局同时仅一座）
 ## 交互方式：玩家靠近后按E（GameWorld统一处理E键，优先级高于拾取物）→ 调用 interact(player)
 ## 进入规则：玩家进入神庙后游戏暂停（GameManager.pause_game），关闭面板后恢复
 ## 替换规则：新神庙出现时，未进入的旧神庙立即消散（GameWorld.spawn_temple → despawn）

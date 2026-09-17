@@ -9,5 +9,5 @@ upgrade_id = "upg_homing"
 display_name = "心灵锁定"
 description = "子弹获得追踪能力，自动飞向附近的敌人；每级转向更快、追踪范围+40"
 rarity = 1
-max_stacks = 10
+max_stacks = 5
 bullet_effect = ExtResource("2")

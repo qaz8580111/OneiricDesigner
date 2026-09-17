@@ -25,7 +25,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 实现方法 ==========
 
 ## 每级叠层成长：燃烧每秒伤害+6、持续时间+0.5秒
-## 设计意图：满级10层时8→62dps、2.5→7秒，燃烧从"点缀"进化为主要持续输出手段
+## 设计意图：满级5层时8→32dps、2.5→4.5秒，燃烧从"点缀"进化为稳定的持续输出手段
 func _on_stack_grown() -> void:
 	damage_per_second += 6
 	duration += 0.5

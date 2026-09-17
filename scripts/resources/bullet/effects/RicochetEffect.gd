@@ -22,7 +22,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 实现方法 ==========
 
 ## 每级叠层成长：弹射次数+1、弹射半径+30px
-## 设计意图：满级10层时2→11次、半径200→470px，从"补刀"进化为主力连锁输出
+## 设计意图：满级5层时2→6次、半径200→320px，从"补刀"进化为可观的连锁输出
 func _on_stack_grown() -> void:
 	bounce_count += 1
 	bounce_radius += 30.0

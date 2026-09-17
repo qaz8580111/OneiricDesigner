@@ -1,43 +1,18 @@
-## RandomShieldTempleOption.gd - 神庙选项：随机护盾（赌博式）
-## 职责：从 data/equipment/ 目录随机抽取一件护盾装备给玩家
-## 赌博性：可能抽到特效护盾（毒雾/冰霜/反击，血赚），也可能抽到基础护盾
-##         （比当前装备的特效护盾差，血亏）——护盾替换机制天然构成赌博
+## RandomShieldTempleOption.gd - 神庙选项：随机护盾强化（赌博式）
+## 职责：将当前装备护盾的叠层 +1~3 层（突破3层上限，理论最高6层）
+## 赌博性：强化层数 1~3 随机——可能 +3 层直接质变（血赚），也可能 +1 层聊胜于无（血亏）
 ## 继承：TempleOption（策略模式子类，路径式继承避免依赖全局类缓存刷新）
-## 数据流：apply() → 扫描 data/equipment/*.tres → 过滤 ShieldEquipmentData
-##         → 随机选一个 → player.equip_shield(shield_data)
-## 扩展性：新增护盾只需放入 data/equipment/ 目录，本选项自动感知
+## 数据流：apply() → player.boost_shield_stack(1~3) → EquipmentShieldComponent.add_stack()
+## 变更说明（2026-09-17）：旧实现为扫描 data/equipment/ 随机替换一件护盾，已按需求废弃；
+##         新实现不再随机换装，改为"随机强化当前护盾等级"
 class_name RandomShieldTempleOption
 extends "res://scripts/resources/temple/TempleOption.gd"
 
-## 重写：随机装备一件护盾
+## 重写：随机强化当前护盾 1~3 层（突破3层上限）
 func apply(player: Node) -> bool:
-	if player == null or not player.has_method("equip_shield"):
+	if player == null or not player.has_method("boost_shield_stack"):
 		return false
-
-	## 扫描装备目录，收集所有护盾数据
-	var shields: Array = []
-	var dir_path: String = "res://data/equipment"
-	var dir: DirAccess = DirAccess.open(dir_path)
-	if dir == null:
-		push_warning("RandomShieldTempleOption: 无法打开装备目录 " + dir_path)
-		return false
-
-	dir.list_dir_begin()
-	var file_name: String = dir.get_next()
-	while file_name != "":
-		if not dir.current_is_dir() and file_name.ends_with(".tres"):
-			var resource: Resource = load(dir_path + "/" + file_name)
-			## 只收集护盾类型（未来新增其他装备类型时自动被过滤）
-			if resource is ShieldEquipmentData:
-				shields.append(resource)
-		file_name = dir.get_next()
-	dir.list_dir_end()
-
-	if shields.is_empty():
-		push_warning("RandomShieldTempleOption: 装备目录中没有护盾资源")
-		return false
-
-	## 随机选一件并装备（替换当前护盾）
-	var random_index: int = RandomManager.randi_range(0, shields.size() - 1)
-	player.equip_shield(shields[random_index])
-	return true
+	## 强化层数 1~3 随机
+	var boost: int = RandomManager.randi_range(1, 3)
+	## 无装备护盾时返回 false（神庙保留不消失）
+	return player.boost_shield_stack(boost)

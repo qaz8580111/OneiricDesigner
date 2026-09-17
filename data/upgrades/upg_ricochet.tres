@@ -9,5 +9,5 @@ upgrade_id = "upg_ricochet"
 display_name = "回旋弹射"
 description = "子弹可弹射2次飞向其他敌人（每次伤害-20%）；每级弹射+1次、范围+30"
 rarity = 1
-max_stacks = 10
+max_stacks = 5
 bullet_effect = ExtResource("2")

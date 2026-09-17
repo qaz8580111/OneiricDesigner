@@ -20,7 +20,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 实现方法 ==========
 
 ## 每级叠层成长：加速度+20/s、速度上限倍数+0.4
-## 设计意图：满级10层时50→230每秒加速、上限3→6.6倍原速，"越飞越快"的爽感随等级翻倍
+## 设计意图：满级5层时50→130每秒加速、上限3→4.6倍原速，"越飞越快"的爽感随等级翻倍
 func _on_stack_grown() -> void:
 	acceleration += 20.0
 	max_speed_mult += 0.4

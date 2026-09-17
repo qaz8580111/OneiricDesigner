@@ -30,7 +30,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 实现方法 ==========
 
 ## 每级叠层成长：转向速度+0.02（弹道更粘人）、追踪范围+40px
-## 设计意图：满级10层时0.05→0.23转向、范围300→660px，子弹如制导导弹般指哪打哪
+## 设计意图：满级5层时0.05→0.13转向、范围300→460px，子弹如制导导弹般指哪打哪
 func _on_stack_grown() -> void:
 	turn_speed = minf(turn_speed + 0.02, 0.4)
 	homing_range += 40.0

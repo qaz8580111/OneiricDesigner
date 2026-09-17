@@ -9,5 +9,5 @@ upgrade_id = "upg_burning"
 display_name = "烈焰附魔"
 description = "命中点燃敌人，2.5秒内每秒受到5点伤害；每级每秒+6点、持续+0.5秒"
 rarity = 1
-max_stacks = 10
+max_stacks = 5
 bullet_effect = ExtResource("2")

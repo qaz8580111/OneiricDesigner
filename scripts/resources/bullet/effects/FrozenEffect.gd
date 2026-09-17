@@ -24,7 +24,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 核心方法（重写扩展插槽） ==========
 
 ## 每级叠层成长：冰冻减速系数-0.04（钳制≥0.05防负数bug）、冻结时长+0.4秒
-## 设计意图：满级10层时敌人移速30%→5%（近定身）、2→5.6秒，配合高射速可永久控场
+## 设计意图：满级5层时敌人移速30%→14%、2→3.6秒，配合高射速可长期控场
 func _on_stack_grown() -> void:
 	speed_reduction = maxf(speed_reduction - 0.04, 0.05)
 	freeze_duration += 0.4

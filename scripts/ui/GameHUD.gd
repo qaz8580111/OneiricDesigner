@@ -493,7 +493,7 @@ func _create_buff_icon(info: Dictionary) -> Control:
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		icon.add_child(label)
 
-	## 层数角标（右下角，Lv.2起显示；满级10用金色）
+	## 层数角标（右下角，Lv.2起显示；满级5用金色）
 	var badge: Label = Label.new()
 	badge.name = "LevelBadge"
 	badge.add_theme_font_size_override("font_size", 11)

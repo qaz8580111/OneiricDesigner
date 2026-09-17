@@ -9,5 +9,5 @@ upgrade_id = "upg_split"
 display_name = "裂变之种"
 description = "子弹销毁时分裂成3枚扇形小子弹（60%伤害、80%速度）；每级弹数+1、伤害+5%"
 rarity = 2
-max_stacks = 10
+max_stacks = 5
 bullet_effect = ExtResource("2")

@@ -22,7 +22,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 实现方法 ==========
 
 ## 每级叠层成长：跳跃次数+1、跳跃半径+25px
-## 设计意图：满级10层时3→12跳、半径150→375px，闪电链进化为全场弹射的清场技能
+## 设计意图：满级5层时3→7跳、半径150→250px，闪电链成为可观的连锁清场手段
 func _on_stack_grown() -> void:
 	max_jumps += 1
 	jump_radius += 25.0

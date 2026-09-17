@@ -305,16 +305,15 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 
 ## ========== 神庙掉落系统 ==========
 
-## 神庙固定掉率：0.001%（用户规则：概率不再随血量/难度/精英波动，保持极低恒定值）
-## 0.001% = 0.00001，即平均每击杀10万个高级怪出现一座
-## 注意：若意图是旧的0.1%（=0.001），将此常量改回0.001即可
-const TEMPLE_FIXED_CHANCE: float = 0.00001
+## 神庙固定掉率：1%（用户规则：概率不再随血量/难度/精英波动，保持恒定值）
+## 1% = 0.01，即平均每击杀100个高级怪出现一座
+const TEMPLE_FIXED_CHANCE: float = 0.01
 ## 小怪名单（击杀不掉神庙）：slime/bat/goblin/scout/spider
 ## 扩展说明：新增敌人默认按"高级怪"处理（有神庙掉率），若属于小怪需加入此名单
 const TEMPLE_BASIC_MOB_IDS: Array[String] = ["slime", "bat", "goblin", "scout", "spider"]
 
 ## 计算击杀指定敌人后神庙的出现概率
-## 规则（用户定制）：固定0.001%，不再随品级/难度/精英波动；小怪不掉神庙
+## 规则（用户定制）：固定1%，不再随品级/难度/精英波动；小怪不掉神庙
 ## 参数：enemy_data - 被击杀敌人的数据资源
 ## 返回：神庙出现概率（0.0 或 TEMPLE_FIXED_CHANCE）
 func get_temple_spawn_chance(enemy_data: Resource) -> float:

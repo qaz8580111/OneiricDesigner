@@ -378,6 +378,19 @@ func _stack_owned_effect(effect: Resource) -> void:
 				owned.add_stack()
 			break
 
+## 移除指定子弹特效（技能种类上限随机替换时调用）
+## 数据流：UpgradeManager._remove_upgrade(特效词条) → 此方法 → 从私有子弹副本移除该特效实例
+## 参数：effect_id - 特效唯一标识（如"explosion"）
+func remove_bullet_effect(effect_id: String) -> void:
+	if _private_bullet_data == null or effect_id == "":
+		return
+	## 倒序遍历，安全移除匹配的特效实例（同一特效只会存在一份）
+	for i in range(_private_bullet_data.effects.size() - 1, -1, -1):
+		var effect = _private_bullet_data.effects[i]
+		if effect != null and effect.effect_id == effect_id:
+			_private_bullet_data.effects.remove_at(i)
+			break
+
 ## 应用核心血量上限加值（UpgradeManager血量词条调用）
 ## 数据流：UpgradeManager.apply_upgrade(max_hp_bonus词条) → 此方法 → 血量组件扩容
 ## 参数：amount - 上限增加值（同时立即治疗等量血量）
@@ -389,6 +402,18 @@ func apply_max_hp_bonus(amount: int) -> void:
 	var core_comp: Node = health_controller.get_node_or_null("CoreHealthComponent")
 	if core_comp != null and core_comp.has_method("expand_max_hp"):
 		core_comp.expand_max_hp(float(amount))
+
+## 移除核心血量上限加值（技能种类上限随机替换移除"梦境之心"词条时调用）
+## 数据流：UpgradeManager._remove_upgrade(max_hp_bonus词条) → 此方法 → 血量组件缩减上限
+## 参数：amount - 上限缩减值（正数）
+func remove_max_hp_bonus(amount: int) -> void:
+	## 非法增量或控制器缺失时拒绝
+	if amount <= 0 or health_controller == null:
+		return
+	## 查找核心血量组件并调用缩减方法（has_method检查保证健壮性）
+	var core_comp: Node = health_controller.get_node_or_null("CoreHealthComponent")
+	if core_comp != null and core_comp.has_method("shrink_max_hp"):
+		core_comp.shrink_max_hp(float(amount))
 
 ## 拾取技能书（青绿宝珠BUFF道具，手动按E拾取后由DropItem.apply调用）
 ## 数据流：敌人掉落技能书 → 玩家手动按E拾取 → DropItem.apply → 此方法
@@ -701,6 +726,14 @@ func equip_shield(shield_data: Resource) -> void:
 		if AudioManager:
 			AudioManager.play_2d("buff_pickup", global_position, 0.8)
 
+## 强化当前装备护盾叠层（神庙"随机护盾"选项由 RandomShieldTempleOption 调用）
+## 参数：amount - 叠加层数（1~3），突破3层上限
+## 返回：是否强化成功（无装备护盾时返回 false）
+func boost_shield_stack(amount: int) -> bool:
+	if equipment_shield != null and equipment_shield.has_method("add_stack"):
+		return equipment_shield.add_stack(amount)
+	return false
+
 ## ========== 梦境碎片系统 ==========
 
 ## 添加梦境碎片（对外接口）
@@ -717,7 +750,8 @@ func add_dream_fragment(amount: int) -> void:
 	## 上报统计（结算面板展示的碎片总数）
 	RunStats.add_fragment(amount)
 	## 碎片=纯收集计数（HUD显示+结算统计），与技能/升级完全无关——
-	## 获得技能词条仅两条途径：手动按E拾取技能宝石、神庙"随机技能"（均走三选一面板）
+	## 获得新技能词条仅一条途径：手动按E拾取技能宝石（三选一面板）；
+	## 神庙"随机技能"只强化已拥有技能等级，不再给新技能
 
 ## 获取玩家当前生存状态（对外接口）
 ## 返回：包含护盾、核心血、无敌状态等信息的字典

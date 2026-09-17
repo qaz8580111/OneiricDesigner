@@ -23,7 +23,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 @export var angle_degrees: float = 360.0
 
 ## 每级叠层成长：额外弹数+1、额外弹伤害系数+0.05
-## 设计意图：满级10层时2→11发、伤害50%→95%，发射瞬间弹幕密度随等级肉眼可见地铺满
+## 设计意图：满级5层时2→6发、伤害50%→70%，发射瞬间弹幕密度随等级肉眼可见地铺满
 func _on_stack_grown() -> void:
 	extra_count += 1
 	damage_mult += 0.05

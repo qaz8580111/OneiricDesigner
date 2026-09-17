@@ -22,7 +22,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 实现方法 ==========
 
 ## 每级叠层成长：爆炸半径+15px、伤害倍率+0.15
-## 设计意图：满级10层时半径80→215px、倍率1.2→2.55，清屏感随等级肉眼可见地增强
+## 设计意图：满级5层时半径80→140px、倍率1.2→1.8，清屏感随等级肉眼可见地增强
 func _on_stack_grown() -> void:
 	explosion_radius += 15.0
 	damage_multiplier += 0.15

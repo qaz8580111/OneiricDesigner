@@ -233,6 +233,26 @@ func expand_max_hp(bonus: float) -> bool:
 	emit_signal("core_health_changed", _current_hp, core_health_data.max_hp)
 	return true
 
+## 缩减核心血量上限（技能种类上限随机替换移除"梦境之心"词条时调用）
+## 数据流：UpgradeManager._remove_upgrade(max_hp_bonus词条) → Player.remove_max_hp_bonus
+##         → 此方法 → 上限缩减并把当前血量钳制到新上限
+## 关键保护：与expand_max_hp一致，首次修改前duplicate私有化，避免污染共享.tres
+## 参数：reduction - 上限缩减值（正数）
+## 返回：true表示缩减成功，false表示失败（死亡/数据空/非法增量）
+func shrink_max_hp(reduction: float) -> bool:
+	## 非法输入直接拒绝（死亡后缩减无意义，缩减值必须为正）
+	if _is_dead or core_health_data == null or reduction <= 0.0:
+		return false
+	## 资源私有化保护（与expand_max_hp同源）
+	core_health_data = core_health_data.duplicate()
+	## 缩减上限并保底1点（防止上限归零导致除零/不可玩）
+	core_health_data.max_hp = maxf(core_health_data.max_hp - reduction, 1.0)
+	## 当前血量钳制到新上限（只截断，不额外扣血致死）
+	_current_hp = minf(_current_hp, core_health_data.max_hp)
+	## 广播核心血量变化（HUD更新血条）
+	emit_signal("core_health_changed", _current_hp, core_health_data.max_hp)
+	return true
+
 ## ========== 计时器回调 ==========
 
 ## 无敌帧结束回调（无敌状态结束）

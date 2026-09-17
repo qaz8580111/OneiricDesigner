@@ -9,5 +9,5 @@ upgrade_id = "upg_frozen"
 display_name = "凝霜之触"
 description = "子弹命中冻结敌人，移速降为30%、持续2秒；每级移速再-4%、持续+0.4秒"
 rarity = 1
-max_stacks = 10
+max_stacks = 5
 bullet_effect = ExtResource("2")

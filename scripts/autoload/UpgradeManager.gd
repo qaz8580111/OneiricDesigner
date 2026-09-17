@@ -2,8 +2,9 @@
 ## 职责：管理词条池加载、三选一随机抽取、词条应用（技能宝石/神庙共用入口）
 ## 继承：Node（作为全局单例运行）
 ## 设计意图：
-##   1. 三选一统一入口：全游戏获得技能词条只有两条途径——手动按E拾取技能宝石、
-##      神庙"随机技能"选项，均调 open_level_up_choice() 弹面板由玩家自选；
+##   1. 三选一统一入口：全游戏获得新技能词条的唯一途径——手动按E拾取技能宝石，
+##      调 open_level_up_choice() 弹面板由玩家自选；神庙"随机技能"选项不再给新技能，
+##      改为随机强化一个已拥有技能 +1~3 级（可突破5级上限，最高到8级）；
 ##      碎片只是收集计数（HUD+结算），与技能/升级完全无关（旧"碎片即经验"已删）
 ##   2. 数据驱动扩展：自动扫描 data/upgrades/ 目录加载词条，
 ##      新增词条只需创建.tres文件，无需修改任何代码
@@ -17,6 +18,9 @@ const UpgradeDataClass = preload("res://scripts/resources/upgrade/UpgradeData.gd
 
 ## 三选一面板场景脚本（纯代码构建UI，无需.tscn）
 const LEVEL_UP_PANEL_SCRIPT = preload("res://scripts/ui/LevelUpPanel.gd")
+
+## 玩家最多同时持有的技能种类数（新需求：满5种后拾取新技能会随机替换旧技能）
+const MAX_SKILL_TYPES: int = 5
 
 ## ========== 信号定义 ==========
 
@@ -179,10 +183,10 @@ func _do_open_level_up_choice() -> void:
 
 ## 从词条池按稀有度加权抽取3个不重复的可用词条
 ## 过滤规则：
-##   1. 叠加层数未达上限（全局统一10级，满级词条不再出现）
+##   1. 叠加层数未达上限（全局统一5级，满级词条不再出现）
 ## 说明：特效词条重复获得时按effect_id去重（不重复挂载），改为调用已拥有特效实例的
 ##       add_stack() 叠层成长——每级放大该特效的关键参数（成长策略见各特效子类
-##       _on_stack_grown），与属性词条一样遵循10级上限规则
+##       _on_stack_grown），与属性词条一样遵循5级上限规则
 ## 返回：最多3个UpgradeData数组（池子不足时返回实际数量）
 func _roll_three_upgrades() -> Array:
 	## 第一步：过滤出当前可用词条
@@ -261,6 +265,12 @@ func _close_panel() -> void:
 func apply_upgrade(upgrade: Resource) -> void:
 	if upgrade == null:
 		return
+	## 新增需求：玩家最多同时持有 MAX_SKILL_TYPES 种真实技能
+	## 仅当本次应用的是"词条池中的真实技能"、且是"尚未拥有的新技能"、且已持有技能种类已达上限时，
+	## 随机替换掉一个已拥有技能（被替换者完全移除：等级归零、属性/特效回退）。
+	## 已拥有技能的叠加升级、以及神庙"属性强化"等临时词条（不入池）均不触发替换，保持原有逻辑不变。
+	if _is_pool_skill(upgrade) and not _upgrade_stacks.has(upgrade.upgrade_id) and _get_held_skill_count() >= MAX_SKILL_TYPES:
+		_replace_random_skill()
 	## 记录叠加层数
 	_upgrade_stacks[upgrade.upgrade_id] = _upgrade_stacks.get(upgrade.upgrade_id, 0) + 1
 	## 记录统计（本局获得词条数）
@@ -289,6 +299,146 @@ func apply_upgrade(upgrade: Resource) -> void:
 	## 应用音效
 	if AudioManager:
 		AudioManager.play_2d("upgrade_pick", _get_player().global_position if _get_player() != null else Vector2.ZERO, 0.8)
+
+## ========== 神庙"随机技能"强化（新增需求） ==========
+
+## 随机强化一个已拥有技能（神庙"随机技能"选项用，替代旧的三选一面板）
+## 规则：从已持有技能中随机选一个，等级 +amount（1~3）级；
+##       突破5级上限（满级5级后继续强化，理论最高可到8级）；
+##       特效词条逐级 add_stack 成长、属性词条逐级累加，均复用词条自身成长逻辑
+## 返回：是否强化成功（无已拥有技能时返回 false，神庙保留不消失）
+func boost_random_skill(amount: int) -> bool:
+	if amount <= 0:
+		return false
+	## 收集当前已持有的真实技能（仅词条池技能，排除神庙临时词条）
+	var held_ids: Array = []
+	for uid in _upgrade_stacks.keys():
+		if _find_upgrade_by_id(uid) != null:
+			held_ids.append(uid)
+	if held_ids.is_empty():
+		return false
+	## 随机抽一个已拥有技能强化
+	var uid: String = String(held_ids[RandomManager.randi_range(0, held_ids.size() - 1)])
+	var upgrade: Resource = _find_upgrade_by_id(uid)
+	if upgrade == null:
+		return false
+	_boost_upgrade(upgrade, amount)
+	return true
+
+## 对指定技能一次性叠加 amount 级（突破 max_stacks 上限）
+## 说明：与 apply_upgrade 的单级叠加逻辑一致，但这里跳过"技能种类上限替换"判断
+##       （操作对象是已拥有技能，不会新增技能种类），统计与信号只触发一次
+## 参数：upgrade - 被强化的词条数据；amount - 叠加等级数（1~3）
+func _boost_upgrade(upgrade: Resource, amount: int) -> void:
+	## 一次性累加层数（突破上限，不做 max_stacks 钳制）
+	_upgrade_stacks[upgrade.upgrade_id] = _upgrade_stacks.get(upgrade.upgrade_id, 0) + amount
+	## 统计（神庙一次选项强化记 1 次词条获得）
+	RunStats.add_upgrade_taken()
+	## 广播层数变化（HUD 刷新 buff 图标与层数角标）
+	upgrades_changed.emit(get_acquired_upgrades())
+
+	if upgrade.is_effect_upgrade():
+		## 特效词条：逐级调用 apply_bullet_effect（已拥有时走 add_stack 成长）
+		var player: Node2D = _get_player()
+		if player != null and player.has_method("apply_bullet_effect"):
+			for i in range(amount):
+				player.apply_bullet_effect(upgrade.bullet_effect)
+	else:
+		## 属性词条：逐级累加到玩家属性字典
+		for i in range(amount):
+			for key in upgrade.stat_modifiers.keys():
+				player_stats[key] = player_stats.get(key, 1.0 if key.ends_with("_mult") else 0) + upgrade.stat_modifiers[key]
+				## 生命上限词条每级都需要立即生效（扩容+治疗）
+				if key == "max_hp_bonus":
+					var player: Node2D = _get_player()
+					if player != null and player.has_method("apply_max_hp_bonus"):
+						player.apply_max_hp_bonus(int(upgrade.stat_modifiers[key]))
+
+	## 广播词条应用信号（与 apply_upgrade 保持一致）
+	upgrade_applied.emit(upgrade)
+	## 应用音效
+	if AudioManager:
+		AudioManager.play_2d("upgrade_pick", _get_player().global_position if _get_player() != null else Vector2.ZERO, 0.8)
+
+## ========== 技能种类上限与随机替换（新增需求） ==========
+
+## 判断给定词条是否为"词条池中的真实技能"（区别于神庙"属性强化"等临时构造词条）
+## 真实技能才受"最多持有5种"限制；临时词条不入池，不应参与技能计数与替换
+## 参数：upgrade - 待判断的词条资源
+## 返回：true表示真实技能，false表示临时词条
+func _is_pool_skill(upgrade: Resource) -> bool:
+	if upgrade == null:
+		return false
+	for u in _upgrade_pool:
+		if u == upgrade or u.upgrade_id == upgrade.upgrade_id:
+			return true
+	return false
+
+## 统计当前已持有的真实技能种类数（仅计数词条池中的技能，排除神庙临时词条）
+## 返回：已持有技能种类数
+func _get_held_skill_count() -> int:
+	var count: int = 0
+	for uid in _upgrade_stacks.keys():
+		if _find_upgrade_by_id(uid) != null:
+			count += 1
+	return count
+
+## 随机替换一个已持有技能（种类上限触发时调用）
+## 数据流：apply_upgrade 检测到上限且拾取新技能 → 此方法随机选一个已持有技能移除
+func _replace_random_skill() -> void:
+	var held_skills: Array = []
+	for uid in _upgrade_stacks.keys():
+		if _find_upgrade_by_id(uid) != null:
+			held_skills.append(uid)
+	if held_skills.is_empty():
+		return
+	var index: int = RandomManager.randi_range(0, held_skills.size() - 1)
+	_remove_upgrade(held_skills[index])
+
+## 移除指定技能的全部层数，并回退其对玩家属性/子弹特效的影响（随机替换的核心清理逻辑）
+## 参数：upgrade_id - 要移除的技能唯一标识
+func _remove_upgrade(upgrade_id: String) -> void:
+	var stacks: int = int(_upgrade_stacks.get(upgrade_id, 0))
+	if stacks <= 0:
+		return
+	var upgrade: Resource = _find_upgrade_by_id(upgrade_id)
+	if upgrade == null:
+		## 找不到数据时仅清除层数记录，避免残留无效技能
+		_upgrade_stacks.erase(upgrade_id)
+		return
+	if upgrade.is_effect_upgrade():
+		## 特效技能：从玩家私有子弹副本移除该特效实例
+		var effect = upgrade.bullet_effect
+		var effect_id: String = ""
+		if effect != null and "effect_id" in effect:
+			effect_id = effect.effect_id
+		var player: Node2D = _get_player()
+		if player != null and player.has_method("remove_bullet_effect"):
+			player.remove_bullet_effect(effect_id)
+	else:
+		## 属性技能：按层数回退属性累加
+		for key in upgrade.stat_modifiers.keys():
+			var key_name: String = String(key)
+			var default_val: float = 1.0 if key_name.ends_with("_mult") else 0.0
+			var current: float = float(player_stats.get(key_name, default_val))
+			player_stats[key_name] = current - float(upgrade.stat_modifiers[key_name]) * float(stacks)
+			## 生命上限技能需要同步缩减实际血量上限（扩容的反向操作）
+			if key_name == "max_hp_bonus":
+				var reduction: int = int(float(upgrade.stat_modifiers[key_name]) * float(stacks))
+				var player: Node2D = _get_player()
+				if reduction > 0 and player != null and player.has_method("remove_max_hp_bonus"):
+					player.remove_max_hp_bonus(reduction)
+	## 移除层数记录
+	_upgrade_stacks.erase(upgrade_id)
+
+## 按 upgrade_id 在词条池中查找词条数据
+## 参数：upgrade_id - 词条唯一标识
+## 返回：找到返回 UpgradeData，未找到返回 null
+func _find_upgrade_by_id(upgrade_id: String) -> Resource:
+	for u in _upgrade_pool:
+		if u.upgrade_id == upgrade_id:
+			return u
+	return null
 
 ## ========== 辅助方法 ==========
 

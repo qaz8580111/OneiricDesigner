@@ -19,7 +19,7 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 ## ========== 实现方法 ==========
 
 ## 每级叠层成长：击退力度+80px/s
-## 设计意图：满级10层时300→1020px/s，一枪把精英怪轰出包围圈，突围价值随等级直观提升
+## 设计意图：满级5层时300→620px/s，一枪把精英怪轰出包围圈，突围价值随等级直观提升
 func _on_stack_grown() -> void:
 	knockback_force += 80.0
 

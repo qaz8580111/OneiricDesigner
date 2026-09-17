@@ -169,7 +169,7 @@ func _create_card(upgrade: Resource, index: int) -> Button:
 	var rarity: int = upgrade.rarity if "rarity" in upgrade else 0
 	var display_name: String = upgrade.display_name if "display_name" in upgrade else "???"
 	var desc: String = upgrade.description if "description" in upgrade else ""
-	## 已获得过的词条显示当前等级（第二次拾取起即为Lv.2，满级10后不会再出现在候选中）
+	## 已获得过的词条显示当前等级（第二次拾取起即为Lv.2，满级5后不会再出现在候选中）
 	var level_tag: String = ""
 	var uid: String = upgrade.upgrade_id if "upgrade_id" in upgrade else ""
 	if uid != "" and UpgradeManager:
