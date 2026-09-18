@@ -79,6 +79,14 @@ var translations: Dictionary = {
 		"BUTTON_RESUME": "继续游戏",
 		"BUTTON_QUIT_TO_MENU": "返回主菜单",
 		
+		## 暂停菜单 - 查看状态子面板
+		"BUTTON_VIEW_STATUS": "查看状态",
+		"STATUS_TITLE": "当前状态",
+		"STATUS_ATTR": "属性",
+		"STATUS_SKILL": "技能",
+		"STATUS_SHIELD": "护盾",
+		"STATUS_NONE": "暂无",
+		
 		## 游戏信息翻译
 		"GAME_SEED": "种子",
 		"GAME_MODS": "模组",
@@ -147,6 +155,14 @@ var translations: Dictionary = {
 		"PAUSED_TITLE": "Paused",
 		"BUTTON_RESUME": "Resume Game",
 		"BUTTON_QUIT_TO_MENU": "Quit to Menu",
+		
+		## 暂停菜单 - 查看状态子面板（英文）
+		"BUTTON_VIEW_STATUS": "View Status",
+		"STATUS_TITLE": "Current Status",
+		"STATUS_ATTR": "Attributes",
+		"STATUS_SKILL": "Skills",
+		"STATUS_SHIELD": "Shield",
+		"STATUS_NONE": "None",
 		
 		## 游戏信息翻译（英文）
 		"GAME_SEED": "Seed",

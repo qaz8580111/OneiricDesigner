@@ -23,6 +23,9 @@ const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
 signal upgrade_chosen(upgrade: Resource)
 
+## 玩家取消本次三选一信号（手柄B/键盘ESC，放弃本次拾取，不应用任何词条）
+signal upgrade_cancelled()
+
 ## ========== 成员变量 ==========
 
 var _choices: Array = []
@@ -63,11 +66,11 @@ func _ready() -> void:
 	## ---------- 底部居中面板容器 ----------
 	_panel_bg = PanelContainer.new()
 	add_child(_panel_bg)
-	## 锚定到屏幕底部居中，底部留出 56px 安全区（底部状态栏高度28px + 上下边距28px）
-	## 避免与 GameHUD 底部常驻状态栏重叠，同时保证面板完整显示不贴边
+	## 锚定到屏幕底部居中；面板需要位于底部三组图标栏（属性/技能/护盾）上方，
+	## 图标栏顶部约距底边 84px，故面板底边距底边 100px、顶边距底边 156px，与图标栏完全不重叠
 	_panel_bg.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	_panel_bg.offset_top = -112.0  ## 面板自身高度约54px
-	_panel_bg.offset_bottom = -58.0  ## 距屏幕底边 58px（状态栏高28px+额外间距30px）
+	_panel_bg.offset_top = -156.0  ## 面板自身高度约56px（标题+卡片行）
+	_panel_bg.offset_bottom = -100.0  ## 距屏幕底边 100px，位于底部图标栏上方
 
 	## 面板背景样式：半透明深色 + 金色细边框 + 圆角
 	var sb: StyleBoxFlat = StyleBoxFlat.new()
@@ -111,8 +114,15 @@ func _ready() -> void:
 ## _process() - 手柄LT/RT扳机(或D-Pad/键盘左右)导航与确认（经InputManager网关轮询消费）
 ## 每帧最多消费一次"刚按下"事件，天然支持连按但不会一帧跳多格
 func _process(_delta: float) -> void:
-	## 入场动画/已锁定选择期间不响应导航，避免误触
-	if _animating or _locked or _cards.is_empty():
+	## 已锁定选择（确认/取消）后不再响应任何输入，防重复触发
+	if _locked:
+		return
+	## B/ESC：取消本次三选一，放弃这次拾取（入场动画期间同样有效）
+	if InputManager.is_action_just_pressed_safe("ui_cancel"):
+		_cancel()
+		return
+	## 入场动画期间不响应导航，避免误触
+	if _animating or _cards.is_empty():
 		return
 	## 左移一张：手柄LT扳机 / 键盘Q / 备用D-Pad左·键盘左方向键（边界夹取，不循环）
 	if InputManager.is_action_just_pressed_safe("game_choice_prev") \
@@ -234,6 +244,16 @@ func _choose(index: int) -> void:
 	if AudioManager:
 		AudioManager.play("upgrade_confirm", 0.8)
 	upgrade_chosen.emit(_choices[index])
+
+## 取消本次三选一（手柄B/键盘ESC）
+## 与 _choose 共用 _locked 防重入；取消不应用任何词条，由 UpgradeManager 负责关闭面板并放弃本次拾取
+func _cancel() -> void:
+	if _locked:
+		return
+	_locked = true
+	if AudioManager:
+		AudioManager.play("ui_click", 0.7)
+	upgrade_cancelled.emit()
 
 ## ========== 入场动画 ==========
 

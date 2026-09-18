@@ -19,8 +19,12 @@ const UpgradeDataClass = preload("res://scripts/resources/upgrade/UpgradeData.gd
 ## 三选一面板场景脚本（纯代码构建UI，无需.tscn）
 const LEVEL_UP_PANEL_SCRIPT = preload("res://scripts/ui/LevelUpPanel.gd")
 
-## 玩家最多同时持有的技能种类数（新需求：满5种后拾取新技能会随机替换旧技能）
-const MAX_SKILL_TYPES: int = 5
+## 玩家最多同时持有的技能类（子弹特效词条）种类数（满5种后拾取新技能会随机替换旧技能）
+const MAX_EFFECT_SKILL_TYPES: int = 5
+
+## 玩家最多同时持有的属性类（纯数值词条）种类数（满2种后拾取新属性会随机替换旧属性）
+## 说明：属性类与技能类数量上限各自独立计算，互不影响
+const MAX_ATTRIBUTE_SKILL_TYPES: int = 2
 
 ## ========== 信号定义 ==========
 
@@ -173,6 +177,8 @@ func _do_open_level_up_choice() -> void:
 	_overlay_layer.add_child(_panel)
 	## 连接选择信号：玩家选定词条后应用并关闭
 	_panel.upgrade_chosen.connect(_on_upgrade_chosen)
+	## 连接取消信号：玩家按B/ESC放弃本次三选一，直接关闭面板不应用词条
+	_panel.upgrade_cancelled.connect(_on_upgrade_cancelled)
 
 	## 注册选择上下文：不暂停战斗（移动/射击保留），仅额外放行D-Pad/方向键+确认，
 	## push自带0.2s屏蔽期，防止升级瞬间残留的攻击/交互键直接选中卡片
@@ -235,6 +241,14 @@ func _on_upgrade_chosen(upgrade: Resource) -> void:
 	## 处理排队中的升级或检查连升
 	_process_pending()
 
+## 玩家取消三选一的回调（响应LevelUpPanel.upgrade_cancelled）
+## 语义：放弃本次拾取——不应用词条、不处理排队升级，直接关闭面板并解锁选择状态。
+##       排队计数一并清零，避免残留计数导致后续升级被"跳过"或"多跳"。
+func _on_upgrade_cancelled() -> void:
+	_pending_upgrades = 0
+	_close_panel()
+	is_choosing = false
+
 ## 处理排队升级：有排队则展示下一组选项，无排队则解锁并检查碎片是否够再升
 func _process_pending() -> void:
 	if _pending_upgrades > 0:
@@ -265,12 +279,23 @@ func _close_panel() -> void:
 func apply_upgrade(upgrade: Resource) -> void:
 	if upgrade == null:
 		return
-	## 新增需求：玩家最多同时持有 MAX_SKILL_TYPES 种真实技能
-	## 仅当本次应用的是"词条池中的真实技能"、且是"尚未拥有的新技能"、且已持有技能种类已达上限时，
-	## 随机替换掉一个已拥有技能（被替换者完全移除：等级归零、属性/特效回退）。
-	## 已拥有技能的叠加升级、以及神庙"属性强化"等临时词条（不入池）均不触发替换，保持原有逻辑不变。
-	if _is_pool_skill(upgrade) and not _upgrade_stacks.has(upgrade.upgrade_id) and _get_held_skill_count() >= MAX_SKILL_TYPES:
-		_replace_random_skill()
+	## 等级上限钳制：词条池中的真实技能/属性到达 max_stacks（5级）后不再叠层。
+	## 商店 / 三选一 / 开局授予均走此入口，因此"商店购买的技能"不会突破5级；
+	## 神庙"随机技能"强化走 _boost_upgrade（不经此入口），可突破上限（理论最高8级）。
+	if _is_pool_skill(upgrade) and _upgrade_stacks.get(upgrade.upgrade_id, 0) >= upgrade.max_stacks:
+		return
+	## 数量上限（技能类与属性类各自独立计算）：
+	##   技能类（特效词条）最多 MAX_EFFECT_SKILL_TYPES 种，满后拾取新技能随机替换一个旧技能；
+	##   属性类（纯数值词条）最多 MAX_ATTRIBUTE_SKILL_TYPES 种，满后拾取新属性随机替换一个旧属性。
+	## 仅当本次应用的是"词条池中的真实技能"、且是"尚未拥有的新技能"时才触发同类替换；
+	## 已拥有技能的叠加升级、以及神庙"属性强化"等临时词条（不入池）均不触发替换。
+	if _is_pool_skill(upgrade) and not _upgrade_stacks.has(upgrade.upgrade_id):
+		if upgrade.is_effect_upgrade():
+			if _get_held_skill_count(true) >= MAX_EFFECT_SKILL_TYPES:
+				_replace_random_skill(true)
+		else:
+			if _get_held_skill_count(false) >= MAX_ATTRIBUTE_SKILL_TYPES:
+				_replace_random_skill(false)
 	## 记录叠加层数
 	_upgrade_stacks[upgrade.upgrade_id] = _upgrade_stacks.get(upgrade.upgrade_id, 0) + 1
 	## 记录统计（本局获得词条数）
@@ -363,7 +388,7 @@ func _boost_upgrade(upgrade: Resource, amount: int) -> void:
 ## ========== 技能种类上限与随机替换（新增需求） ==========
 
 ## 判断给定词条是否为"词条池中的真实技能"（区别于神庙"属性强化"等临时构造词条）
-## 真实技能才受"最多持有5种"限制；临时词条不入池，不应参与技能计数与替换
+## 真实技能才受"最多持有N种"限制（技能类5种 / 属性类2种各自计算）；临时词条不入池，不参与计数与替换
 ## 参数：upgrade - 待判断的词条资源
 ## 返回：true表示真实技能，false表示临时词条
 func _is_pool_skill(upgrade: Resource) -> bool:
@@ -374,21 +399,25 @@ func _is_pool_skill(upgrade: Resource) -> bool:
 			return true
 	return false
 
-## 统计当前已持有的真实技能种类数（仅计数词条池中的技能，排除神庙临时词条）
-## 返回：已持有技能种类数
-func _get_held_skill_count() -> int:
+## 统计当前已持有的某类真实技能种类数（仅计数词条池中的技能，排除神庙临时词条）
+## 参数：want_effect - true=技能类(特效词条) / false=属性类(纯数值词条)
+## 返回：该类已持有技能种类数
+func _get_held_skill_count(want_effect: bool) -> int:
 	var count: int = 0
 	for uid in _upgrade_stacks.keys():
-		if _find_upgrade_by_id(uid) != null:
+		var u: Resource = _find_upgrade_by_id(uid)
+		if u != null and u.is_effect_upgrade() == want_effect:
 			count += 1
 	return count
 
-## 随机替换一个已持有技能（种类上限触发时调用）
-## 数据流：apply_upgrade 检测到上限且拾取新技能 → 此方法随机选一个已持有技能移除
-func _replace_random_skill() -> void:
+## 随机替换一个已持有的某类技能（该类数量上限触发时调用）
+## 参数：want_effect - true=技能类(特效词条) / false=属性类(纯数值词条)
+## 数据流：apply_upgrade 检测到该类上限且拾取同类新技能 → 此方法随机选一个同类已持有技能移除
+func _replace_random_skill(want_effect: bool) -> void:
 	var held_skills: Array = []
 	for uid in _upgrade_stacks.keys():
-		if _find_upgrade_by_id(uid) != null:
+		var u: Resource = _find_upgrade_by_id(uid)
+		if u != null and u.is_effect_upgrade() == want_effect:
 			held_skills.append(uid)
 	if held_skills.is_empty():
 		return
@@ -444,24 +473,32 @@ func _find_upgrade_by_id(upgrade_id: String) -> Resource:
 
 ## 随机获取一个属性类词条（bullet_effect 为空，即纯数值加成词条）
 ## 用于：开局随机授予一个属性技能、商店"属性类"商品
-## 返回：随机属性词条；池中无属性词条时返回 null
+## 过滤：已满级（层数达到 max_stacks）的词条不再返回，避免商店售出无法升级的满级商品
+## 返回：随机可用属性词条；池中无可用属性词条时返回 null
 func get_random_attribute_upgrade() -> Resource:
 	var candidates: Array = []
 	for upgrade in _upgrade_pool:
-		if upgrade.bullet_effect == null:
-			candidates.append(upgrade)
+		if upgrade.bullet_effect != null:
+			continue
+		if _upgrade_stacks.get(upgrade.upgrade_id, 0) >= upgrade.max_stacks:
+			continue
+		candidates.append(upgrade)
 	if candidates.is_empty():
 		return null
 	return candidates[RandomManager.randi_range(0, candidates.size() - 1)]
 
 ## 随机获取一个特效类词条（bullet_effect 非空，即子弹特效词条）
 ## 用于：商店"技能类"商品
-## 返回：随机特效词条；池中无特效词条时返回 null
+## 过滤：已满级（层数达到 max_stacks）的词条不再返回，避免商店售出无法升级的满级商品
+## 返回：随机可用特效词条；池中无可用特效词条时返回 null
 func get_random_effect_upgrade() -> Resource:
 	var candidates: Array = []
 	for upgrade in _upgrade_pool:
-		if upgrade.bullet_effect != null:
-			candidates.append(upgrade)
+		if upgrade.bullet_effect == null:
+			continue
+		if _upgrade_stacks.get(upgrade.upgrade_id, 0) >= upgrade.max_stacks:
+			continue
+		candidates.append(upgrade)
 	if candidates.is_empty():
 		return null
 	return candidates[RandomManager.randi_range(0, candidates.size() - 1)]
@@ -506,5 +543,7 @@ func get_acquired_upgrades() -> Array:
 			"rarity": upgrade.rarity,
 			"stacks": stacks,
 			"max_stacks": upgrade.max_stacks,
+			"is_effect": upgrade.is_effect_upgrade(),
+			"description": upgrade.description,
 		})
 	return result

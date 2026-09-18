@@ -12,6 +12,7 @@
 ;       ├── Title (Label) - 标题（Paused）
 ;       ├── ResumeButton (Button) - 继续游戏按钮
 ;       ├── SettingsButton (Button) - 设置按钮
+;       ├── StatusButton (Button) - 查看状态按钮（打开状态子面板）
 ;       └── QuitButton (Button) - 返回主菜单按钮
 ;
 ; 使用方式：游戏暂停时作为UIStack的子节点动态加载到CanvasLayer中
@@ -85,6 +86,12 @@ text = "Resume Game"
 [node name="SettingsButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Settings"
+
+; StatusButton (Button) - 查看状态按钮
+; 打开暂停菜单内的状态子面板，展示当前属性/技能/护盾
+[node name="StatusButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "View Status"
 
 ; QuitButton (Button) - 返回主菜单按钮
 ; 退出当前游戏，返回主菜单

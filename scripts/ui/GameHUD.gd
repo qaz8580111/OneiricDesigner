@@ -21,36 +21,33 @@ const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 ## 难度标签节点，显示当前难度等级（随时间提升）
 @onready var diff_label: Label = $DiffLabel
 
-## ========== Buff图标栏（按稀有度三行分区展示） ==========
+## ========== 底部图标栏（屏幕中间下方：属性/技能/护盾三组分区） ==========
 
-## 三行图标容器缓存：key=稀有度枚举值(2史诗/1稀有/0普通)，value=该行的HBoxContainer
-## 设计意图：按稀有度分行且从高到低排列（史诗最上、普通最下），
-##           玩家扫一眼左上角即可判断当前build的强度构成
-var _buff_rows: Dictionary = {}
+## 底部图标栏根容器（三组水平排列，屏幕底部居中，向上生长）
+var _bottom_icon_root: HBoxContainer = null
 
-## Buff图标缓存字典：key=effect_id, value=对应图标节点
-var _buff_icons: Dictionary = {}
+## 三组图标行容器：属性组（纯数值词条）/ 技能组（子弹特效词条）/ 护盾组（当前装备护盾）
+var _attribute_row: HBoxContainer = null
+var _skill_row: HBoxContainer = null
+var _shield_icon_row: HBoxContainer = null
 
-## 单个Buff图标的尺寸（正方形，像素）
+## 属性图标缓存：key=upgrade_id, value=图标节点
+var _attribute_icons: Dictionary = {}
+## 技能图标缓存：key=upgrade_id, value=图标节点
+var _skill_icons: Dictionary = {}
+## 底部护盾图标（当前装备护盾，未装备时隐藏）
+var _shield_bottom_icon: Control = null
+
+## 单个图标的尺寸（正方形，像素）
 const BUFF_ICON_SIZE: float = 36.0
 
-## Buff图标之间的间距（像素）
+## 图标之间的间距（像素）
 const BUFF_ICON_GAP: float = 6.0
 
-## 三行图标区的起始y（护盾显示区84~120之下，与经验条/碎片统计彻底分离不遮挡）
-const BUFF_ROWS_START_Y: float = 130.0
+## ========== 装备护盾显示（左上角：名称 + 耐久条，图标已移到底部护盾组） ==========
 
-## 行间距 = 图标高度 + 图标间距（三行紧凑排列）
-const BUFF_ROW_SPACING: float = BUFF_ICON_SIZE + BUFF_ICON_GAP
-
-## ========== 装备护盾显示（左上角：类型图标 + 耐久度） ==========
-
-## 护盾显示面板容器（图标+名称耐久文字+耐久条，未装备护盾时整体隐藏）
+## 护盾显示面板容器（名称耐久文字+耐久条，未装备护盾时整体隐藏）
 var _shield_panel: HBoxContainer = null
-## 护盾图标底板（Panel，底色随护盾颜色，图标缺失时作为类型色块兜底）
-var _shield_icon_holder: Panel = null
-## 护盾图标纹理矩形（真实图标贴图，缺失时隐藏）
-var _shield_icon_rect: TextureRect = null
 ## 护盾名称+耐久数值标签（如"冰霜护盾 45/60"）
 var _shield_name_label: Label = null
 ## 护盾耐久条（颜色随护盾类型）
@@ -59,6 +56,8 @@ var _shield_durability_bar: ProgressBar = null
 var _equipment_shield: Node = null
 ## 当前显示的护盾id（防止节流刷新时重复重建图标/颜色）
 var _shield_display_id: String = ""
+## 底部护盾图标的贴图矩形（随护盾类型变化，缺失时隐藏露出色块）
+var _shield_bottom_icon_rect: TextureRect = null
 
 ## ========== 成员变量（运行时数据） ==========
 
@@ -116,12 +115,12 @@ func _ready() -> void:
 	## 初始化难度显示（本项目无角色等级系统，仅难度随时间提升；读取单例当前值兜底中途创建HUD）
 	_refresh_progress_displays()
 
-	## ========== Buff图标栏初始化 ==========
-	## 设计意图：左上角按稀有度三行排列已获得的技能图标（史诗/稀有/普通自上而下，
-	## 含层数角标），让玩家直观看到当前持有哪些词条、各自几级与强度构成
-	_build_buff_bar()
+	## ========== 底部图标栏初始化 ==========
+	## 设计意图：屏幕中间下方按"属性/技能/护盾"三组分区排列已获得词条与护盾图标，
+	## 让玩家直观看到当前持有的属性、技能与护盾各自几级（层数角标）
+	_build_bottom_icon_bar()
 	## ========== 装备护盾显示初始化 ==========
-	## 护盾类型图标+耐久条（未装备时隐藏，装备后常驻左上角经验条下方）
+	## 护盾名称+耐久条（未装备时隐藏，装备后常驻左上角经验条下方）
 	_build_shield_display()
 	## 面板就绪后立即刷新一次（兜底HUD在护盾已装备后才创建的情况；
 	## _find_player中的那次刷新因面板未构建被空引用保护跳过）
@@ -383,24 +382,155 @@ func _on_difficulty_changed(new_level: int) -> void:
 	else:
 		diff_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
 
-## ========== Buff图标栏 ==========
+## ========== 底部图标栏 ==========
 
-## 构建Buff图标三行容器（左上角护盾显示区下方，按稀有度从高到低）
-## 行序：史诗(rarity=2)最上 → 稀有(1) → 普通(0)最下；空行不渲染任何内容
-func _build_buff_bar() -> void:
-	## 固定三行槽位：保证不同稀有度图标位置稳定（不会因获得顺序跳行）
-	for rarity: int in [2, 1, 0]:
-		var row: HBoxContainer = HBoxContainer.new()
-		## 行命名便于调试定位（Epic/Rare/Common）
-		row.name = "BuffRow_%s" % ["Epic", "Rare", "Common"][2 - rarity]
-		row.add_theme_constant_override("separation", int(BUFF_ICON_GAP))
-		## 行y坐标 = 起始y + 行索引×行距（史诗第0行/稀有第1行/普通第2行）
-		var row_index: int = 2 - rarity
-		row.position = Vector2(20, BUFF_ROWS_START_Y + BUFF_ROW_SPACING * float(row_index))
-		## 不拦截鼠标（纯展示）
-		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(row)
-		_buff_rows[rarity] = row
+## 构建底部图标栏（屏幕中间下方，属性/技能/护盾三组分区展示）
+## 位置：锚定屏幕底部居中、向上生长，与左上角血量条/护盾耐久条分离，不遮挡战斗画面
+## 分区设计：三组各自独立外壳（边框色不同）+ 组名标签，属性/技能/护盾互不混排
+func _build_bottom_icon_bar() -> void:
+	## 根容器：三组水平排列，锚定底部居中
+	_bottom_icon_root = HBoxContainer.new()
+	_bottom_icon_root.name = "BottomIconBar"
+	_bottom_icon_root.add_theme_constant_override("separation", 14)
+	_bottom_icon_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	## 锚定底部居中：水平双向生长（始终居中）、垂直向上生长（内容变高不压出屏幕）
+	_bottom_icon_root.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	_bottom_icon_root.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_bottom_icon_root.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_bottom_icon_root.offset_top = -84.0   ## 向上留 84px（标签+图标一行的高度）
+	_bottom_icon_root.offset_bottom = -24.0 ## 距屏幕底边 24px
+	add_child(_bottom_icon_root)
+
+	## 三组：属性（金色边框）/ 技能（蓝色边框）/ 护盾（绿色边框）
+	_attribute_row = _build_icon_group("属性", Color(0.95, 0.75, 0.3))
+	_skill_row = _build_icon_group("技能", Color(0.4, 0.7, 1.0))
+	_shield_icon_row = _build_icon_group("护盾", Color(0.4, 0.9, 0.5))
+	## _build_icon_group 返回的是内部图标行(row)，其父级是 VBox，VBox 父级是外壳 PanelContainer；
+	## 必须把外壳加入根容器，边框/底色/组名才会真正显示
+	_bottom_icon_root.add_child(_attribute_row.get_parent().get_parent())
+	_bottom_icon_root.add_child(_skill_row.get_parent().get_parent())
+	_bottom_icon_root.add_child(_shield_icon_row.get_parent().get_parent())
+
+	## 护盾组内预创建护盾图标（初始隐藏，装备护盾后由_refresh_shield_display显示）
+	_create_shield_bottom_icon()
+
+## 创建单个图标分组（外壳 + 组名标签 + 图标行），返回内部图标行 HBox
+## 参数：group_name - 组名（属性/技能/护盾）；border_color - 分组外壳边框色（视觉区分三组）
+func _build_icon_group(group_name: String, border_color: Color) -> HBoxContainer:
+	## 外壳：PanelContainer 提供边框 + 半透明底色，三组互不混排
+	var shell: PanelContainer = PanelContainer.new()
+	shell.name = "Group_" + group_name
+	shell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.06, 0.1, 0.78)
+	style.border_color = border_color
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.corner_radius_top_left = 5
+	style.corner_radius_top_right = 5
+	style.corner_radius_bottom_left = 5
+	style.corner_radius_bottom_right = 5
+	style.content_margin_left = 5
+	style.content_margin_right = 5
+	style.content_margin_top = 3
+	style.content_margin_bottom = 3
+	shell.add_theme_stylebox_override("panel", style)
+
+	## 内部：组名标签 + 图标行（垂直排列）
+	var vbox: VBoxContainer = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 2)
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shell.add_child(vbox)
+
+	var label: Label = Label.new()
+	label.text = group_name
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_color_override("font_color", border_color)
+	label.add_theme_font_size_override("font_size", 12)
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	label.add_theme_constant_override("outline_size", 3)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(label)
+
+	var row: HBoxContainer = HBoxContainer.new()
+	row.name = "IconRow"
+	row.add_theme_constant_override("separation", int(BUFF_ICON_GAP))
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(row)
+	return row
+
+## 在护盾组内创建护盾图标（Panel底色 + 贴图 + 层数角标，与buff图标风格一致）
+## 初始隐藏；装备护盾后由_refresh_shield_display填充底色/贴图/角标并显示
+func _create_shield_bottom_icon() -> void:
+	if _shield_icon_row == null:
+		return
+	_shield_bottom_icon = Panel.new()
+	_shield_bottom_icon.name = "ShieldBottomIcon"
+	_shield_bottom_icon.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
+	_shield_bottom_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_bottom_icon.visible = false
+	## 底色样式：初始用默认青蓝（实际颜色在刷新时按护盾类型覆盖）
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	style.bg_color = Color(0.3, 0.6, 1.0)
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	style.border_width_left = 1
+	style.border_width_right = 1
+	style.border_width_top = 1
+	style.border_width_bottom = 1
+	style.border_color = Color(1, 1, 1, 0.4)
+	_shield_bottom_icon.add_theme_stylebox_override("panel", style)
+
+	## 贴图矩形：等比缩放居中，内缩1px露出底板描边
+	_shield_bottom_icon_rect = TextureRect.new()
+	_shield_bottom_icon_rect.name = "ShieldTex"
+	_shield_bottom_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_shield_bottom_icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_shield_bottom_icon_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_shield_bottom_icon_rect.offset_left = 1
+	_shield_bottom_icon_rect.offset_top = 1
+	_shield_bottom_icon_rect.offset_right = -1
+	_shield_bottom_icon_rect.offset_bottom = -1
+	_shield_bottom_icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_bottom_icon.add_child(_shield_bottom_icon_rect)
+
+	## 层数角标（右下角，2层起显示）
+	var badge: Label = Label.new()
+	badge.name = "LevelBadge"
+	badge.add_theme_font_size_override("font_size", 11)
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	badge.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	badge.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	badge.offset_left = -10
+	badge.offset_top = -12
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_shield_bottom_icon.add_child(badge)
+
+	_shield_icon_row.add_child(_shield_bottom_icon)
+
+## 更新护盾图标角标（层数≥2时显示"×N"，≥3层金色，与buff图标角标视觉一致）
+## 参数：stack - 当前护盾叠层数
+func _update_shield_bottom_badge(stack: int) -> void:
+	if _shield_bottom_icon == null or not is_instance_valid(_shield_bottom_icon):
+		return
+	var badge: Label = _shield_bottom_icon.get_node_or_null("LevelBadge")
+	if badge == null:
+		return
+	if stack <= 1:
+		badge.text = ""
+		return
+	badge.text = "×%d" % stack
+	if stack >= 3:
+		badge.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	else:
+		badge.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+	badge.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	badge.add_theme_constant_override("outline_size", 3)
 
 ## 稀有度对应的图标底色（普通灰白/稀有蓝/史诗紫，与三选一面板配色一致）
 func _get_rarity_color(rarity: int) -> Color:
@@ -412,38 +542,56 @@ func _get_rarity_color(rarity: int) -> Color:
 		_:
 			return Color(0.85, 0.85, 0.9)  ## 普通：浅灰白
 
-## 刷新Buff图标栏（响应UpgradeManager.upgrades_changed信号）
+## 刷新底部图标栏（响应UpgradeManager.upgrades_changed信号）
 ## 设计意图：增量更新——已存在的词条id保留节点（仅更新层数角标，避免闪烁），
-##           新增的创建图标并放入其稀有度对应行，已移除的销毁节点
+##           新增的创建图标并按"属性/技能"类型归入对应组，已移除的销毁节点
 ## 参数：acquired - get_acquired_upgrades()返回的词条信息字典数组
 func _refresh_buff_icons(acquired: Array) -> void:
-	if _buff_rows.is_empty():
+	if _attribute_row == null or _skill_row == null:
 		return
 
-	## 构建当前词条id集合（用于判断哪些图标需要保留）
-	var current_ids: Dictionary = {}
+	## 按类型分离：属性（is_effect=false）→ 属性组；技能（is_effect=true）→ 技能组
+	var attr_ids: Dictionary = {}
+	var skill_ids: Dictionary = {}
 	for info in acquired:
-		current_ids[info["id"]] = info
+		if bool(info.get("is_effect", false)):
+			skill_ids[info["id"]] = info
+		else:
+			attr_ids[info["id"]] = info
 
-	## 移除不再激活的buff图标
-	for eid in _buff_icons.keys():
-		if not current_ids.has(eid):
-			var old: Control = _buff_icons[eid]
+	## 移除不再激活的属性图标
+	for eid in _attribute_icons.keys():
+		if not attr_ids.has(eid):
+			var old: Control = _attribute_icons[eid]
 			if old != null and is_instance_valid(old):
 				old.queue_free()
-			_buff_icons.erase(eid)
-
-	## 新增激活的buff图标；已存在的仅同步层数角标
-	for eid in current_ids.keys():
-		var info: Dictionary = current_ids[eid]
-		if _buff_icons.has(eid):
-			_update_buff_badge(_buff_icons[eid], int(info["stacks"]), int(info["max_stacks"]))
+			_attribute_icons.erase(eid)
+	## 新增/更新属性图标
+	for eid in attr_ids.keys():
+		var info: Dictionary = attr_ids[eid]
+		if _attribute_icons.has(eid):
+			_update_buff_badge(_attribute_icons[eid], int(info["stacks"]), int(info["max_stacks"]))
 			continue
 		var icon: Control = _create_buff_icon(info)
-		## 按词条稀有度放入对应行（史诗最上/稀有中/普通最下；同一id稀有度固定不会换行）
-		var row: HBoxContainer = _buff_rows[int(info["rarity"])]
-		row.add_child(icon)
-		_buff_icons[eid] = icon
+		_attribute_row.add_child(icon)
+		_attribute_icons[eid] = icon
+
+	## 移除不再激活的技能图标
+	for eid in _skill_icons.keys():
+		if not skill_ids.has(eid):
+			var old: Control = _skill_icons[eid]
+			if old != null and is_instance_valid(old):
+				old.queue_free()
+			_skill_icons.erase(eid)
+	## 新增/更新技能图标
+	for eid in skill_ids.keys():
+		var info: Dictionary = skill_ids[eid]
+		if _skill_icons.has(eid):
+			_update_buff_badge(_skill_icons[eid], int(info["stacks"]), int(info["max_stacks"]))
+			continue
+		var icon: Control = _create_buff_icon(info)
+		_skill_row.add_child(icon)
+		_skill_icons[eid] = icon
 
 ## 创建单个Buff图标（稀有度底色+技能名首2字+右下角层数角标）
 ## 参数：info - 词条信息字典（id/name/rarity/stacks/max_stacks）
@@ -550,16 +698,11 @@ func _build_shield_display() -> void:
 	_shield_panel.name = "ShieldDisplay"
 	_shield_panel.add_theme_constant_override("separation", 6)
 	## 位置：经验条(72px+8高)下方，与碎片统计、经验条彻底分离
+	## 护盾图标已移到底部护盾组，左上角只保留名称+耐久条
 	_shield_panel.position = Vector2(20, 84)
 	_shield_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_shield_panel.visible = false  ## 初始无护盾，装备后由刷新逻辑显示
 	add_child(_shield_panel)
-
-	## 图标底板：36x36方块（尺寸与buff图标一致），底色随护盾颜色
-	_shield_icon_holder = Panel.new()
-	_shield_icon_holder.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
-	_shield_icon_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_shield_panel.add_child(_shield_icon_holder)
 
 	## 信息列：名称耐久文字 + 耐久条（垂直排列）
 	var info_box: VBoxContainer = VBoxContainer.new()
@@ -609,52 +752,47 @@ func _refresh_shield_display() -> void:
 	_shield_panel.visible = data != null
 	if data == null:
 		_shield_display_id = ""
+		## 未装备护盾：底部护盾图标同步隐藏
+		if _shield_bottom_icon != null and is_instance_valid(_shield_bottom_icon):
+			_shield_bottom_icon.visible = false
 		return
 
 	## 护盾颜色（缺属性时兜底默认青蓝色，与掉落物视觉一致）
 	var shield_color: Color = data.shield_color if "shield_color" in data else Color(0.3, 0.6, 1.0)
 	var shield_id: String = str(data.shield_id) if "shield_id" in data else ""
 
-	## 护盾类型变化时才重建图标与配色（节流轮询下避免每0.5秒重建节点）
+	## 护盾类型变化时才重建配色与贴图（节流轮询下避免每0.5秒重建节点）
 	if shield_id != _shield_display_id:
 		_shield_display_id = shield_id
-		## 图标底板底色=护盾颜色（白色细描边，与buff图标框风格统一）
-		var holder_style: StyleBoxFlat = StyleBoxFlat.new()
-		holder_style.bg_color = shield_color
-		holder_style.set_content_margin_all(0.0)
-		holder_style.corner_radius_top_left = 4
-		holder_style.corner_radius_top_right = 4
-		holder_style.corner_radius_bottom_left = 4
-		holder_style.corner_radius_bottom_right = 4
-		holder_style.border_width_left = 1
-		holder_style.border_width_right = 1
-		holder_style.border_width_top = 1
-		holder_style.border_width_bottom = 1
-		holder_style.border_color = Color(1, 1, 1, 0.4)
-		_shield_icon_holder.add_theme_stylebox_override("panel", holder_style)
 		## 名称与耐久条颜色随护盾类型
 		_shield_name_label.add_theme_color_override("font_color", shield_color)
 		_shield_durability_bar.tint_over = shield_color
 		_shield_durability_bar.tint_under = Color(0.3, 0.3, 0.3, 0.5)
-		## 类型图标：IconLibrary按icon_<shield_id>.png契约加载；缺失时隐藏贴图露出色块
-		var icon_tex: Texture2D = IconLibraryLib.get_shield_icon(shield_id)
-		if icon_tex != null:
-			## 首次用到时创建贴图矩形（等比缩放居中，内缩1px露出底板描边）
-			if _shield_icon_rect == null:
-				_shield_icon_rect = TextureRect.new()
-				_shield_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-				_shield_icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-				_shield_icon_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-				_shield_icon_rect.offset_left = 1
-				_shield_icon_rect.offset_top = 1
-				_shield_icon_rect.offset_right = -1
-				_shield_icon_rect.offset_bottom = -1
-				_shield_icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-				_shield_icon_holder.add_child(_shield_icon_rect)
-			_shield_icon_rect.texture = icon_tex
-			_shield_icon_rect.visible = true
-		elif _shield_icon_rect != null:
-			_shield_icon_rect.visible = false
+		## 底部护盾图标底色=护盾颜色（白色细描边，与buff图标框风格统一）
+		if _shield_bottom_icon != null and is_instance_valid(_shield_bottom_icon):
+			var holder_style: StyleBoxFlat = StyleBoxFlat.new()
+			holder_style.bg_color = shield_color
+			holder_style.set_content_margin_all(0.0)
+			holder_style.corner_radius_top_left = 4
+			holder_style.corner_radius_top_right = 4
+			holder_style.corner_radius_bottom_left = 4
+			holder_style.corner_radius_bottom_right = 4
+			holder_style.border_width_left = 1
+			holder_style.border_width_right = 1
+			holder_style.border_width_top = 1
+			holder_style.border_width_bottom = 1
+			holder_style.border_color = Color(1, 1, 1, 0.4)
+			_shield_bottom_icon.add_theme_stylebox_override("panel", holder_style)
+			## 类型图标：IconLibrary按icon_<shield_id>.png契约加载；缺失时隐藏贴图露出色块
+			var icon_tex: Texture2D = IconLibraryLib.get_shield_icon(shield_id)
+			if _shield_bottom_icon_rect != null:
+				_shield_bottom_icon_rect.texture = icon_tex
+				_shield_bottom_icon_rect.visible = icon_tex != null
+
+	## 底部护盾图标显隐 + 层数角标（每次刷新都更新——叠层/耐久归零仍保持显示）
+	if _shield_bottom_icon != null and is_instance_valid(_shield_bottom_icon):
+		_shield_bottom_icon.visible = true
+		_update_shield_bottom_badge(stack)
 
 	## 名称+耐久数值与耐久条进度（每次刷新都更新——耐久是高频变化数据）
 	## 叠层显示：2层以上在名称后加×N；耐久为0时显示"回盾中"提示

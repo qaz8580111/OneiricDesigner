@@ -58,6 +58,15 @@ var _trigger_axis_active: Dictionary = {}
 ## 扳机扣下判定阈值（与game_choice_prev/next的InputMap deadzone一致）
 const TRIGGER_PRESSED_THRESHOLD: float = 0.5
 
+## 扳机两次边沿触发之间的最小间隔（秒）
+## 修复：手柄LT/RT是模拟轴，半扣时轴值会在0.5阈值附近抖动，产生多次"松开→扣下"边沿，
+##       导致升级三选一/神庙/商店的左右切换"稍微按一下就连续滑到最前/最后"。
+##       加冷却后，同一扳机在一次扣下后的0.2秒内不再重复触发，抖动被吞掉。
+const TRIGGER_EDGE_COOLDOWN: float = 0.2
+
+## 扳机边沿冷却计时器：action → 剩余冷却秒数（>0 表示该扳机刚触发过，忽略后续边沿）
+var _trigger_edge_cooldown: Dictionary = {}
+
 ## 缓存的鼠标左键按住状态
 var _mouse_left_pressed: bool = false
 
@@ -82,6 +91,13 @@ func _process(delta: float) -> void:
 	## 冷却期倒计时（期间is_action_just_pressed_safe一律返回false）
 	if _input_cooldown_timer > 0.0:
 		_input_cooldown_timer -= delta
+
+	## 扳机边沿冷却倒计时（防LT/RT半扣抖动连滑）
+	if not _trigger_edge_cooldown.is_empty():
+		for action in _trigger_edge_cooldown.keys():
+			_trigger_edge_cooldown[action] = float(_trigger_edge_cooldown[action]) - delta
+			if float(_trigger_edge_cooldown[action]) <= 0.0:
+				_trigger_edge_cooldown.erase(action)
 
 	_cache_movement_input()
 
@@ -164,9 +180,11 @@ func _handle_trigger_motion(event: InputEventJoypadMotion) -> void:
 		var was_active: bool = bool(_trigger_axis_active.get(action, false))
 		## 状态无论是否被上下文放行都要更新，避免上下文切换后边沿状态错乱
 		_trigger_axis_active[action] = now_active
-		## 仅在"松开→扣下"跳变沿、且当前上下文允许时缓存一次
+		## 仅在"松开→扣下"跳变沿、且当前上下文允许、且不在边沿冷却期内时缓存一次
 		if now_active and not was_active and _is_action_allowed_in_context(action):
-			_just_pressed_actions[action] = true
+			if float(_trigger_edge_cooldown.get(action, 0.0)) <= 0.0:
+				_just_pressed_actions[action] = true
+				_trigger_edge_cooldown[action] = TRIGGER_EDGE_COOLDOWN
 
 
 ## ==================== 公开接口 ====================
