@@ -22,6 +22,18 @@ const LEVEL_UP_PANEL_SCRIPT = preload("res://scripts/ui/LevelUpPanel.gd")
 ## 玩家最多同时持有的技能种类数（新需求：满5种后拾取新技能会随机替换旧技能）
 const MAX_SKILL_TYPES: int = 5
 
+## ========== 升级即全属性成长（新增需求） ==========
+
+## 每次三选一升级附带的生命/伤害/攻速/移速四项小步成长
+## 需求：升级后生命、子弹攻速、伤害、移动速度都会有所提升（无论选择何种词条）
+## 设计：数值刻意小于对应单属性词条的每级增量（伤害+0.05 vs 单属性+0.30、
+##       攻速+0.04 vs +0.20、移速+0.03 vs +0.15、生命+8 vs +25），
+##       作为"升级即成长"的保底收益，不喧宾夺主、不改变三选一的主导地位
+const UNIVERSAL_DAMAGE_MULT: float = 0.05
+const UNIVERSAL_FIRE_RATE_MULT: float = 0.04
+const UNIVERSAL_MOVE_SPEED_MULT: float = 0.03
+const UNIVERSAL_MAX_HP_BONUS: int = 8
+
 ## ========== 信号定义 ==========
 
 ## 词条应用信号：玩家选定词条后发出（HUD/日志等监听）
@@ -228,7 +240,9 @@ func _roll_three_upgrades() -> Array:
 ## 玩家选定词条的回调（响应LevelUpPanel.upgrade_chosen）
 ## 参数：upgrade - 选定的词条数据
 func _on_upgrade_chosen(upgrade: Resource) -> void:
-	## 应用词条
+	## 升级即全属性成长：每次三选一无论选什么，生命/伤害/攻速/移速都会小幅提升
+	_apply_universal_growth()
+	## 应用所选词条
 	apply_upgrade(upgrade)
 	## 关闭面板
 	_close_panel()
@@ -244,6 +258,21 @@ func _process_pending() -> void:
 	else:
 		## 无排队，解锁选择状态
 		is_choosing = false
+
+## 应用一次全属性成长（三选一升级时调用，与所选词条叠加生效）
+## 数据流：累加 player_stats 四键 → 生命上限立即生效（apply_max_hp_bonus 扩容+治疗）；
+##         伤害/攻速/移速乘算由后续 apply_upgrade 末尾的 upgrade_applied 信号
+##         触发 Player._sync_upgrade_stats 统一同步，无需在此重复同步
+func _apply_universal_growth() -> void:
+	player_stats["damage_mult"] = float(player_stats.get("damage_mult", 1.0)) + UNIVERSAL_DAMAGE_MULT
+	player_stats["fire_rate_mult"] = float(player_stats.get("fire_rate_mult", 1.0)) + UNIVERSAL_FIRE_RATE_MULT
+	player_stats["move_speed_mult"] = float(player_stats.get("move_speed_mult", 1.0)) + UNIVERSAL_MOVE_SPEED_MULT
+	player_stats["max_hp_bonus"] = int(player_stats.get("max_hp_bonus", 0)) + UNIVERSAL_MAX_HP_BONUS
+
+	## 生命上限立即生效（扩容+治疗，与属性词条"梦境之心"同一条应用路径）
+	var player: Node2D = _get_player()
+	if player != null and player.has_method("apply_max_hp_bonus"):
+		player.apply_max_hp_bonus(UNIVERSAL_MAX_HP_BONUS)
 
 ## 关闭并销毁选择面板（连同 CanvasLayer 一起清理）
 func _close_panel() -> void:

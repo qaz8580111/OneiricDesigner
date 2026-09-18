@@ -148,6 +148,13 @@ func _ready() -> void:
 	## 避免时间信息在顶部/底部重复出现）
 	_build_top_status_bar()
 
+	## ========== 右上角小地图挂载 ==========
+	## 实时显示玩家位置 + 商店/神庙标记（存在时），作为 GameHUD 子节点跟随生命周期
+	var MinimapClass = preload("res://scripts/ui/Minimap.gd")
+	var minimap: Control = MinimapClass.new()
+	minimap.name = "Minimap"
+	add_child(minimap)
+
 ## ========== FPS 计数器：读取设置 + 动态创建/刷新标签 ==========
 
 ## 读取 settings.cfg 中的 show_fps 值：true 就创建 Label 并启动 _process 计数，false 则什么都不做
