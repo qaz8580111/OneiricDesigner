@@ -9,7 +9,7 @@
 ;   GameHUD (Control) - 全屏覆盖
 ;   ├── HealthBar (ProgressBar) - 血量条（左上角）
 ;   ├── FragmentLabel (Label) - 梦境碎片数量显示（血量条下方）
-;   └── DiffLabel (Label) - 难度等级显示（右上角，血量条下方偏移）
+;   └── DiffLabel (Label) - 难度等级显示（顶部居中，状态栏下方）
 ;
 ; 以下UI由 GameHUD.gd 代码动态创建（不在本场景文件中）：
 ;   顶部状态栏（时间/击杀/最高连击，顶部居中 y=12，原底部栏上移合并）
@@ -61,16 +61,17 @@ theme_override_colors/font_color = Color(1, 0.8, 0, 1)
 
 ; ------------------------------ 难度显示 ------------------------------
 ; DiffLabel (Label) - 难度等级（随时间提升）
-; 锚点右上角（等级下方44px），右对齐，随难度升高的警示色由脚本控制
+; 位置：顶部居中（状态栏下方44px），随难度升高的警示色由脚本控制
+; 说明：右上角仅保留小地图，难度信息与顶部状态栏一并居中展示
 [node name="DiffLabel" type="Label" parent="."]
-anchors_preset = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -140.0
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -60.0
 offset_top = 44.0
-offset_right = -20.0
+offset_right = 60.0
 offset_bottom = 64.0
-grow_horizontal = 0
+grow_horizontal = 2
 text = "难度 1"
-horizontal_alignment = 2
+horizontal_alignment = 1
 theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)

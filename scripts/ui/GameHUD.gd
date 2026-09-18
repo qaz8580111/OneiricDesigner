@@ -113,7 +113,7 @@ func _ready() -> void:
 	if UpgradeManager:
 		UpgradeManager.upgrades_changed.connect(_on_upgrades_changed)
 
-	## 初始化经验条/等级/难度显示（读取单例当前值，兜底中途创建HUD的情况）
+	## 初始化难度显示（本项目无角色等级系统，仅难度随时间提升；读取单例当前值兜底中途创建HUD）
 	_refresh_progress_displays()
 
 	## ========== Buff图标栏初始化 ==========

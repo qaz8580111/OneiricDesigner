@@ -61,6 +61,11 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 				core.take_core_damage(float(core_damage))
 			elif core.has_method("take_damage"):
 				core.take_damage(float(core_damage))
+	else:
+		## 普通敌人无 HealthController 节点（该节点玩家独有）：回退到直接调用 target.take_damage，
+		## 使破甲的额外核心伤害对敌人真正生效（否则本词条对绝大多数敌人是空操作）
+		if target.has_method("take_damage"):
+			target.take_damage(core_damage)
 
 ## 护盾碎裂视觉：目标位置灰色碎片迸裂
 ## 参数：world - 特效挂载的世界节点；pos - 迸裂中心位置

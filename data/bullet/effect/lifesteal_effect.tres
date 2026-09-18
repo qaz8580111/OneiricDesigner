@@ -6,5 +6,4 @@
 script = ExtResource("1")
 effect_id = "lifesteal"
 trigger_type = 0
-steal_percent = 0.3
-min_heal = 1
+heal_per_hit = 2

@@ -1,8 +1,8 @@
 ## LifeStealEffect.gd - 吸血特效
-## 职责：命中敌人时按伤害的百分比恢复玩家生命值
+## 职责：命中敌人时恢复固定生命值（百分比制对低伤害子弹几乎无效，故改为固定值）
 ## 继承：BulletEffect
 ## 被引用方：挂载于子弹配置的effects数组，也可作为UpgradeData.bullet_effect特效词条被玩家获得
-## 设计意图：策略模式特效——ON_HIT触发；恢复走玩家HealthController.heal（内部自带护盾优先规则），
+## 设计意图：策略模式特效——ON_HIT触发；恢复走 Player.heal（内部经 HealthController.heal_core 恢复核心血量），
 ##           结算成功才播放音效与血珠视觉，强化"从敌人身上抽取生命"的反馈
 ## 继承改为按路径引用基类：全局类缓存缺失BulletEffect注册时，
 ## extends BulletEffect会报"Could not find base class"并连锁破坏所有引用特效的资源加载
@@ -10,32 +10,24 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 
 ## ========== 吸血属性 ==========
 
-## 吸血系数（0.3 = 恢复30%的伤害值作为生命）
-@export var steal_percent: float = 0.3
-
-## 每次吸血最小值（保证每次至少恢复1点）
-@export var min_heal: int = 1
+## 每次命中恢复的固定生命值（不依赖伤害，低伤害高射速下更稳定实用）
+@export var heal_per_hit: int = 2
 
 ## ========== 实现方法 ==========
 
-## 每级叠层成长：吸血系数+0.08（钳制≤0.9防超过伤害本身的治疗量）
-## 设计意图：满级5层时30%→62%，站撸续航能力随等级稳步提升（前中期救命词条）
+## 每级叠层成长：每次命中恢复量+1
+## 设计意图：满级5层时2→6点/命中，站撸续航能力随等级稳步提升（前中期救命词条）
 func _on_stack_grown() -> void:
-	steal_percent = minf(steal_percent + 0.08, 0.9)
+	heal_per_hit += 1
 
 ## 应用吸血特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
-## 参数：bullet - 命中的子弹实例（取最终伤害作吸血基数）；target - 被命中的目标（血珠起点，可空）
+## 参数：bullet - 命中的子弹实例；target - 被命中的目标（血珠起点，可空）
 ## 返回值：无
-## 设计意图：恢复量=max(伤害×steal_percent, min_heal)保底；从player组取玩家节点后交由
-##           HealthController.heal结算，成功后再表现音效与血珠飞行
+## 设计意图：每次命中恢复固定生命值（不依赖伤害）；从player组取玩家节点后交由
+##           Player.heal结算（玩家统一回血入口），成功后再表现音效与血珠飞行
 func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> void:
-	var bullet_data = bullet.get_bullet_data() if bullet.has_method("get_bullet_data") else null
-	var damage_dealt: int = bullet_data.get_final_damage() if bullet_data else 10
-	
-	## 计算恢复量
-	var heal_amount: int = int(damage_dealt * steal_percent)
-	heal_amount = max(heal_amount, min_heal)
+	var heal_amount: int = heal_per_hit
 	
 	## 查找玩家（特效是Resource节点，没有get_tree()方法，通过bullet获取场景树）
 	var player: Node2D = null
@@ -46,13 +38,11 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 	if player == null or not is_instance_valid(player):
 		return
 	
-	## 玩家生命系统：优先恢复护盾，护盾满了再恢复血量
+	## 玩家生命系统：调用玩家统一回血入口（Player.heal → HealthController.heal_core 恢复核心血量）
 	var healed: bool = false
-	if player.has_node("HealthController"):
-		var hc = player.get_node("HealthController")
-		if hc.has_method("heal"):
-			hc.heal(float(heal_amount))
-			healed = true
+	if player.has_method("heal"):
+		player.heal(float(heal_amount))
+		healed = true
 	
 	## ---------- 音效 ----------
 	var from_pos: Vector2 = target.global_position if target != null else bullet.global_position
