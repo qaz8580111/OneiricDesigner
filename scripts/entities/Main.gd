@@ -369,6 +369,11 @@ func _on_settings_applied(settings: Dictionary) -> void:
 func _on_game_started() -> void:
 	## 生成游戏元素
 	_spawn_game_elements()
+	## 开局随机授予一个属性类技能（需求：开始游戏后即获得一个属性类技能）
+	## 必须在 _spawn_game_elements 之后调用：此时玩家已加入场景树并注册到 "player" 组，
+	## apply_upgrade 内部的 _get_player 才能找到玩家并正确应用属性/血量扩容
+	if UpgradeManager:
+		UpgradeManager.grant_random_attribute_upgrade()
 
 ## 游戏结束信号回调（响应GameManager.game_ended）
 ## 直播增强：死亡瞬间先0.5秒慢动作让观众看清"怎么死的"，再进入黑屏渐隐
@@ -487,19 +492,21 @@ func _process(delta: float) -> void:
 	## 处理死亡黑屏过渡动画
 	_update_death_fade()
 	
+	## 模态面板（升级三选一/神庙/商店）打开期间：不消费也不处理暂停键，
+	## 让面板自身消费 ui_cancel/确认 等按键（避免此处先消费导致面板收不到关闭键）。
+	## 这些面板关闭时都会 pop_context 清空已捕获输入，因此此处不消费不会造成残留误触发
+	if UpgradeManager and UpgradeManager.is_choosing:
+		return
+	var ctx: String = InputManager.get_current_context()
+	if ctx == "TEMPLE_CHOICE" or ctx == "SHOP_CHOICE":
+		return
+
 	## 检测暂停/取消按钮：
 	##   game_pause = 手柄START / 键盘PauseBreak（呼出与关闭暂停都走它）
 	##   ui_cancel  = 键盘ESC / 手柄B（游戏中可呼出；暂停中由PauseMenu导航器消费关闭）
 	var pause_pressed: bool = InputManager.is_action_just_pressed_safe("game_pause")
 	var cancel_pressed: bool = InputManager.is_action_just_pressed_safe("ui_cancel")
 	if pause_pressed or cancel_pressed:
-		## 升级三选一进行中屏蔽暂停（防止暂停菜单叠加在选择面板上造成UI冲突）
-		## 数据流：升级触发 → UpgradeManager.is_choosing=true → 此处拦截
-		if UpgradeManager and UpgradeManager.is_choosing:
-			return
-		## 神庙选择面板打开期间同样屏蔽暂停（用上下文判断，无需Temple暴露状态）
-		if InputManager.get_current_context() == "TEMPLE_CHOICE":
-			return
 		## 游戏中：显示暂停菜单
 		if current_screen == Screen.GAME:
 			_show_pause_menu()

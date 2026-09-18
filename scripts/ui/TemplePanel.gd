@@ -2,9 +2,10 @@
 ## 职责：展示神庙的4个选项（随机技能/随机护盾/强化伤害/生命上限），玩家选定后发信号
 ## 设计意图：
 ##   1. 与 LevelUpPanel 同风格：屏幕底部居中小面板，选项横向一行排开，无全屏蒙层
-##   2. 鼠标点击/数字键1-4/手柄D-Pad左右+A选择；描述走tooltip减小占用
+##   2. 鼠标点击/数字键1-4/手柄LT·RT扳机左右+D-Pad备用+A选择；描述走tooltip减小占用
 ##   3. 赌博式选项带"赌"角标，稳妥式带"稳"角标，玩家可预判风险
-## 输入架构：选择输入全部经InputManager网关（TEMPLE_CHOICE上下文放行ui_left/right/confirm）；
+## 输入架构：选择输入全部经InputManager网关（TEMPLE_CHOICE上下文放行game_choice_prev/next=LT/RT、
+##           ui_left/right/confirm）；
 ##           按钮FOCUS_NONE，选中态由_selected_index统一管理，避免内置焦点双重移动
 ## 数据流：Temple.interact() → 创建面板 → setup(options)
 ##         → 玩家选定 option_chosen 信号 → Temple 应用效果并消失
@@ -96,17 +97,19 @@ func _ready() -> void:
 	var tween: Tween = create_tween()
 	tween.tween_property(panel_bg, "modulate:a", 1.0, 0.15)
 
-## _process() - 手柄D-Pad/键盘方向键导航与确认（经InputManager网关轮询消费）
-## 面板为横向一行，用ui_left/ui_right移动选中项（与升级三选一同款横向导航）
+## _process() - 手柄LT/RT扳机(或D-Pad/键盘左右)导航与确认（经InputManager网关轮询消费）
+## 面板为横向一行，用game_choice_prev/next=LT/RT、键盘Q/E优先，ui_left/ui_right为备用
 func _process(_delta: float) -> void:
 	## 已锁定选择后不响应，防重复触发
 	if _locked or _buttons.is_empty():
 		return
-	## D-Pad左/左方向键：选中上一项（边界夹取不循环）
-	if InputManager.is_action_just_pressed_safe("ui_left"):
+	## 左移一项：手柄LT扳机 / 键盘Q / 备用D-Pad左·键盘左方向键（边界夹取不循环）
+	if InputManager.is_action_just_pressed_safe("game_choice_prev") \
+			or InputManager.is_action_just_pressed_safe("ui_left"):
 		_set_selection(_selected_index - 1)
-	## D-Pad右/右方向键：选中下一项
-	elif InputManager.is_action_just_pressed_safe("ui_right"):
+	## 右移一项：手柄RT扳机 / 键盘E / 备用D-Pad右·键盘右方向键
+	elif InputManager.is_action_just_pressed_safe("game_choice_next") \
+			or InputManager.is_action_just_pressed_safe("ui_right"):
 		_set_selection(_selected_index + 1)
 	## A键/Space/Enter：确认当前选中项
 	if InputManager.is_action_just_pressed_safe("ui_confirm"):

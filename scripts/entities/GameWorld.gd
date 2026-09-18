@@ -29,6 +29,9 @@ const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
 ## 神庙场景预加载（高级怪死亡后概率生成）
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/gameplay/Temple.tscn")
 
+## 中央商店脚本预加载（5分钟后在竞技场中心生成，永久存在；纯脚本实例化，无.tscn）
+const SHOP_SCRIPT = preload("res://scripts/entities/Shop.gd")
+
 ## 竞技场尺寸/碰撞层/边缘预警常量（墙坐标、刷怪钳制、红光距离的单一数据源）
 const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
 
@@ -77,6 +80,11 @@ var _enemy_pool_total_weight: float = 0.0
 
 ## 精英怪数据资源（配置精英怪的属性、掉落等）
 @export var elite_enemy_data: EnemyDataClass = null
+
+## ========== 中央商店配置 ==========
+
+## 商店出现时间（秒）：游戏进行满 5 分钟后在竞技场中心生成，之后永久存在不消失
+const SHOP_SPAWN_TIME: float = 300.0
 
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
@@ -127,6 +135,12 @@ var _pickups: Array[Area2D] = []
 
 ## 场景中所有神庙的管理列表（高级怪死亡概率生成，交互后消失）
 var _temples: Array[Area2D] = []
+
+## 中央商店节点（全局唯一，5分钟后生成，永久存在）
+var _shop: Area2D = null
+
+## 商店是否已生成（防止每帧重复生成）
+var _shop_spawned: bool = false
 
 ## ========== 精英怪成员变量 ==========
 
@@ -401,6 +415,9 @@ func _process(delta: float) -> void:
 	## 处理精英敌人生成
 	_spawn_elite_enemies(delta)
 
+	## 处理中央商店生成（5分钟后在竞技场中心生成一次）
+	_update_shop_spawn()
+
 	## 处理手动拾取输入（按E键拾取道具）
 	_handle_manual_pickup()
 
@@ -538,6 +555,28 @@ func _spawn_elite_enemies(delta: float) -> void:
 		## 动态间隔：精英怪刷新随难度等级压缩（下限6秒）
 		_elite_spawn_timer = DifficultyManager.get_elite_spawn_interval(elite_spawn_interval)
 
+## ========== 中央商店系统 ==========
+
+## 检测并生成中央商店（游戏满5分钟后一次性生成，之后永久存在不消失）
+## 时间源：RunStats.elapsed_time 仅在本局游戏进行中累计，暂停/菜单/结算期间自然冻结，
+##         因此"5分钟"严格等于实际战斗时长，符合需求且无需额外计时器
+func _update_shop_spawn() -> void:
+	if _shop_spawned:
+		return
+	if RunStats and RunStats.elapsed_time >= SHOP_SPAWN_TIME:
+		_shop_spawned = true
+		_spawn_shop()
+
+## 生成中央商店：实例化纯脚本节点，置于竞技场正中心 Vector2.ZERO
+func _spawn_shop() -> void:
+	var shop: Area2D = SHOP_SCRIPT.new() as Area2D
+	add_child(shop)
+	shop.global_position = Vector2.ZERO
+	## 重置物理插值，避免商店从原点外的初始位置平滑滑向中心（与拾取物/神庙同规则）
+	if shop.has_method("reset_physics_interpolation"):
+		shop.reset_physics_interpolation()
+	_shop = shop
+
 ## ========== 道具拾取系统 ==========
 
 ## 处理手动拾取输入（玩家按E键：优先与神庙交互，其次拾取道具）
@@ -559,7 +598,15 @@ func _handle_manual_pickup() -> void:
 				temple.interact(player)
 				return
 
-	## 优先级2：遍历所有拾取物，查找玩家附近可手动拾取的道具
+	## 优先级2：检查中央商店（优先级低于神庙，高于拾取物）
+	if _shop != null and is_instance_valid(_shop) \
+			and _shop.has_method("is_player_in_range") and _shop.has_method("interact"):
+		## 玩家在商店交互范围内时进入商店（进入后由 Shop 负责暂停游戏）
+		if _shop.is_player_in_range():
+			_shop.interact(player)
+			return
+
+	## 优先级3：遍历所有拾取物，查找玩家附近可手动拾取的道具
 	## 性能优化：先用global_position.distance_to快速预筛选，跳过远距拾取物
 	## 旧逻辑每帧对所有_pickups调用has_method×2+is_player_in_range（内部又算距离），
 	## 拾取物多时（百级）每帧上百次方法调用+距离计算；预筛选只用一次distance_to
@@ -841,3 +888,9 @@ func clear_all() -> void:
 		if is_instance_valid(temple) and temple.is_inside_tree():
 			temple.queue_free()
 	_temples.clear()
+
+	## 清理中央商店
+	if _shop != null and is_instance_valid(_shop) and _shop.is_inside_tree():
+		_shop.queue_free()
+	_shop = null
+	_shop_spawned = false

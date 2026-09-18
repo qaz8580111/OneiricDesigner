@@ -399,6 +399,16 @@ func _is_action_allowed_in_context(action: String) -> bool:
 		],
 		"TEMPLE_CHOICE": [
 			"game_move_", "game_shoot", "game_interact", "game_aim_",
+			# 神庙选项左右选择与升级三选一同款：优先手柄LT/RT扳机(game_choice_prev/next)、键盘Q/E同义，
+			# D-Pad/方向键(ui_left/ui_right)保留为备用
+			"game_choice_prev", "game_choice_next",
+			"ui_up", "ui_down", "ui_left", "ui_right", "ui_confirm", "game_confirm", "ui_cancel"
+		],
+		# 中央商店：进入后游戏暂停，移动/射击自然停止，无需放行移动/交互键；
+		# 商品左右选择与升级三选一同款：LT/RT扳机(game_choice_prev/next)、键盘Q/E，
+		# D-Pad/方向键(ui_left/ui_right)备用；确认购买用A/Space(game_confirm/ui_confirm)，ESC关闭(ui_cancel)
+		"SHOP_CHOICE": [
+			"game_choice_prev", "game_choice_next",
 			"ui_up", "ui_down", "ui_left", "ui_right", "ui_confirm", "game_confirm", "ui_cancel"
 		],
 	}

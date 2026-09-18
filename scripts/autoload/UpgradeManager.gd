@@ -440,6 +440,40 @@ func _find_upgrade_by_id(upgrade_id: String) -> Resource:
 			return u
 	return null
 
+## ========== 随机词条获取（开局技能 / 商店商品） ==========
+
+## 随机获取一个属性类词条（bullet_effect 为空，即纯数值加成词条）
+## 用于：开局随机授予一个属性技能、商店"属性类"商品
+## 返回：随机属性词条；池中无属性词条时返回 null
+func get_random_attribute_upgrade() -> Resource:
+	var candidates: Array = []
+	for upgrade in _upgrade_pool:
+		if upgrade.bullet_effect == null:
+			candidates.append(upgrade)
+	if candidates.is_empty():
+		return null
+	return candidates[RandomManager.randi_range(0, candidates.size() - 1)]
+
+## 随机获取一个特效类词条（bullet_effect 非空，即子弹特效词条）
+## 用于：商店"技能类"商品
+## 返回：随机特效词条；池中无特效词条时返回 null
+func get_random_effect_upgrade() -> Resource:
+	var candidates: Array = []
+	for upgrade in _upgrade_pool:
+		if upgrade.bullet_effect != null:
+			candidates.append(upgrade)
+	if candidates.is_empty():
+		return null
+	return candidates[RandomManager.randi_range(0, candidates.size() - 1)]
+
+## 开局随机授予一个属性类技能（玩家实例化完成后由 Main 调用）
+## 规则：仅从属性词条（bullet_effect 为空）中随机一个，走 apply_upgrade 正常应用——
+##       计入技能种类、叠加层数与属性字典，与手动拾取技能书获得的新词条完全一致
+func grant_random_attribute_upgrade() -> void:
+	var upgrade: Resource = get_random_attribute_upgrade()
+	if upgrade != null:
+		apply_upgrade(upgrade)
+
 ## ========== 辅助方法 ==========
 
 ## 获取玩家节点（通过player组查找）

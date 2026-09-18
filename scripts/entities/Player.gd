@@ -753,6 +753,19 @@ func add_dream_fragment(amount: int) -> void:
 	## 获得新技能词条仅一条途径：手动按E拾取技能宝石（三选一面板）；
 	## 神庙"随机技能"只强化已拥有技能等级，不再给新技能
 
+## 扣除梦境碎片（商店购买支付专用）
+## 注意：只做货币扣减与HUD刷新，不上报 RunStats（fragments_total 统计的是"累计获得"，
+##       不是"当前余额"，扣除不应影响结算的收集总数）
+## 参数：amount - 要扣除的碎片数量
+## 返回：true=扣除成功，false=余额不足或非法数量
+func spend_dream_fragment(amount: int) -> bool:
+	if amount <= 0 or dream_fragment < amount:
+		return false
+	dream_fragment -= amount
+	## 发出信号通知UI更新显示
+	dream_fragment_changed.emit(dream_fragment)
+	return true
+
 ## 获取玩家当前生存状态（对外接口）
 ## 返回：包含护盾、核心血、无敌状态等信息的字典
 func get_survival_state() -> Dictionary:
