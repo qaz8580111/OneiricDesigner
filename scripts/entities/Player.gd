@@ -391,6 +391,25 @@ func remove_bullet_effect(effect_id: String) -> void:
 			_private_bullet_data.effects.remove_at(i)
 			break
 
+## 将指定子弹特效实例精确提升到目标等级（神庙"融合技能"用）
+## 数据流：UpgradeManager._set_effect_to_level → 此方法 → 定位同id特效实例逐级 add_stack
+## 设计意图：融合技能的等级取两个源技能的较高值，需把两个特效都精确拉到该等级；
+##           逐级 add_stack（内部触发 _on_stack_grown 参数放大）而非直接改 stack_count，
+##           保证成长策略与正常叠层完全一致，且不污染共享 .tres
+## 参数：effect_id - 特效唯一标识；level - 目标等级（≥当前层数时成长，否则保持原样）
+func set_bullet_effect_level(effect_id: String, level: int) -> void:
+	if _private_bullet_data == null or effect_id == "" or level < 1:
+		return
+	## 定位私有副本中已拥有的特效实例
+	for owned in _private_bullet_data.effects:
+		if owned != null and owned.effect_id == effect_id:
+			## 计算还需成长的层数（当前层数可能已 ≥ 目标，则不操作）
+			var diff: int = level - int(owned.stack_count)
+			for i in range(diff):
+				if owned.has_method("add_stack"):
+					owned.add_stack()
+			break
+
 ## 应用核心血量上限加值（UpgradeManager血量词条调用）
 ## 数据流：UpgradeManager.apply_upgrade(max_hp_bonus词条) → 此方法 → 血量组件扩容
 ## 参数：amount - 上限增加值（同时立即治疗等量血量）
@@ -726,13 +745,22 @@ func equip_shield(shield_data: Resource) -> void:
 		if AudioManager:
 			AudioManager.play_2d("buff_pickup", global_position, 0.8)
 
-## 强化当前装备护盾叠层（神庙"随机护盾"选项由 RandomShieldTempleOption 调用）
-## 参数：amount - 叠加层数（1~3），突破3层上限
+## 强化当前装备护盾叠层（神庙"强化护盾"选项由 RandomShieldTempleOption 调用）
+## 参数：amount - 叠加层数（固定1），突破3层上限
 ## 返回：是否强化成功（无装备护盾时返回 false）
 func boost_shield_stack(amount: int) -> bool:
 	if equipment_shield != null and equipment_shield.has_method("add_stack"):
 		return equipment_shield.add_stack(amount)
 	return false
+
+## 查询当前是否已装备护盾（神庙"强化护盾"选项预检查用）
+## 说明：区别于 EquipmentShieldComponent.has_shield()（耐久>0才算有盾），
+##       此处只判断"是否装备了护盾数据"——护盾破碎(耐久0)时仍可被神庙强化并补满耐久
+## 返回：true=已装备护盾，false=未装备
+func has_equipped_shield() -> bool:
+	return equipment_shield != null \
+			and equipment_shield.has_method("get_shield_data") \
+			and equipment_shield.get_shield_data() != null
 
 ## ========== 梦境碎片系统 ==========
 

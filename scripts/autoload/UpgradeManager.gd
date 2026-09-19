@@ -26,6 +26,17 @@ const MAX_EFFECT_SKILL_TYPES: int = 5
 ## 说明：属性类与技能类数量上限各自独立计算，互不影响
 const MAX_ATTRIBUTE_SKILL_TYPES: int = 2
 
+## ========== 神庙强化碎片消耗（累加计价） ==========
+
+## 神庙强化首次消耗的梦境碎片数（第一次2000）
+const TEMPLE_BOOST_BASE_COST: int = 2000
+
+## 神庙强化每次消耗的增量（第二次2500、第三次3000……每次+500）
+const TEMPLE_BOOST_COST_STEP: int = 500
+
+## 融合技能固定消耗的梦境碎片数
+const FUSE_SKILL_COST: int = 10000
+
 ## ========== 信号定义 ==========
 
 ## 词条应用信号：玩家选定词条后发出（HUD/日志等监听）
@@ -57,6 +68,18 @@ var player_stats: Dictionary = {
 
 ## 各词条已叠加层数（upgrade_id → 层数，控制max_stacks上限）
 var _upgrade_stacks: Dictionary = {}
+
+## ========== 神庙强化 / 融合技能运行时状态 ==========
+
+## 神庙强化已执行次数（每次强化消耗累加：第1次2000、第2次2500……）
+## 跨神庙累计，游戏开始重置
+var _temple_boost_count: int = 0
+
+## 当前融合技能记录（玩家身上最多同时一个）
+## 结构：{ "a_id": String, "b_id": String, "level": int }
+##   a_id/b_id = 被融合的两个技能类词条 upgrade_id；level = 融合时二者较高等级
+## 空字典 = 当前无融合技能
+var _fused_skill: Dictionary = {}
 
 ## ========== 词条池 ==========
 
@@ -94,6 +117,9 @@ func _on_game_started() -> void:
 		"max_hp_bonus": 0,
 	}
 	_upgrade_stacks.clear()
+	## 重置神庙强化计数与融合技能状态
+	_temple_boost_count = 0
+	_fused_skill = {}
 	## 关闭可能残留的选择面板
 	_close_panel()
 
@@ -327,22 +353,46 @@ func apply_upgrade(upgrade: Resource) -> void:
 
 ## ========== 神庙"随机技能"强化（新增需求） ==========
 
-## 随机强化一个已拥有技能（神庙"随机技能"选项用，替代旧的三选一面板）
-## 规则：从已持有技能中随机选一个，等级 +amount（1~3）级；
+## 随机强化一个已拥有的"技能类"词条（神庙"强化技能"选项用，替代旧的"随机技能"）
+## 规则：从已持有的特效词条（技能类，bullet_effect 非空）中随机选一个，等级 +amount（1~3）级；
 ##       突破5级上限（满级5级后继续强化，理论最高可到8级）；
-##       特效词条逐级 add_stack 成长、属性词条逐级累加，均复用词条自身成长逻辑
-## 返回：是否强化成功（无已拥有技能时返回 false，神庙保留不消失）
+##       只针对技能类，不再包含属性类（属性类由 boost_random_attribute 单独强化）
+## 返回：是否强化成功（无已持有特效技能时返回 false，神庙保留不消失）
 func boost_random_skill(amount: int) -> bool:
 	if amount <= 0:
 		return false
-	## 收集当前已持有的真实技能（仅词条池技能，排除神庙临时词条）
+	## 收集当前已持有的真实特效技能（仅词条池技能且为特效类，排除神庙临时词条与属性类）
 	var held_ids: Array = []
 	for uid in _upgrade_stacks.keys():
-		if _find_upgrade_by_id(uid) != null:
+		var u: Resource = _find_upgrade_by_id(uid)
+		if u != null and u.is_effect_upgrade():
 			held_ids.append(uid)
 	if held_ids.is_empty():
 		return false
 	## 随机抽一个已拥有技能强化
+	var uid: String = String(held_ids[RandomManager.randi_range(0, held_ids.size() - 1)])
+	var upgrade: Resource = _find_upgrade_by_id(uid)
+	if upgrade == null:
+		return false
+	_boost_upgrade(upgrade, amount)
+	return true
+
+## 随机强化一个已拥有的"属性类"词条（神庙"强化属性"选项用）
+## 规则：从已持有的属性词条（bullet_effect 为空）中随机选一个，等级 +amount 级；
+##       突破5级上限（满级后继续强化）；
+##       只针对属性类，与技能类各自独立
+## 返回：是否强化成功（无已持有属性技能时返回 false，神庙保留不消失）
+func boost_random_attribute(amount: int) -> bool:
+	if amount <= 0:
+		return false
+	## 收集当前已持有的真实属性词条（仅词条池技能且为属性类）
+	var held_ids: Array = []
+	for uid in _upgrade_stacks.keys():
+		var u: Resource = _find_upgrade_by_id(uid)
+		if u != null and not u.is_effect_upgrade():
+			held_ids.append(uid)
+	if held_ids.is_empty():
+		return false
 	var uid: String = String(held_ids[RandomManager.randi_range(0, held_ids.size() - 1)])
 	var upgrade: Resource = _find_upgrade_by_id(uid)
 	if upgrade == null:
@@ -384,6 +434,143 @@ func _boost_upgrade(upgrade: Resource, amount: int) -> void:
 	## 应用音效
 	if AudioManager:
 		AudioManager.play_2d("upgrade_pick", _get_player().global_position if _get_player() != null else Vector2.ZERO, 0.8)
+
+## ========== 神庙强化碎片消耗（累加计价） ==========
+
+## 获取当前神庙强化的消耗碎片数（累加：第1次2000、第2次2500、第3次3000……）
+## 返回：本次强化需消耗的碎片数
+func get_temple_boost_cost() -> int:
+	return TEMPLE_BOOST_BASE_COST + _temple_boost_count * TEMPLE_BOOST_COST_STEP
+
+## 是否有可强化的技能类词条（"强化技能"选项预检查用）
+## 返回：true=存在已持有的特效技能
+func has_boostable_skill() -> bool:
+	for uid in _upgrade_stacks.keys():
+		var u: Resource = _find_upgrade_by_id(uid)
+		if u != null and u.is_effect_upgrade():
+			return true
+	return false
+
+## 是否有可强化的属性类词条（"强化属性"选项预检查用）
+## 返回：true=存在已持有的属性词条
+func has_boostable_attribute() -> bool:
+	for uid in _upgrade_stacks.keys():
+		var u: Resource = _find_upgrade_by_id(uid)
+		if u != null and not u.is_effect_upgrade():
+			return true
+	return false
+
+## 尝试扣除神庙强化的碎片（累加计价）
+## 规则：扣除成功后才递增计数（失败不计数，神庙保留可重试）
+## 参数：player - 玩家节点
+## 返回：true=扣除成功，false=碎片不足或玩家无效
+func consume_temple_boost(player: Node) -> bool:
+	if player == null or not player.has_method("spend_dream_fragment"):
+		return false
+	var cost: int = get_temple_boost_cost()
+	if not player.spend_dream_fragment(cost):
+		return false
+	_temple_boost_count += 1
+	return true
+
+## ========== 神庙"融合技能" ==========
+
+## 判断当前是否具备融合条件（已持有至少2个技能类词条）
+## 用途：FuseSkillTempleOption 的 can_select 预检查（碎片足够但技能不足时同样置灰）
+## 返回：true=可融合（已持有≥2个特效技能）
+func can_fuse_skills() -> bool:
+	var held_count: int = 0
+	for uid in _upgrade_stacks.keys():
+		var u: Resource = _find_upgrade_by_id(uid)
+		if u != null and u.is_effect_upgrade():
+			held_count += 1
+	return held_count >= 2
+
+## 随机融合两个已拥有的"技能类"词条（神庙"融合技能"选项用）
+## 规则：
+##   1. 从已持有的特效技能中随机选两个不同的 A、B；
+##   2. 融合等级 = max(A等级, B等级)（等级取两个中较高的）；
+##   3. 效果叠加：两个特效都保留生效，且都提升到融合等级；
+##   4. 上限等级依赖融合时取值（不再受 max_stacks 约束，也不会再被"强化技能"强化——
+##      源技能已从词条栈移除，boost_random_skill 不会再选中它们）；
+##   5. 玩家身上只允许一个融合技能：再次融合会先撤销旧融合技能再生成新的。
+## 返回：是否融合成功（已持有特效技能不足2个时返回 false，神庙保留不消失）
+func fuse_random_skills() -> bool:
+	## 收集当前已持有的特效技能（仅词条栈中的，融合技能不在此处）
+	var held_ids: Array = []
+	for uid in _upgrade_stacks.keys():
+		var u: Resource = _find_upgrade_by_id(uid)
+		if u != null and u.is_effect_upgrade():
+			held_ids.append(uid)
+	if held_ids.size() < 2:
+		return false
+
+	## 随机抽两个不同的技能
+	var idx_a: int = RandomManager.randi_range(0, held_ids.size() - 1)
+	var idx_b: int = RandomManager.randi_range(0, held_ids.size() - 2)
+	if idx_b >= idx_a:
+		idx_b += 1
+	var upgrade_a: Resource = _find_upgrade_by_id(String(held_ids[idx_a]))
+	var upgrade_b: Resource = _find_upgrade_by_id(String(held_ids[idx_b]))
+	if upgrade_a == null or upgrade_b == null:
+		return false
+
+	## 融合等级 = 两者较高等级
+	var level_a: int = int(_upgrade_stacks.get(upgrade_a.upgrade_id, 0))
+	var level_b: int = int(_upgrade_stacks.get(upgrade_b.upgrade_id, 0))
+	var fuse_level: int = maxi(level_a, level_b)
+
+	## 撤销旧融合技能（若有），保证玩家身上只有一个融合技能
+	_clear_fused_skill()
+
+	## 记录新融合技能
+	_fused_skill = {
+		"a_id": upgrade_a.upgrade_id,
+		"b_id": upgrade_b.upgrade_id,
+		"level": fuse_level,
+	}
+
+	## 从词条栈移除源技能：释放技能格子，且不再被"强化技能"选中
+	_upgrade_stacks.erase(upgrade_a.upgrade_id)
+	_upgrade_stacks.erase(upgrade_b.upgrade_id)
+
+	## 两个特效都提升到融合等级（效果叠加，等级取高）
+	_set_effect_to_level(upgrade_a, fuse_level)
+	_set_effect_to_level(upgrade_b, fuse_level)
+
+	## 统计与广播
+	RunStats.add_upgrade_taken()
+	upgrades_changed.emit(get_acquired_upgrades())
+	upgrade_applied.emit(upgrade_a)
+	return true
+
+## 撤销当前融合技能：移除其两个源特效实例（第二次融合替换前一个时调用）
+func _clear_fused_skill() -> void:
+	if _fused_skill.is_empty():
+		return
+	var player: Node2D = _get_player()
+	var a: Resource = _find_upgrade_by_id(String(_fused_skill.get("a_id", "")))
+	var b: Resource = _find_upgrade_by_id(String(_fused_skill.get("b_id", "")))
+	if player != null and player.has_method("remove_bullet_effect"):
+		if a != null and a.bullet_effect != null and "effect_id" in a.bullet_effect:
+			player.remove_bullet_effect(a.bullet_effect.effect_id)
+		if b != null and b.bullet_effect != null and "effect_id" in b.bullet_effect:
+			player.remove_bullet_effect(b.bullet_effect.effect_id)
+	_fused_skill = {}
+
+## 将指定特效实例提升到目标等级（融合技能用）
+## 参数：upgrade - 源技能词条；target_level - 目标等级（融合等级）
+func _set_effect_to_level(upgrade: Resource, target_level: int) -> void:
+	if upgrade == null or upgrade.bullet_effect == null:
+		return
+	var player: Node2D = _get_player()
+	if player == null or not player.has_method("set_bullet_effect_level"):
+		return
+	player.set_bullet_effect_level(upgrade.bullet_effect.effect_id, target_level)
+
+## 查询当前融合技能信息（供 HUD/状态面板展示，空字典=无融合技能）
+func get_fused_skill() -> Dictionary:
+	return _fused_skill
 
 ## ========== 技能种类上限与随机替换（新增需求） ==========
 

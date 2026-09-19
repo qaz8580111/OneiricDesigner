@@ -26,10 +26,39 @@ extends Resource
 ## 是否赌博式选项（true=赌博：结果随机可能好可能差；false=稳妥：小幅度固定强化）
 @export var is_gamble: bool = false
 
-## ========== 虚方法（子类必须重写） ==========
+## ========== 虚方法（子类按需重写） ==========
 
 ## 应用选项效果（玩家选定后由 Temple 调用）
 ## 参数：player - 玩家节点
 ## 返回：是否应用成功（false=应用失败，神庙保留不消失）
 func apply(_player: Node) -> bool:
+	return false
+
+## 获取本次选择消耗的梦境碎片（神庙面板价格展示与置灰判定共用）
+## 参数：player - 玩家节点（部分选项费用可能随状态变化，如累加计价）
+## 返回：需消耗的碎片数，默认0=无消耗
+func get_cost(_player: Node) -> int:
+	return 0
+
+## 判断玩家是否支付得起本次选择（用于按钮置灰）
+## 参数：player - 玩家节点（可能为 null，子类/本类需自行防御）
+## 返回：true=碎片充足（或无需消耗）
+func is_affordable(player: Node) -> bool:
+	var cost: int = get_cost(player)
+	if cost <= 0:
+		return true
+	if player == null or not ("dream_fragment" in player):
+		return false
+	return int(player.get("dream_fragment")) >= cost
+
+## 判断该选项当前是否可选（TemplePanel 据此置灰不可选项：仍显示但不可确认）
+## 默认仅看支付能力；带额外前置条件的子类（如"融合技能"还需≥2个技能）应重写
+## 参数：player - 玩家节点
+## 返回：true=可选，false=置灰
+func can_select(player: Node) -> bool:
+	return is_affordable(player)
+
+## 是否为"融合技能"选项（TemplePanel 据此渲染金色边框与"融"字图标）
+## 返回：默认 false，融合技能子类重写为 true
+func is_fuse_option() -> bool:
 	return false

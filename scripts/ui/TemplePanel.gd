@@ -1,14 +1,16 @@
 ## TemplePanel.gd - 神庙选项面板（紧凑底栏样式，与升级三选一同款横向排版）
-## 职责：展示神庙的4个选项（随机技能/随机护盾/强化伤害/生命上限），玩家选定后发信号
+## 职责：展示神庙的4个选项，玩家选定后发信号；支持返回键取消且不消耗神庙
 ## 设计意图：
 ##   1. 与 LevelUpPanel 同风格：屏幕底部居中小面板，选项横向一行排开，无全屏蒙层
-##   2. 鼠标点击/数字键1-4/手柄LT·RT扳机左右+D-Pad备用+A选择；描述走tooltip减小占用
-##   3. 赌博式选项带"赌"角标，稳妥式带"稳"角标，玩家可预判风险
+##   2. 鼠标点击/数字键1-4/手柄LT·RT扳机左右+D-Pad备用+A选择；描述与碎片价格走tooltip
+##   3. 赌博式选项带"赌"角标，稳妥式带"稳"角标；融合技能显示"融"字+金色边框
+##   4. 碎片不足/前置条件不满足的选项置灰（disabled）但保留显示，不可选中确认
 ## 输入架构：选择输入全部经InputManager网关（TEMPLE_CHOICE上下文放行game_choice_prev/next=LT/RT、
-##           ui_left/right/confirm）；
+##           ui_left/right/confirm/cancel）；
 ##           按钮FOCUS_NONE，选中态由_selected_index统一管理，避免内置焦点双重移动
-## 数据流：Temple.interact() → 创建面板 → setup(options)
+## 数据流：Temple.interact() → 创建面板 → setup(options, player)
 ##         → 玩家选定 option_chosen 信号 → Temple 应用效果并消失
+##         → 玩家按返回键 option_cancelled 信号 → Temple 关闭面板且神庙保留
 extends Control
 
 ## ========== 信号定义 ==========
@@ -17,15 +19,19 @@ extends Control
 ## 参数：option - 被选中的神庙选项资源
 signal option_chosen(option: Resource)
 
+## 玩家按返回键取消信号（手柄B/键盘ESC）：关闭面板、神庙不消失
+signal option_cancelled()
+
 ## ========== 成员变量 ==========
 
 var _options: Array = []          ## 全部选项（TempleOption资源）
-var _buttons: Array[Button] = []  ## 选项按钮列表（动画用）
+var _buttons: Array[Button] = []  ## 选项按钮列表（动画/置灰用）
 var _vbox: VBoxContainer = null   ## 内部垂直容器（标题在上，选项行在下）
 var _hbox: HBoxContainer = null   ## 选项水平容器（4个选项一行排开）
 var _locked: bool = false         ## 防重复选择锁
+var _player: Node = null          ## 交互玩家（用于价格/支付状态判定）
 
-## 当前选中选项索引（鼠标悬停/D-Pad上下共用一个选中态，A键确认）
+## 当前选中选项索引（鼠标悬停/D-Pad左右共用一个选中态，A键确认）
 var _selected_index: int = -1
 
 ## ========== 选中态视觉常量 ==========
@@ -38,6 +44,10 @@ const NORMAL_MODULATE: Color = Color.WHITE
 const SELECTED_SCALE: Vector2 = Vector2(1.05, 1.05)
 ## 选中态切换动画时长（秒）
 const SELECT_TWEEN_TIME: float = 0.06
+## 置灰（不可选）选项的固定灰态调制
+const DISABLED_MODULATE: Color = Color(0.55, 0.55, 0.55, 0.65)
+## 融合技能的金色边框/文字颜色
+const FUSE_GOLD: Color = Color(1.0, 0.85, 0.2, 1.0)
 
 ## ========== 生命周期方法 ==========
 
@@ -97,20 +107,24 @@ func _ready() -> void:
 	var tween: Tween = create_tween()
 	tween.tween_property(panel_bg, "modulate:a", 1.0, 0.15)
 
-## _process() - 手柄LT/RT扳机(或D-Pad/键盘左右)导航与确认（经InputManager网关轮询消费）
+## _process() - 手柄LT/RT扳机(或D-Pad/键盘左右)导航、确认与取消（经InputManager网关轮询消费）
 ## 面板为横向一行，用game_choice_prev/next=LT/RT、键盘Q/E优先，ui_left/ui_right为备用
 func _process(_delta: float) -> void:
 	## 已锁定选择后不响应，防重复触发
 	if _locked or _buttons.is_empty():
 		return
-	## 左移一项：手柄LT扳机 / 键盘Q / 备用D-Pad左·键盘左方向键（边界夹取不循环）
+	## 返回键（手柄B/键盘ESC）：取消本次神庙选择，神庙保留不消失
+	if InputManager.is_action_just_pressed_safe("ui_cancel"):
+		_cancel()
+		return
+	## 左移一项：手柄LT扳机 / 键盘Q / 备用D-Pad左·键盘左方向键（边界夹取不循环，自动跳过置灰项）
 	if InputManager.is_action_just_pressed_safe("game_choice_prev") \
 			or InputManager.is_action_just_pressed_safe("ui_left"):
-		_set_selection(_selected_index - 1)
+		_move_selection(-1)
 	## 右移一项：手柄RT扳机 / 键盘E / 备用D-Pad右·键盘右方向键
 	elif InputManager.is_action_just_pressed_safe("game_choice_next") \
 			or InputManager.is_action_just_pressed_safe("ui_right"):
-		_set_selection(_selected_index + 1)
+		_move_selection(1)
 	## A键/Space/Enter：确认当前选中项
 	if InputManager.is_action_just_pressed_safe("ui_confirm"):
 		_choose(_selected_index)
@@ -133,18 +147,19 @@ func _unhandled_input(event: InputEvent) -> void:
 ## ========== 对外接口 ==========
 
 ## 初始化面板显示（Temple创建面板后调用）
-## 参数：options - 神庙选项数组（TempleOption资源）
-func setup(options: Array) -> void:
+## 参数：options - 神庙选项数组（TempleOption资源）；player - 交互玩家（用于价格/置灰判定）
+func setup(options: Array, player: Node = null) -> void:
 	_options = options
+	_player = player
 	_buttons.clear()
-	## 选中索引置-1：构建完成后_set_selection(0)才会真正刷新高亮（同索引会被去重跳过）
+	## 选中索引置-1：构建完成后_select_first_selectable才会真正刷新高亮（同索引会被去重跳过）
 	_selected_index = -1
 	for i in range(options.size()):
 		var btn: Button = _create_option_button(options[i], i)
 		_hbox.add_child(btn)
 		_buttons.append(btn)
-	## 默认高亮第一项（Temple.push_context自带0.2s屏蔽期，已替输入防抖，无需额外动画锁）
-	_set_selection(0)
+	## 默认高亮第一个可选选项（置灰项自动跳过；Temple.push_context自带0.2s屏蔽期已替输入防抖）
+	_select_first_selectable()
 
 ## ========== 内部构建方法 ==========
 
@@ -152,29 +167,42 @@ func setup(options: Array) -> void:
 ## 参数：option - 神庙选项资源, index - 序号（数字键提示用）
 func _create_option_button(option: Resource, index: int) -> Button:
 	var btn: Button = Button.new()
-	var gamble_tag: String = "赌" if option.is_gamble else "稳"
 	var key_hint: String = str(index + 1)
-	btn.text = "[%s] %s %s" % [key_hint, gamble_tag, option.display_name]
-	## 描述走tooltip（减小面板占用）
-	btn.tooltip_text = option.description
+	var cost: int = option.get_cost(_player)
+	var cost_text: String = "  %d碎片" % cost if cost > 0 else ""
+	var is_fuse: bool = option.is_fuse_option()
+
+	## 融合技能：显示"融"字图标+金色边框；普通选项：赌/稳角标
+	if is_fuse:
+		btn.text = "[%s] 融 %s%s" % [key_hint, option.display_name, cost_text]
+	else:
+		var gamble_tag: String = "赌" if option.is_gamble else "稳"
+		btn.text = "[%s] %s %s%s" % [key_hint, gamble_tag, option.display_name, cost_text]
+
+	## 描述与碎片价格走tooltip（减小面板占用）
+	var tip: String = option.description
+	if cost > 0:
+		tip += "\n消耗：%d 梦境碎片" % cost
+	btn.tooltip_text = tip
 	btn.custom_minimum_size = Vector2(150, 32)
 	btn.focus_mode = Control.FOCUS_NONE
 
-	## 按钮样式：深色底 + 选项主题色边框
+	## 按钮样式：深色底 + 选项主题色边框（融合技能=金色粗边框）
 	var sb: StyleBoxFlat = StyleBoxFlat.new()
 	sb.bg_color = Color(0.1, 0.1, 0.16, 0.9)
-	sb.border_width_top = 1
-	sb.border_width_bottom = 1
-	sb.border_width_left = 1
-	sb.border_width_right = 1
-	sb.border_color = option.option_color
+	var border_w: int = 2 if is_fuse else 1
+	sb.border_width_top = border_w
+	sb.border_width_bottom = border_w
+	sb.border_width_left = border_w
+	sb.border_width_right = border_w
+	sb.border_color = FUSE_GOLD if is_fuse else option.option_color
 	sb.corner_radius_top_left = 4
 	sb.corner_radius_top_right = 4
 	sb.corner_radius_bottom_left = 4
 	sb.corner_radius_bottom_right = 4
 	btn.add_theme_stylebox_override("normal", sb)
 
-	## 悬停样式：底色提亮
+	## 悬停样式：底色提亮（保留原边框色）
 	var sb_hover: StyleBoxFlat = sb.duplicate()
 	sb_hover.bg_color = Color(0.18, 0.18, 0.28, 0.95)
 	btn.add_theme_stylebox_override("hover", sb_hover)
@@ -184,10 +212,20 @@ func _create_option_button(option: Resource, index: int) -> Button:
 	sb_pressed.bg_color = Color(0.24, 0.24, 0.36, 1.0)
 	btn.add_theme_stylebox_override("pressed", sb_pressed)
 
-	## 字体颜色跟随选项主题色
-	btn.add_theme_color_override("font_color", option.option_color)
+	## 置灰样式：碎片不足/前置条件不满足时灰底+灰边框，配合 disabled=true 使用
+	var sb_disabled: StyleBoxFlat = sb.duplicate()
+	sb_disabled.bg_color = Color(0.12, 0.12, 0.14, 0.6)
+	sb_disabled.border_color = Color(0.4, 0.4, 0.4, 0.5)
+	btn.add_theme_stylebox_override("disabled", sb_disabled)
+
+	## 字体颜色跟随选项主题色（融合技能=金色）
+	btn.add_theme_color_override("font_color", FUSE_GOLD if is_fuse else option.option_color)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.add_theme_color_override("font_disabled_color", Color(0.55, 0.55, 0.55, 0.7))
 	btn.add_theme_font_size_override("font_size", 13)
+
+	## 不可选（碎片不足/前置条件不满足）→ 置灰禁用；点击/确认均被拦截
+	btn.disabled = not option.can_select(_player)
 
 	## 点击选择
 	btn.pressed.connect(_choose.bind(index))
@@ -197,21 +235,58 @@ func _create_option_button(option: Resource, index: int) -> Button:
 	btn.mouse_entered.connect(_set_selection.bind(index))
 	return btn
 
-## 设置当前选中选项（鼠标悬停与D-Pad导航的唯一入口）
-## 参数：index - 目标索引，自动夹取到[0,选项数)边界，不循环
+## 判断指定索引是否可选（未置灰）
+func _is_selectable(index: int) -> bool:
+	return index >= 0 and index < _buttons.size() and not _buttons[index].disabled
+
+## 鼠标悬停入口：仅可选选项才更新选中索引（置灰项不可悬停选中）
 func _set_selection(index: int) -> void:
+	if not _is_selectable(index):
+		return
+	_set_selection_absolute(index)
+
+## 键盘/手柄导航：按方向移动到下一个可选选项（边界夹取不循环，自动跳过置灰项）
+## 参数：direction - -1左移 / +1右移
+func _move_selection(direction: int) -> void:
 	if _buttons.is_empty():
 		return
-	var new_index: int = clampi(index, 0, _buttons.size() - 1)
-	if new_index == _selected_index:
+	var idx: int = _selected_index if _selected_index >= 0 else 0
+	var guard: int = 0
+	while guard < _buttons.size():
+		idx += direction
+		## 到达边界无可选：保持原选中不变
+		if idx < 0 or idx >= _buttons.size():
+			return
+		if _is_selectable(idx):
+			_set_selection_absolute(idx)
+			return
+		guard += 1
+
+## 设置当前选中选项（绝对索引，同索引去重跳过）
+func _set_selection_absolute(index: int) -> void:
+	if index < 0 or index >= _buttons.size():
 		return
-	_selected_index = new_index
+	if index == _selected_index:
+		return
+	_selected_index = index
 	_refresh_selection_visual()
 
-## 刷新全部选项的选中态视觉（选中=紫金提亮+放大，其余=正常）
+## 默认高亮第一个可选选项（setup构建完成后调用，自动跳过置灰项）
+func _select_first_selectable() -> void:
+	for i in range(_buttons.size()):
+		if _is_selectable(i):
+			_set_selection_absolute(i)
+			return
+
+## 刷新全部选项的选中态视觉（选中=紫金提亮+放大，其余=正常；置灰项固定灰态）
 func _refresh_selection_visual() -> void:
 	for i in range(_buttons.size()):
 		var btn: Button = _buttons[i]
+		## 置灰项不参与高亮动画，固定灰态
+		if btn.disabled:
+			btn.modulate = DISABLED_MODULATE
+			btn.scale = Vector2.ONE
+			continue
 		var is_selected: bool = i == _selected_index
 		var target_modulate: Color = SELECTED_MODULATE if is_selected else NORMAL_MODULATE
 		var target_scale: Vector2 = SELECTED_SCALE if is_selected else Vector2.ONE
@@ -221,12 +296,25 @@ func _refresh_selection_visual() -> void:
 		t.tween_property(btn, "modulate", target_modulate, SELECT_TWEEN_TIME)
 		t.tween_property(btn, "scale", target_scale, SELECT_TWEEN_TIME).set_ease(Tween.EASE_OUT)
 
-## 选定选项
+## 选定选项（统一入口：鼠标点击/数字键/导航后A键确认）
 func _choose(index: int) -> void:
 	if _locked or index < 0 or index >= _options.size():
+		return
+	## 置灰项不可选择（碎片不足/前置条件不满足）
+	if _buttons[index].disabled:
 		return
 	_locked = true
 	var chosen: Resource = _options[index]
 	if AudioManager:
 		AudioManager.play("ui_click", 0.7)
 	option_chosen.emit(chosen)
+
+## 取消本次神庙选择（手柄B/键盘ESC）
+## 与 _choose 共用 _locked 防重入；取消不消耗神庙，由 Temple 负责关闭面板并保留神庙
+func _cancel() -> void:
+	if _locked:
+		return
+	_locked = true
+	if AudioManager:
+		AudioManager.play("ui_click", 0.7)
+	option_cancelled.emit()

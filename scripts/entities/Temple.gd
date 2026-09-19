@@ -149,7 +149,7 @@ func interact(player: Node) -> void:
 		return
 
 	_interacted = true
-	_open_panel()
+	_open_panel(player)
 
 ## ========== 内部方法 ==========
 
@@ -189,7 +189,8 @@ func _load_options() -> void:
 		push_warning("Temple: 神庙选项目录为空，神庙将无法提供任何选项")
 
 ## 打开选项面板（专用CanvasLayer隔离相机，与升级面板同方案）
-func _open_panel() -> void:
+## 参数：player - 交互玩家节点（传给面板用于价格显示与置灰判定）
+func _open_panel(player: Node = null) -> void:
 	## 创建CanvasLayer挂到root
 	_overlay_layer = CanvasLayer.new()
 	_overlay_layer.name = "TempleOverlay"
@@ -199,21 +200,23 @@ func _open_panel() -> void:
 	_overlay_layer.process_mode = Node.PROCESS_MODE_ALWAYS
 	get_tree().root.add_child(_overlay_layer)
 
-	## 创建面板
+	## 创建面板（全部选项均显示，碎片不足/前置不满足的项由面板置灰而非隐藏）
 	_panel = TEMPLE_PANEL_SCRIPT.new()
 	_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	_overlay_layer.add_child(_panel)
-	_panel.setup(_options)
+	_panel.setup(_options, player)
 
 	## 玩家选定选项
 	_panel.option_chosen.connect(_on_option_chosen)
+	## 玩家按返回键取消：关闭面板且神庙不消失
+	_panel.option_cancelled.connect(_on_option_cancelled)
 
 	## 暂停战斗（玩家可安心选择；状态机守卫保证只在PLAYING时生效）
 	if GameManager and GameManager.is_playing():
 		GameManager.pause_game()
 		_paused_by_temple = true
 
-	## 注册神庙选择上下文：暂停后移动/射击自然停止，额外放行D-Pad/方向键+确认；
+	## 注册神庙选择上下文：暂停后移动/射击自然停止，额外放行D-Pad/方向键+确认+取消；
 	## push自带0.2s屏蔽期，防止按E交互的同一次按键立刻选中选项（A/E/Space存在键位复用）
 	InputManager.push_context("TEMPLE_CHOICE")
 
@@ -236,6 +239,13 @@ func _on_option_chosen(option: Resource) -> void:
 	## 应用失败（如词条池为空）：神庙保留，可重新交互
 	else:
 		_interacted = false
+
+## 玩家按返回键取消选择：关闭面板、恢复战斗，神庙保留可再次交互
+## 语义：取消不消耗碎片、不应用选项，神庙不消失（与"选择且生效后才消失"一致）
+func _on_option_cancelled() -> void:
+	_close_panel()
+	## 重置交互状态：玩家离开后再靠近仍可再次进入同一座神庙
+	_interacted = false
 
 ## 被新神庙替换：未进入的旧神庙立即消散（全局唯一规则）
 ## 已进入/面板打开中的神庙不消散（此时游戏暂停，正常流程不会有新神庙生成，双保险）
