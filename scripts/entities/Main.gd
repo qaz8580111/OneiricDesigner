@@ -55,6 +55,11 @@ const DEATH_SLOWMO_SCALE: float = 0.2
 ## 慢动作持续时间（秒，按真实时间计算而非 delta）
 const DEATH_SLOWMO_DURATION: float = 0.5
 
+## ---------- 通关结算延时 ----------
+## 击败终极 BOSS 后，先让 StageDirector 的庆祝横幅播放片刻再弹出结算面板，
+## 避免"横幅刚出现就被面板盖住"的突兀感（横幅时长 6 秒，此处取 4 秒衔接）
+const VICTORY_PANEL_DELAY: float = 4.0
+
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
 ## UI栈容器，用于显示菜单、设置、HUD等UI界面
@@ -115,6 +120,12 @@ func _ready() -> void:
 		GameManager.game_paused.connect(_on_game_paused)
 		## 游戏恢复信号：当游戏恢复时触发回调
 		GameManager.game_resumed.connect(_on_game_resumed)
+
+	## 连接阶段导演的"本局通关"信号（击败终极 BOSS 后触发通关结算流程）
+	## 注意：终极关卡内不会走 game_ended（那是玩家死亡的专用路径），
+	##       通关与死亡是两条独立收尾链路，此处必须单独监听，否则杀完 BOSS 后无任何后续交互
+	if StageDirector:
+		StageDirector.run_completed.connect(_on_run_completed)
 
 	## 显示主菜单（游戏启动后进入主菜单）
 	_show_main_menu()
@@ -189,8 +200,9 @@ func _show_pause_menu() -> void:
 	ui_stack.add_child(active_ui)
 
 ## 显示游戏结束结算面板（死亡黑屏过渡完成后调用）
+## 参数：victory - true=通关结算（击败终极 BOSS），false=死亡结算（默认）
 ## 设计意图：roguelike的"再来一局"驱动力——结算面板量化展示本局成果
-func _show_game_over_panel() -> void:
+func _show_game_over_panel(victory: bool = false) -> void:
 	## 清除当前所有UI界面（HUD已在玩家死亡时自行隐藏，会随_clear_ui保留但不可见）
 	_clear_ui()
 	## 设置当前屏幕状态为GAME_OVER
@@ -199,6 +211,9 @@ func _show_game_over_panel() -> void:
 	InputManager.reset_context("SETTINGS")
 	## 用脚本创建结算面板（纯代码UI，无.tscn）
 	active_ui = GAME_OVER_PANEL_SCRIPT.new()
+	## 通关/死亡共用同一面板，仅切换标题与配色
+	## 时序关键：必须在 add_child 之前写入 victory —— 面板的 _ready() 会在入树瞬间构建UI
+	active_ui.victory = victory
 	## 面板必须ALWAYS处理模式（死亡瞬间场景树可能仍处于暂停）
 	active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
 	## 连接结算面板信号：再来一局 / 返回主菜单
@@ -392,6 +407,35 @@ func _on_game_ended() -> void:
 	_is_death_slowmo = true
 	_slowmo_start_msec = Time.get_ticks_msec()
 	## 先不启动死亡渐隐，等慢动作结束后再启动
+
+## 本局通关回调（响应 StageDirector.run_completed：终极 BOSS 已被击败）
+## 流程：置屏幕状态 → 立即清掉遗留弹幕 → 等待庆祝横幅播完 → 弹出通关结算面板
+## 与死亡路径的区别：死亡要慢动作+黑屏渐隐（因为玩家没看到自己怎么死的），
+##                  通关是正向反馈，直接亮起结算面板即可，不做黑屏处理
+func _on_run_completed() -> void:
+	## 仅在本局游戏进行中响应（防止主菜单/结算态下被旧局残留信号误触发）
+	if current_screen != Screen.GAME:
+		return
+	## 立刻切到 GAME_OVER 态：等待期间 ESC 不再能呼出暂停菜单（暂停菜单仅 GAME 态可开）
+	current_screen = Screen.GAME_OVER
+	## 立即清掉 BOSS 遗留的弹幕与追踪导弹：终极关卡内 spawning_enabled 已关闭，清场后不再有新敌人
+	## 必须"立即清"而非等横幅播完再清——追踪导弹存活时长可达 10 秒，若留到庆祝期间，
+	## 玩家很可能被残余导弹打死，收尾从"通关"变成"死亡"，体验割裂
+	## 用 call_deferred：本回调由 Boss 击杀链触发，可能正处在物理回调中，
+	## 直接改场景树会踩项目已知的"物理回调中改树"问题
+	if game_world != null and is_instance_valid(game_world) \
+			and game_world.has_method("clear_all"):
+		game_world.call_deferred("clear_all")
+	## 等待庆祝横幅展示（create_timer 默认 process_always，不受 time_scale 影响）
+	await get_tree().create_timer(VICTORY_PANEL_DELAY).timeout
+	## 等待期间可能已重开或返回主菜单（current_screen 被改写），此时放弃本次结算
+	if current_screen != Screen.GAME_OVER:
+		return
+	## 隐藏游戏HUD（死亡路径由玩家死亡逻辑自行隐藏，通关路径无此环节，此处手动收起）
+	if game_hud != null:
+		game_hud.visible = false
+	## 弹出通关结算面板（victory=true 切换标题为通关文案）
+	_show_game_over_panel(true)
 
 ## 游戏暂停信号回调（响应GameManager.game_paused）
 func _on_game_paused() -> void:

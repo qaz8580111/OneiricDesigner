@@ -6,6 +6,8 @@
 ##      让玩家直观看到成长（击杀/等级/难度/词条数），激发破纪录欲望
 ##   2. 数据来自RunStats单例（每局自动重置），面板只负责展示，不持有状态
 ##   3. 支持R键快捷重开，减少重开摩擦
+##   4. 同一面板复用两种收尾：玩家死亡（victory=false）与击败终极BOSS通关（victory=true），
+##      差异仅在标题文案与配色——两条收尾链路的统计数据、按钮行为完全一致
 ## 数据流：RunStats单例（各系统上报）→ _build_stats_text() → 结算展示；
 ##        restart_requested / back_to_menu_requested → Main.gd 监听后执行重开或切换主菜单
 extends Control
@@ -19,6 +21,11 @@ signal restart_requested
 signal back_to_menu_requested
 
 ## ========== 成员变量 ==========
+
+## 是否为通关结算（由 Main.gd 在 add_child 之前赋值）
+## false = 玩家死亡结算（默认，红色"梦境终结"）；true = 击败终极 BOSS 通关（金色"通关"）
+## 时序约束：必须在入树前赋值——_ready() 会立即据此构建标题与配色
+var victory: bool = false
 
 ## 统计文本标签引用（R键重开时需要判断面板是否已显示）
 var _stats_label: Label = null
@@ -82,10 +89,15 @@ func _ready() -> void:
 
 	## ---------- 标题 ----------
 	var title: Label = Label.new()
-	title.text = "—— 梦境终结 ——"
+	## 通关/死亡两种结算共用面板：通关用金色庆祝文案，死亡用红色哀悼文案
+	if victory:
+		title.text = "★ 梦境终结 · 通关 ★"
+		title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
+	else:
+		title.text = "—— 梦境终结 ——"
+		## 红色标题呼应"死亡"主题
+		title.add_theme_color_override("font_color", Color(0.95, 0.35, 0.35))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	## 红色标题呼应"死亡"主题
-	title.add_theme_color_override("font_color", Color(0.95, 0.35, 0.35))
 	vbox.add_child(title)
 
 	## ---------- 统计文本 ----------

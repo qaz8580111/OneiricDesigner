@@ -5,7 +5,7 @@
 ## 交互方式：玩家靠近后按 E（GameWorld 统一处理 E 键，优先级神庙 > 商店 > 拾取物）→ 调用 interact(player)
 ## 进入规则：进入商店后游戏暂停（GameManager.pause_game），关闭面板后恢复
 ## 商品规则：每 60 秒随机刷新一次 3 件商品，商品全部落在现有技能/装备体系内
-##          （属性词条 / 特效词条 / 装备护盾 / 血包），价格体系见 .trae/docs 商品清单
+##          （属性词条 / 特效词条 / 装备护盾 / 血包），价格体系见 docs 商品清单
 ## 视觉方案：_draw() 程序化绘制（柜台 + 顶棚 + 发光宝石，脉冲呼吸），与主题皮肤无关
 ## 扩展性：商品生成集中在 _roll_products/_generate_product，新增商品种类只需加一个填充分支
 extends Area2D
@@ -32,7 +32,7 @@ const REFRESH_INTERVAL: float = 60.0
 ## 每次刷新的商品数量（横向 3 件，与升级三选一数量一致，面板可完整排开）
 const PRODUCT_COUNT: int = 3
 
-## ---------- 价格体系（梦境碎片，与 .trae/docs 商品清单保持一致） ----------
+## ---------- 价格体系（梦境碎片，与 docs 商品清单保持一致） ----------
 ## 属性类词条：按稀有度分档
 const PRICE_ATTR_COMMON: int = 30
 const PRICE_ATTR_RARE: int = 60

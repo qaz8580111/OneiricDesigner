@@ -13,13 +13,16 @@
 ##      - Enemy.killed/damaged        → 后置通知：监听 Boss 死亡推进阶段、受击驱动外挂血条
 ##   3. 装饰模式：Boss 复用 Enemy.tscn 实例 + 数据深拷贝副本（绝不污染共享 .tres），
 ##      头顶血条/屏幕血条/阶段字幕均为切面外挂节点，随 Boss 销毁自动清理
-## 进度模型（总进度把控到阶段 10）：
-##   阶段 N 整点（N*120 秒）  → 怪潮事件：一波"等级+1"的怪物
-##   阶段 N.5（N*120+60 秒） → 阶段 N 守门 Boss（阶段 10.5 为关底 Boss"梦境之主"）
+## 进度模型（总进度把控到阶段 10，之后进入终极关卡）：
+##   阶段 N 整点（N*105 秒）    → 怪潮事件：一波"等级+1"的怪物
+##   阶段 N.5（N*105+52.5 秒） → 阶段 N 守门 Boss（阶段 10.5 为关底 Boss"梦境之主"）
 ##   事件严格串行：上一个事件完结（怪潮全灭或超时兜底 / Boss 被击杀）后，才触发下一个已到点的事件
-##   击杀关底 Boss → 通关横幅 → 无尽模式（游戏照常继续，但不再触发任何阶段事件）
+##   击杀「梦境之主」→ 终极关卡：清空全场敌人 + 停止常规刷怪 + 生成终极 BOSS「梦境根源」
+##   击杀终极 BOSS → 本局通关（emit run_completed）
+## 节奏目标：阶段 10.5「梦境之主」在 1102.5 秒（≈18.4 分钟）降临，
+##          整局（不含终极 BOSS 战）落在 15~20 分钟区间，与 DifficultyManager 每级 110 秒同档
 ## 数据流：本类自计时 → 时间轴事件表逐个触发 → 怪潮走业务刷怪链路 / Boss 由切面自建
-##         → Boss 死亡信号回调 → 推进事件索引 → …… → 终局通关
+##         → Boss 死亡信号回调 → 推进事件索引 → …… → 终极关卡 → 终局通关
 extends Node
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========
@@ -33,6 +36,12 @@ const EnemyDataClass = preload("res://scripts/resources/enemy/EnemyData.gd")
 ## 掉落物数据资源类：配置 Boss 丰厚掉落
 const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
 
+## 子弹数据资源类：终极 BOSS 普攻强化配置（伤害/速度提升）
+const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
+
+## 怪物技能资源类：终极 BOSS 三技能配置（天女散花/飞机轰炸/追踪导弹）
+const MonsterSkillClass = preload("res://scripts/resources/enemy/MonsterSkill.gd")
+
 ## 残影/粒子节点类（对象池管理）：Boss 出场特效复用，遵守性能约定
 const TrailGhostClass = preload("res://scripts/entities/TrailGhost.gd")
 
@@ -41,10 +50,11 @@ const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
 
 ## ========== 调参常量（阶段曲线的核心配置，集中管理便于平衡调整） ==========
 
-## 每个阶段的时长（秒）：阶段 N 事件在 N*210 秒，阶段 N.5 在 N*210+105 秒
-## 旧值120s→210s：原节奏20分钟通关，现在约35分钟，让玩家有充分的循序渐进体验
-## 即：210s 阶段1怪潮 → 315s 阶段1Boss → 420s 阶段2怪潮 → 525s 阶段2Boss → ……
-const STAGE_INTERVAL: float = 210.0
+## 每个阶段的时长（秒）：阶段 N 事件在 N*105 秒，阶段 N.5 在 N*105+52.5 秒
+## 数值依据：DifficultyManager 每级 110 秒，本切面每阶段 105 秒，两者同档推进（等级≈阶段）
+## 节奏结果：阶段 10 怪潮 1050 秒 → 关底 Boss「梦境之主」1102.5 秒（≈18.4 分钟），
+##          整局（不含终极 BOSS 战）落在 15~20 分钟区间
+const STAGE_INTERVAL: float = 105.0
 
 ## 总进度上限：把控到阶段 10（阶段 10.5 为关底 Boss）
 const MAX_STAGE: int = 10
@@ -57,6 +67,13 @@ const BOSS_SPAWN_DISTANCE: float = 700.0
 
 ## 波次怪存活检查节流（秒）：每 0.5 秒查一次快照存活数，避免每帧遍历
 const WAVE_CHECK_INTERVAL: float = 0.5
+
+## 终极 BOSS 碰撞判定半径（像素）：视觉半径为皮肤 150x150 的一半（75），
+## 判定略小于视觉，避免"擦边"就被判中，手感更公平
+const ULTIMATE_BOSS_COLLISION_RADIUS: float = 68.0
+
+## 终极 BOSS 受击盒（Hitbox）半径：比物理体再小 2px，接触伤害判定稍收紧
+const ULTIMATE_BOSS_HITBOX_RADIUS: float = 66.0
 
 ## ========== 阶段事件类型枚举 ==========
 
@@ -71,7 +88,10 @@ enum StageEventType {
 ## 阶段事件触发信号：参数为事件类型与所属阶段
 signal stage_event_fired(event_type: int, stage: int)
 
-## 通关信号：关底 Boss 被击杀时发出（进入无尽模式）
+## 终极关卡开启信号：关底 Boss「梦境之主」被击杀、全场清空并停止常规刷怪后发出
+signal ultimate_stage_started
+
+## 通关信号：终极 BOSS「梦境根源」被击杀时发出（本局通关）
 signal run_completed
 
 ## ========== 运行时状态（每局由 game_started 重置） ==========
@@ -85,7 +105,7 @@ var _timeline: Array = []
 ## 下一个待触发的事件索引（时间轴游标：触发成功才前进）
 var _event_index: int = 0
 
-## 是否已通关（无尽模式标志：true 后不再触发任何阶段事件）
+## 是否已进入终局（终极关卡标志：true 后时间轴退役，不再触发任何阶段事件）
 var _run_completed: bool = false
 
 ## 当前活动事件的类型（-1 = 无活动事件，即上一个事件已完结、可触发下一个）
@@ -152,7 +172,7 @@ func _process(delta: float) -> void:
 	## 门禁 1：只在游戏进行中推进（暂停/菜单/结算时时间轴冻结，与难度曲线同拍）
 	if not GameManager.is_playing():
 		return
-	## 门禁 2：已通关进入无尽模式 → 时间轴退役，游戏完全交还业务系统
+	## 门禁 2：已进入终极关卡 → 时间轴退役，本局进度由终极 BOSS 战独立接管
 	if _run_completed:
 		return
 
@@ -168,7 +188,7 @@ func _process(delta: float) -> void:
 ## ========== 事件时间轴构建 ==========
 
 ## 构建本局事件时间轴（每局 game_started 时重建）
-## 时间轴模型：阶段 N 怪潮在 N*120 秒 → 阶段 N 守门 Boss 在 N*120+60 秒 → ……
+## 时间轴模型：阶段 N 怪潮在 N*105 秒 → 阶段 N 守门 Boss 在 N*105+52.5 秒 → ……
 ##             阶段 10 怪潮后，10.5 位置为关底 Boss"梦境之主"
 ## 返回：按时间升序排列的事件字典数组 [{time, type, stage}, ...]
 func _build_timeline() -> Array:
@@ -264,7 +284,11 @@ func _fire_mob_wave(ev: Dictionary) -> bool:
 	var stage: int = int(ev.stage)
 
 	## ---- before：临时抬升难度等级 ----
-	DifficultyManager.level += 1
+	## 封顶守卫：难度已达上限时不再抬升（否则会在满级瞬间越界到 11 级，破坏 10 级封顶约定）
+	var level_boosted: bool = false
+	if DifficultyManager.level < DifficultyManager.MAX_LEVEL:
+		DifficultyManager.level += 1
+		level_boosted = true
 
 	## ---- around：复用业务刷怪链路 ----
 	## 快照刷怪前 enemy 组（用于差集提取"这波怪"）
@@ -280,8 +304,9 @@ func _fire_mob_wave(ev: Dictionary) -> bool:
 			break
 		world._spawn_enemy()
 
-	## ---- after：还原难度等级 ----
-	DifficultyManager.level -= 1
+	## ---- after：还原难度等级（仅还原本次真正抬升过的那一级） ----
+	if level_boosted:
+		DifficultyManager.level -= 1
 
 	## ---- 后置：差集提取波次怪快照，启动完结追踪 ----
 	_wave_enemies.clear()
@@ -516,18 +541,239 @@ func _on_boss_killed(boss: Node, is_final: bool) -> void:
 	_hide_boss_hud()
 
 	if is_final:
-		## ---- 通关：进入无尽模式 ----
-		_run_completed = true
-		_show_banner("★ 梦境之主已被击败 ★\n进入无尽模式 · 梦境永不完结", Color(1.0, 0.85, 0.3), 5.0)
-		_update_stage_label("无尽模式")
+		## ---- 关底 Boss 已倒：无缝进入终极关卡（清场 + 停刷怪 + 生成终极 BOSS） ----
+		_show_banner("★ 梦境之主已被击败 ★\n梦境深处传来更古老的回响……", Color(1.0, 0.85, 0.3), 3.0)
 		if AudioManager:
 			AudioManager.play("buff_pickup", 0.9)
 			AudioManager.play("upgrade_pick", 0.9)
-		run_completed.emit()
-		print("[StageDirector] 通关！进入无尽模式，阶段事件全部退役")
+		_enter_ultimate_stage()
 	else:
 		_show_banner("守门者已被击败", Color(0.6, 1.0, 0.6), 1.5)
 		print("[StageDirector] 守门 Boss 已被击败，下一阶段事件解锁")
+
+## ========== 终极关卡（终局流程：清场 → 停刷怪 → 终极 BOSS） ==========
+
+## 进入终极关卡：本局阶段流程的终点，之后只面对终极 BOSS「梦境根源」
+## 触发时机：阶段 10.5「梦境之主」被击杀（难度 10 的收尾 Boss）
+## 执行顺序（严格）：时间轴退役 → 清空全场敌人 → 停止常规刷怪 → 宣告 → 生成终极 BOSS
+func _enter_ultimate_stage() -> void:
+	var world: Node2D = _get_world()
+
+	## ---- 1. 时间轴退役：不再触发任何阶段事件（进度交由终极 BOSS 战接管） ----
+	_run_completed = true
+	_active_type = -1
+	_wave_enemies.clear()
+
+	## ---- 2. 清空全场敌人（含不在业务管理列表内的实体，避免残留小怪干扰终局战） ----
+	if world != null and world.has_method("clear_all"):
+		world.call("clear_all")
+
+	## ---- 3. 停止一切常规刷怪：终极关卡只面对终极 BOSS，玩家需专注躲技能 ----
+	if world != null and "spawning_enabled" in world:
+		world.spawning_enabled = false
+
+	## ---- 4. 狂暴状态复位：上一个 Boss 的濒死狂暴标记不能带到终极 BOSS ----
+	_boss_enraged = false
+
+	## ---- 5. 切面展示层：终极关卡宣告 ----
+	_update_stage_label("终极关卡")
+	if AudioManager:
+		AudioManager.play("difficulty_up", 1.0)
+		AudioManager.play("wave_start", 0.8)
+	ultimate_stage_started.emit()
+	print("[StageDirector] 终极关卡开启：全场清空 + 常规刷怪已停止")
+
+	## ---- 6. 生成终极 BOSS（world 缺失时静默跳过，避免空引用崩溃） ----
+	if world != null:
+		_spawn_ultimate_boss(world)
+
+## 生成终极 BOSS「梦境根源」：复用敌人场景 + 装饰注入（与阶段 Boss 同一套外挂装饰）
+## 说明：终极 BOSS 与阶段事件解耦——不推进事件游标、不参与难度缩放，数值为终局固定形态
+## 参数：world - 游戏世界（Boss 挂载容器 / 掉落路由目标）
+func _spawn_ultimate_boss(world: Node2D) -> void:
+	## 构建数据副本（深拷贝，绝不污染共享 .tres——项目硬性约定）
+	var boss_data: EnemyDataClass = _build_ultimate_boss_data(world)
+
+	## ---- 实例化与挂载（与 _fire_boss 同款链路，保证物理/阵营行为一致） ----
+	var boss: CharacterBody2D = ENEMY_SCENE.instantiate()
+	boss.enemy_data = boss_data
+	boss.add_to_group("enemy")
+	boss.add_to_group("boss")
+	boss.position = _pick_boss_spawn_position(world)
+	world.add_child(boss)
+	if boss.has_method("reset_physics_interpolation"):
+		boss.reset_physics_interpolation()
+
+	## ---- 体积配套：同步放大碰撞判定（Enemy.tscn 默认半径 16/15 是普通怪规格） ----
+	## 说明：视觉体积由主题皮肤 target_size 决定（见 _build_ultimate_boss_data），
+	##       碰撞判定无法随皮肤自动变化，必须在此显式覆写，否则巨型 BOSS 只有 30px 的受击范围
+	_sync_ultimate_boss_body_size(boss)
+
+	## ---- 登场演出：时停 0.2 秒 + 强震屏（终局规格，强度高于阶段 Boss） ----
+	_do_boss_entry_time_stop()
+	_do_boss_entry_shake(world, true)
+
+	## ---- 装饰 1：入场淡入（时长拉长，强调压迫感） ----
+	if "sprite" in boss and boss.sprite != null:
+		boss.sprite.modulate.a = 0.0
+		var tw: Tween = create_tween()
+		tw.tween_property(boss.sprite, "modulate:a", 1.0, 0.8)
+
+	## ---- 装饰 2：出场粒子（16 方向，数量与漂移距离均高于阶段 Boss） ----
+	var boss_color: Color = boss_data.placeholder_color
+	for i in range(16):
+		var angle: float = (i / 16.0) * TAU
+		var drift: Vector2 = Vector2(cos(angle), sin(angle)) * 160.0
+		TrailGhostClass.spawn(world, boss.position, Color(boss_color.r, boss_color.g, boss_color.b, 0.9), 16.0, 0.8, 2.0, drift)
+
+	## ---- 装饰 3/4：头顶血条 + 屏幕 Boss 血条（复用现有外挂装饰） ----
+	_attach_boss_health_bar(boss)
+	_show_boss_hud(boss_data.enemy_name, boss_data.max_health)
+	boss.damaged.connect(_on_boss_damaged.bind(boss))
+
+	## ---- 后置通知接线：终极 BOSS 死亡 = 本局通关 ----
+	_current_boss = boss
+	boss.killed.connect(_on_ultimate_boss_killed.bind(boss))
+	boss.drops_generated.connect(_on_boss_drops.bind(world))
+
+	## ---- 切面展示层 ----
+	_show_banner("★ 梦境根源 · 降临 ★", Color(1.0, 0.3, 0.3), 3.5)
+	print("[StageDirector] 终极 BOSS「%s」降临" % boss_data.enemy_name)
+
+## 构建终极 BOSS 数据副本（深拷贝，绝不触碰共享 .tres）
+## 参数：world - 游戏世界（取精英数据作基底）
+## 返回：配置完毕的终极 BOSS 数据副本
+func _build_ultimate_boss_data(world: Node2D) -> EnemyDataClass:
+	## 基底：GameWorld 的精英怪数据（复用已配置的碰撞/技能等基础字段）
+	var base_data: EnemyDataClass = null
+	if "elite_enemy_data" in world and world.elite_enemy_data != null:
+		base_data = world.elite_enemy_data
+	var boss_data: EnemyDataClass = base_data.duplicate(true) if base_data != null else EnemyDataClass.new()
+
+	## ---- 身份标识 ----
+	boss_data.enemy_id = "ultimate_boss"
+	boss_data.enemy_name = "梦境根源"
+	boss_data.is_elite = true
+	boss_data.elite_prefix = "★"
+
+	## ---- 外观：体积为普通 Boss 的 5 倍 ----
+	## 关键：视觉体积由主题皮肤 target_size 决定（enemy_id="ultimate_boss" → 主题里的巨型皮肤），
+	##       placeholder_size 仅作血条定位等切面用途，必须与皮肤尺寸保持一致，否则血条悬空
+	boss_data.shape_type = "circle"
+	boss_data.placeholder_color = Color(1.0, 0.25, 0.3, 1)
+	boss_data.placeholder_size = Vector2(150, 150)
+
+	## ---- 数值：血量/伤害大幅高于阶段 Boss（远高于关底 Boss 的 900 血/25 伤） ----
+	boss_data.max_health = 5000
+	boss_data.damage = 45
+	boss_data.speed = 55.0            ## 移速低于玩家（180），保证可被走位拉扯
+	boss_data.wander_speed = 40.0
+	boss_data.wander_interval = 2.0
+	boss_data.attack_range = 700.0    ## 远程普攻覆盖大半屏
+	boss_data.attack_cooldown = 0.9   ## 普攻间隔短于阶段 Boss（1.6），压迫感更强
+	boss_data.detection_range = 3000.0  ## 全图索敌，不会丢失玩家
+
+	## ---- 普攻强化：比关底 Boss（25 伤 / 300 速）小幅提升 ----
+	## 说明：Enemy._perform_attack 走 enemy_data.get_bullet_data()；不配置时会兜底用 damage 作伤害，
+	##       在此显式配置以获得更高的伤害与弹速（飞行速度 300 → 400）
+	## 形态留空：子弹走 _body_color 染色，颜色自动跟随主题皮肤主色
+	var boss_bullet: BulletDataClass = BulletDataClass.new()
+	boss_bullet.damage = 35
+	boss_bullet.speed = 400.0
+	boss_data.bullet_data = boss_bullet
+
+	## ---- 技能：三技能并发（天女散花 / 飞机轰炸 / 追踪导弹） ----
+	## 装配方式：填 monster_skills（多技能并发数组），monster_skill 留 null
+	##           → Enemy._init_skill_slots() 为每个技能建立独立触发槽，触发即释放、互不排队
+	## 注意：monster_skills 不会被 EnemyData.apply_to_enemy() 同步覆盖，此处副本赋值即最终生效值
+	boss_data.skill_damage = 18    ## 散花单颗子弹伤害（散花技能取 enemy.skill_damage）
+	boss_data.skill_cooldown = 8.0 ## 单技能路径未启用（monster_skill 为空），保留合理默认值
+	boss_data.monster_skills = _build_ultimate_skills()
+
+	return boss_data
+
+## 构建终极 BOSS 的三技能配置（三技能并发的手感来源）
+## 返回：三个技能资源组成的数组（填入 EnemyData.monster_skills）
+## 设计意图：
+##   1. 需求要求"三个技能不是依次释放，而是各有内置触发点、触发即释放" →
+##      三个技能的 trigger_interval 各不相同（8/15/25 秒），Enemy._get_slot_interval
+##      会在此基础上再叠加 ±30% 随机抖动 → 三条节奏逐渐错开、偶发重合，
+##      形成"小概率同时存在 2 个、极小概率同时存在 3 个"的效果
+##   2. 技能节奏参数（环数/波数/导弹数量等）取 MonsterSkill 资源的默认值，
+##      仅在需要单独平衡时在此显式覆盖
+func _build_ultimate_skills() -> Array[Resource]:
+	var skills: Array[Resource] = []
+
+	## ---- 技能1：天女散花（以 BOSS 为圆心的多环不规则弹幕，只能靠走位穿缝） ----
+	var bloom: MonsterSkillClass = MonsterSkillClass.new()
+	bloom.skill_id = "ultimate_sky_bloom"
+	bloom.display_name = "天女散花"
+	bloom.skill_type = MonsterSkillClass.SkillType.SKY_BLOOM
+	bloom.effect_color = Color(1.0, 0.35, 0.75, 1.0)
+	bloom.trigger_interval = 8.0      ## 三技能中最频繁：持续压缩走位空间
+	bloom.projectile_speed = 240.0    ## 略低于普通技能弹（250），弹幕密集时更易穿缝
+	skills.append(bloom)
+
+	## ---- 技能2：飞机轰炸（全屏随机伤害圈，预警 5 秒后爆炸，共 5 波 × 12 落点） ----
+	var bomb: MonsterSkillClass = MonsterSkillClass.new()
+	bomb.skill_id = "ultimate_air_bombardment"
+	bomb.display_name = "飞机轰炸"
+	bomb.skill_type = MonsterSkillClass.SkillType.AIR_BOMBARDMENT
+	bomb.effect_color = Color(1.0, 0.55, 0.2, 1.0)
+	bomb.trigger_interval = 25.0      ## 单次持续约 17 秒，触发最稀疏（避免全屏长期被覆盖）
+	skills.append(bomb)
+
+	## ---- 技能3：追踪导弹（屏幕外飞入、持续锁定、需打爆才解除） ----
+	var missile: MonsterSkillClass = MonsterSkillClass.new()
+	missile.skill_id = "ultimate_tracking_missile"
+	missile.display_name = "追踪导弹"
+	missile.skill_type = MonsterSkillClass.SkillType.TRACKING_MISSILE
+	missile.effect_color = Color(0.65, 0.85, 1.0, 1.0)
+	missile.trigger_interval = 15.0   ## 触发频率居中
+	missile.missile_speed = 120.0     ## 硬约束：必须小于玩家移速(180)，玩家可靠走位甩开而非被必杀
+	skills.append(missile)
+
+	return skills
+
+## 同步终极 BOSS 的碰撞判定尺寸（放大到与巨型体型匹配）
+## 参数：boss - 终极 BOSS 实例
+## 说明：Enemy.tscn 的 CollisionShape2D / Hitbox 默认半径 16/15 是普通怪规格，
+##       不改则巨型 BOSS 只有 30px 见方的受击范围（玩家子弹穿体而过却不掉血）
+func _sync_ultimate_boss_body_size(boss: CharacterBody2D) -> void:
+	_override_circle_radius(boss, "CollisionShape2D", ULTIMATE_BOSS_COLLISION_RADIUS)
+	_override_circle_radius(boss, "Hitbox/CollisionShape2D", ULTIMATE_BOSS_HITBOX_RADIUS)
+
+## 覆写指定碰撞节点的圆形半径（副本化形状，避免污染共享 SubResource）
+## 参数：host - 宿主节点、path - 碰撞节点相对路径、radius - 新的圆形半径
+## 说明：Enemy.tscn 内所有敌人实例共享同一个 CircleShape2D 资源，
+##       直接改 shape.radius 会让全场敌人（含后续生成的）一起变大，必须 duplicate 后替换
+func _override_circle_radius(host: Node, path: String, radius: float) -> void:
+	var shape_node: CollisionShape2D = host.get_node_or_null(path) as CollisionShape2D
+	if shape_node == null:
+		return
+	var circle: CircleShape2D = shape_node.shape as CircleShape2D
+	if circle == null:
+		return
+	var own_shape: CircleShape2D = circle.duplicate() as CircleShape2D
+	own_shape.radius = radius
+	shape_node.shape = own_shape
+
+## 终极 BOSS 死亡回调：本局通关（时间轴已退役，此处只做终局收尾）
+## 参数：boss - 死亡的终极 BOSS（未直接使用，保留实例便于扩展）
+func _on_ultimate_boss_killed(_boss: Node) -> void:
+	RunStats.add_kill()
+	if AudioManager:
+		AudioManager.play("hit_explosion", 1.0)
+	_current_boss = null
+	_active_type = -1
+	_hide_boss_hud()
+	_show_banner("★ 梦境根源已被击碎 ★\n梦境终结 · 恭喜通关", Color(1.0, 0.9, 0.4), 6.0)
+	_update_stage_label("通关")
+	if AudioManager:
+		AudioManager.play("buff_pickup", 1.0)
+		AudioManager.play("upgrade_pick", 1.0)
+	run_completed.emit()
+	print("[StageDirector] 终极 BOSS 已被击败：本局通关")
 
 ## Boss 掉落补路由：Boss 不在业务管理列表，drops_generated 信号由切面转接
 ## 参数：position - 掉落位置，drops - 掉落物数组，world - 游戏世界

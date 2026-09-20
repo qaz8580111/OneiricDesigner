@@ -129,6 +129,19 @@ var _skill_timer: float = 0.0
 ## 技能释放中标记（冲锋/传送/自爆等技能执行期间为true，暂停普通AI）
 var _skill_active: bool = false
 
+## ========== 多技能并发槽（终极BOSS专属：多技能各自独立触发） ==========
+
+## 技能槽列表（每个槽=一个技能资源，来源 EnemyData.monster_skills）
+## 设计意图：用户要求终极BOSS的技能"不是依次释放，而是各有内置触发点、触发即释放，
+##           可能小概率同时存在2个、极小概率3个"。原 _skill_timer/_skill_active 是
+##           "单冷却+单独占锁"的串行模型（一个技能释放期间门禁全锁），无法并发；
+##           因此为每个技能建立独立计时槽，彼此不共享冷却、不互相阻塞
+var _skill_slots: Array[Resource] = []
+
+## 每个技能槽的触发倒计时（秒，与 _skill_slots 同下标一一对应）
+## 触发点带随机浮动 → 三个技能的节奏逐渐错开/偶发重合，形成"偶发并发"的自然手感
+var _skill_slot_timers: Array[float] = []
+
 ## 死亡标记（防重入：_die()调用后置true，take_damage/_physics_process据此跳过）
 ## 设计意图：敌人血量归零到call_deferred("queue_free")真正执行之间有一帧间隙，
 ##           期间子弹仍可命中导致take_damage重复触发_die()，引发重复掉落/异常中断
@@ -278,6 +291,10 @@ func _ready() -> void:
 	## 构建技能HUD（头顶技能名称+冷却进度条，仅有技能的高级怪才创建）
 	_create_skill_hud()
 
+	## 初始化多技能并发槽（仅配置了 monster_skills 的多技能敌人，如终极BOSS）
+	## 单技能敌人此处得到空数组 → 继续走原有单技能串行路径，行为完全不变
+	_init_skill_slots()
+
 	## 开启_process驱动HUD更新
 	set_process(true)
 
@@ -362,6 +379,47 @@ func _update_skill_hud() -> void:
 			## 恢复正常颜色
 			if enemy_data != null and enemy_data.monster_skill != null:
 				_skill_bar_fg.color = enemy_data.monster_skill.effect_color
+
+## ========== 多技能并发调度（终极BOSS专属） ==========
+
+## 初始化多技能并发槽：把 EnemyData.monster_skills 逐个建成"独立计时槽"
+## 数据流：EnemyData.monster_skills → _skill_slots[i] + _skill_slot_timers[i]
+## 无 monster_skills 的普通敌人 → 数组保持为空 → 并发调度整体跳过（零开销）
+func _init_skill_slots() -> void:
+	_skill_slots.clear()
+	_skill_slot_timers.clear()
+	if enemy_data == null:
+		return
+	for skill in enemy_data.monster_skills:
+		## 空槽跳过（数组允许留空占位，方便策划增删技能）
+		if skill == null:
+			continue
+		_skill_slots.append(skill)
+		## 首次触发点同样带随机浮动：避免BOSS一入场就三技能齐发
+		_skill_slot_timers.append(_get_slot_interval(skill))
+
+## 计算某个技能槽的下一次触发间隔（秒）
+## 参数：skill - 技能资源
+## 设计意图：以技能的 trigger_interval 为基准（未配置时回退敌人 skill_cooldown），
+##           再叠加 ±30% 随机浮动 → 各技能节奏逐渐漂移，偶发同帧到点（同时存在2~3个技能）
+func _get_slot_interval(skill: Resource) -> float:
+	var base: float = skill.trigger_interval if skill.trigger_interval > 0.0 else skill_cooldown
+	return base * RandomManager.randf_range(0.7, 1.3)
+
+## 多技能并发调度心跳：逐槽递减计时，到点且该槽就绪时立即释放
+## 并发语义：各槽完全独立——同一帧内多个槽同时归零则多个技能同时释放；
+##           计时重置在该技能释放前完成，因此长持续技能不会阻塞其他技能
+func _tick_skill_slots(delta: float) -> void:
+	for i in range(_skill_slots.size()):
+		_skill_slot_timers[i] -= delta
+		if _skill_slot_timers[i] > 0.0:
+			continue
+		var skill: Resource = _skill_slots[i]
+		if skill == null:
+			continue
+		## 先重置下一次触发点，再释放（释放是异步的，不能依赖其返回时机）
+		_skill_slot_timers[i] = _get_slot_interval(skill)
+		_perform_skill_by_data(skill)
 
 ## ========== 辅助方法 ==========
 
@@ -526,6 +584,11 @@ func _physics_process(delta: float) -> void:
 	_wander_timer -= delta
 	## 递减技能冷却计时器（独立于攻击冷却）
 	_skill_timer -= delta
+
+	## 多技能并发调度（终极BOSS）：各技能槽独立计时、到点即释放、互不排队
+	## 位置说明：放在 _skill_active 门禁之前，保证独占类技能执行期间其他技能仍能触发
+	if not _skill_slots.is_empty():
+		_tick_skill_slots(delta)
 
 	## 技能释放中时跳过普通AI（冲锋/传送/自爆等技能需要独占控制权）
 	if _skill_active:
@@ -785,15 +848,25 @@ func _perform_attack() -> void:
 
 ## ========== 怪物技能系统 ==========
 
-## 释放技能（根据MonsterSkill.skill_type分发到对应实现）
-## 技能独立于普通攻击，有独立冷却计时器，在_physics_process中触发
+## 释放技能（单一技能入口：读取 enemy_data.monster_skill，在_physics_process中触发）
 func _perform_skill() -> void:
 	if enemy_data == null or enemy_data.monster_skill == null:
 		return
 	if _player == null:
 		return
+	## 交给统一的技能执行入口（与多技能并发槽共用音效/分发逻辑）
+	_perform_skill_by_data(enemy_data.monster_skill)
 
-	var skill: Resource = enemy_data.monster_skill
+## 按技能资源执行一次释放（音效 + 类型分发 + 动画）
+## 参数：skill - 要释放的技能资源
+## 设计意图：单一技能（monster_skill）与多技能并发槽（monster_skills）共用此唯一入口，
+##           保证新增技能类型只需在下面两个match各加一个分支，不会出现两套分发逻辑
+func _perform_skill_by_data(skill: Resource) -> void:
+	if skill == null:
+		return
+	if _player == null:
+		return
+
 	var dmg: int = skill_damage
 	var skill_color: Color = skill.effect_color
 
@@ -810,6 +883,10 @@ func _perform_skill() -> void:
 		MonsterSkill.SkillType.TELEPORT_STRIKE: sfx_name = "skill_teleport"
 		MonsterSkill.SkillType.PIERCING_SHOT:   sfx_name = "skill_piercing"
 		MonsterSkill.SkillType.SUICIDE_BOMB:    sfx_name = "skill_bomb_fuse"
+		## 终极BOSS三技能复用现有音效（散花=环形弹幕、轰炸预警=引信、导弹=追踪）
+		MonsterSkill.SkillType.SKY_BLOOM:       sfx_name = "skill_nova"
+		MonsterSkill.SkillType.AIR_BOMBARDMENT: sfx_name = "skill_bomb_fuse"
+		MonsterSkill.SkillType.TRACKING_MISSILE: sfx_name = "skill_homing"
 	if AudioManager:
 		AudioManager.play_2d(sfx_name, global_position, 0.8)
 
@@ -833,6 +910,13 @@ func _perform_skill() -> void:
 			_skill_piercing_shot(skill, dmg, skill_color)
 		MonsterSkill.SkillType.SUICIDE_BOMB:
 			_skill_suicide_bomb(skill, dmg, skill_color)
+		## 终极BOSS三技能（伤害取技能自带字段，与普通怪的 skill_damage 解耦）
+		MonsterSkill.SkillType.SKY_BLOOM:
+			_skill_sky_bloom(skill, dmg, skill_color)
+		MonsterSkill.SkillType.AIR_BOMBARDMENT:
+			_skill_air_bombardment(skill, skill_color)
+		MonsterSkill.SkillType.TRACKING_MISSILE:
+			_skill_tracking_missile(skill, skill_color)
 
 	## 动画反馈
 	if animator != null:
@@ -1047,9 +1131,239 @@ func _skill_suicide_bomb(skill: Resource, dmg: int, color: Color) -> void:
 	_skill_active = false
 	take_damage(max_health)  ## 直接秒杀自己
 
+## ---------- 技能10：天女散花（终极BOSS） ----------
+## 以BOSS为圆心、由内向外逐环抛出不规则弹幕（满屏铺散）
+## 不规则性来源：每颗子弹的角度叠加随机抖动 + 速度叠加随机浮动 + 逐环相位错开，
+##              因此不存在固定的"安全缝"，玩家只能靠不断走位从稀疏处穿出
+func _skill_sky_bloom(skill: Resource, dmg: int, color: Color) -> void:
+	var ring_count: int = maxi(skill.bloom_ring_count, 1)
+	var per_ring: int = maxi(skill.bloom_ring_bullet_count, 1)
+	var ring_interval: float = skill.bloom_ring_interval
+	var jitter: float = deg_to_rad(skill.bloom_angle_jitter)
+	var speed_jitter: float = skill.bloom_speed_jitter
+	## 起始相位随机：每次散花的角度基准都不同，玩家无法记住上一轮的空隙位置
+	var base_angle: float = RandomManager.randf_range(0.0, TAU)
+
+	for ring_i in range(ring_count):
+		## 视觉预警：每个环发射前扩散一次光环（提示本轮弹幕方向基准）
+		_create_nova_flash(40.0, color)
+		## 环相位错开（黄金角141.8°）：相邻环的弹幕互相填补空隙，叠加随机抖动后无死角
+		var ring_phase: float = base_angle + float(ring_i) * 0.618 * TAU
+		for i in range(per_ring):
+			var angle: float = ring_phase + TAU * float(i) / float(per_ring) \
+				+ RandomManager.randf_range(-jitter, jitter)
+			var dir: Vector2 = Vector2.RIGHT.rotated(angle)
+			var speed: float = skill.projectile_speed \
+				* (1.0 + RandomManager.randf_range(-speed_jitter, speed_jitter))
+			_spawn_skill_bullet(dir, dmg, speed, color)
+		## 环与环之间的间隔（最后一环不等）：一波接一波压缩玩家走位空间
+		if ring_i < ring_count - 1 and ring_interval > 0.0:
+			await get_tree().create_timer(ring_interval, false).timeout
+			## BOSS可能在此await期间死亡被queue_free，协程恢复时引用已无效——守卫退出
+			if not is_instance_valid(self) or _is_dying:
+				return
+
+## ---------- 技能11：飞机轰炸（终极BOSS） ----------
+## 全屏随机生成伤害圈：圈先出现并倒数，倒计时结束才爆炸；玩家在圈内则受巨额伤害
+## 节奏：共5波、每波12个落点，同波落点按间隔陆续出现（可逐点规避），波间再留间隔
+func _skill_air_bombardment(skill: Resource, color: Color) -> void:
+	var wave_count: int = maxi(skill.bombardment_wave_count, 1)
+	var per_wave: int = maxi(skill.bombardment_per_wave_count, 1)
+	var pit_interval: float = skill.bombardment_pit_interval
+	var wave_interval: float = skill.bombardment_wave_interval
+
+	for wave_i in range(wave_count):
+		for pit_i in range(per_wave):
+			## BOSS可能在此前await期间死亡，守卫退出
+			if not is_instance_valid(self) or _is_dying:
+				return
+			_spawn_bomb_pit(skill)
+			## 同波落点陆续出现（非同时），给玩家逐个规避的窗口
+			if pit_interval > 0.0:
+				await get_tree().create_timer(pit_interval, false).timeout
+		## 波与波之间的喘息间隔（最后一波不等）
+		if wave_i < wave_count - 1 and wave_interval > 0.0:
+			await get_tree().create_timer(wave_interval, false).timeout
+
+## 生成单个轰炸落点：预警圈先出现并逐秒倒数，倒计时结束爆炸判定伤害
+## 参数：skill - 轰炸技能资源（半径/倒计时/伤害从中读取）
+## 生命周期：落点节点挂世界节点、动画Tween挂落点自身（BOSS销毁不影响爆炸与回收）
+func _spawn_bomb_pit(skill: Resource) -> void:
+	var radius: float = skill.bombardment_radius
+	var warn_time: float = skill.bombardment_warning_time
+	var dmg: int = skill.bombardment_damage
+	var color: Color = skill.effect_color
+	var pit_pos: Vector2 = _get_bombardment_point(radius)
+
+	## 落点视觉节点（范围显示）
+	var pit: Node2D = Node2D.new()
+	pit.z_index = 9
+	pit.global_position = pit_pos
+	get_parent().add_child(pit)
+	pit.draw.connect(_draw_bomb_pit.bind(pit, radius, color))
+	## 倒计时数字（玩家可直观看到剩余秒数）
+	var label: Label = Label.new()
+	label.add_theme_font_size_override("font_size", 24)
+	label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.25, 1.0))
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.size = Vector2(60, 28)
+	label.position = Vector2(-30, -14)
+	pit.add_child(label)
+	pit.queue_redraw()
+
+	## 倒计时动画（Tween挂落点自身：BOSS死亡后仍会跑完并回收，不留视觉残留）
+	var tw: Tween = pit.create_tween()
+	var seconds: int = int(ceilf(warn_time))
+	for i in range(seconds):
+		tw.tween_callback(_update_bomb_label.bind(label, seconds - i))
+		tw.tween_interval(1.0)
+	## 倒计时结束：爆炸判定（绑self，伤害应用需要玩家引用）
+	tw.tween_callback(_explode_bomb_pit.bind(pit, radius, dmg, color))
+	## 安全网：万一爆炸回调因BOSS已销毁而未能执行，此处仍强制回收落点节点
+	## （Tween绑pit自身，pit被回收时本Tween自动失效，不会重复执行）
+	var cleanup: Tween = pit.create_tween()
+	cleanup.tween_interval(warn_time + 1.0)
+	cleanup.tween_callback(pit.queue_free)
+
+## 计算一个"全屏随机"轰炸落点：以玩家所在屏幕为基础随机，再钳制进竞技场
+## 参数：radius - 落点半径（作为钳制余量，保证整个圈都在场内有意义）
+func _get_bombardment_point(radius: float) -> Vector2:
+	var center: Vector2 = global_position
+	if _player != null and is_instance_valid(_player):
+		center = _player.global_position
+	## 屏幕半尺寸：从实际视口读取，分辨率变更时自适应（相机无缩放，1:1映射）
+	var half_screen: Vector2 = Vector2(960.0, 640.0)
+	var vp: Viewport = get_viewport()
+	if vp != null:
+		half_screen = vp.get_visible_rect().size * 0.5
+	var point: Vector2 = center + Vector2(
+		RandomManager.randf_range(-half_screen.x, half_screen.x),
+		RandomManager.randf_range(-half_screen.y, half_screen.y)
+	)
+	## 出生点必须钳制在物理墙内（工作区铁律：所有出生点经 ArenaConfig.clamp_inside）
+	return ArenaConfigClass.clamp_inside(point, radius)
+
+## 更新落点倒计时数字
+func _update_bomb_label(label: Label, remaining: int) -> void:
+	if label == null or not is_instance_valid(label):
+		return
+	label.text = str(remaining)
+
+## 落点预警圈绘制回调（范围显示：半透明填充+双层外环）
+func _draw_bomb_pit(pit: Node2D, radius: float, color: Color) -> void:
+	pit.draw_circle(Vector2.ZERO, radius, Color(color.r, color.g, color.b, 0.14))
+	pit.draw_arc(Vector2.ZERO, radius, 0, TAU, 48, color, 3.0)
+	pit.draw_arc(Vector2.ZERO, radius * 0.55, 0, TAU, 32, Color(color.r, color.g, color.b, 0.5), 2.0)
+
+## 落点爆炸：范围伤害判定 + 爆炸视觉 + 音效 + 回收落点节点
+## 参数：pit - 落点视觉节点，radius - 爆炸半径，dmg - 爆炸伤害，color - 爆炸颜色
+func _explode_bomb_pit(pit: Node2D, radius: float, dmg: int, color: Color) -> void:
+	## 落点可能已被安全网Tween回收——守卫退出
+	if pit == null or not is_instance_valid(pit):
+		return
+	var blast_pos: Vector2 = pit.global_position
+	## 爆炸视觉：在落点位置扩散冲击环
+	_create_blast_visual(blast_pos, radius, color)
+	## 爆炸音效（复用现有轰炸爆炸音，按距离衰减）
+	if AudioManager:
+		AudioManager.play_2d("bomber_explode", blast_pos, 0.9)
+	## 玩家在圈内 → 巨额伤害
+	if _player != null and is_instance_valid(_player):
+		if blast_pos.distance_to(_player.global_position) <= radius:
+			if _player.has_method("set_last_attacker"):
+				_player.set_last_attacker(self, {"is_bullet": false})
+			if _player.has_method("take_damage"):
+				_player.take_damage(dmg)
+	## 回收落点节点（安全网Tween兜底，正常情况下此处即回收）
+	pit.queue_free()
+
+## 在指定位置播放一次扩散爆炸视觉（挂世界节点，Tween挂visual自身保证回收）
+func _create_blast_visual(pos: Vector2, radius: float, color: Color) -> void:
+	var visual: Node2D = Node2D.new()
+	visual.z_index = 11
+	visual.global_position = pos
+	visual.modulate = color
+	get_parent().add_child(visual)
+	visual.draw.connect(_draw_aoe_ring.bind(visual, radius, color))
+	var tw: Tween = visual.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(visual, "scale", Vector2(1.4, 1.4), 0.35)
+	tw.tween_property(visual, "modulate:a", 0.0, 0.35)
+	tw.chain().tween_callback(visual.queue_free)
+	visual.queue_redraw()
+
+## ---------- 技能12：追踪导弹（终极BOSS） ----------
+## 从屏幕外依次生成、持续锁定玩家的导弹；移速低于玩家（可走位甩开），
+## 需打爆导弹才解除追踪，触碰玩家则造成巨额伤害
+func _skill_tracking_missile(skill: Resource, color: Color) -> void:
+	var count: int = maxi(skill.missile_count, 1)
+	var interval: float = skill.missile_spawn_interval
+	for i in range(count):
+		## BOSS可能在此前await期间死亡，守卫退出
+		if not is_instance_valid(self) or _is_dying:
+			return
+		_spawn_tracking_missile(skill, color)
+		## 依次飞入而非一次齐射（最后一枚不等）
+		if i < count - 1 and interval > 0.0:
+			await get_tree().create_timer(interval, false).timeout
+
+## 生成单枚追踪导弹：从玩家视野外的随机方位飞入并锁定玩家
+## 参数：skill - 导弹技能资源，color - 导弹颜色
+func _spawn_tracking_missile(skill: Resource, color: Color) -> void:
+	if BULLET_SCENE == null or _player == null or not is_instance_valid(_player):
+		return
+	var spawn_pos: Vector2 = _get_missile_spawn_point()
+	var dir: Vector2 = (_player.global_position - spawn_pos).normalized()
+	var missile: Area2D = _spawn_skill_bullet_at(
+		dir, skill.missile_damage, skill.missile_speed, color, spawn_pos)
+	if missile == null:
+		return
+	## 追踪参数（复用Bullet的homing meta协议，与普通追踪弹同一条驱动链路）
+	## 转向速率低于普通追踪弹（3.0），配合低移速形成"可被甩开但需持续走位"的压迫感
+	missile.set_meta("homing_target", _player)
+	missile.set_meta("homing_turn_rate", 2.2)
+	missile.set_meta("homing_time", skill.missile_homing_duration)
+	missile.set_meta("homing_elapsed", 0.0)
+	## 追踪弹视觉标记：Bullet.gd读取此meta绘制发光光环
+	missile.set_meta("is_homing_shot", true)
+	missile.set_meta("homing_color", color)
+	## 入场豁免：导弹出生在屏幕外，豁免期内不因视口边界判定被销毁
+	if "_boundary_grace" in missile:
+		missile._boundary_grace = skill.missile_entry_grace
+	## 导弹可被玩家打爆：血量存入meta，供Bullet的击落判定读取
+	missile.set_meta("shootdown_health", skill.missile_health)
+	## 并入敌人层(bit2)后玩家子弹(mask=2)才能检测到这枚导弹
+	## （原层为敌方子弹层8，仅供导弹命中玩家用；不并层则玩家子弹与导弹互不检测）
+	## 时序说明：必须在 shootdown_health 写入之后再改层，避免出现"能被打中但无血量"的空窗
+	missile.collision_layer = 8 | 2
+
+## 计算导弹出生点：玩家视野外围的随机方位（贴竞技场边缘也算屏幕外入场）
+func _get_missile_spawn_point() -> Vector2:
+	var center: Vector2 = global_position
+	if _player != null and is_instance_valid(_player):
+		center = _player.global_position
+	var half_screen: Vector2 = Vector2(960.0, 640.0)
+	var vp: Viewport = get_viewport()
+	if vp != null:
+		half_screen = vp.get_visible_rect().size * 0.5
+	## 以视口对角半径为基础外扩，保证任意方位出生点都在玩家视野之外
+	var offset: float = half_screen.length() + 200.0
+	var angle: float = RandomManager.randf_range(0.0, TAU)
+	var point: Vector2 = center + Vector2.RIGHT.rotated(angle) * offset
+	## 出生点必须钳制在物理墙内（工作区铁律：所有出生点经 ArenaConfig.clamp_inside）
+	return ArenaConfigClass.clamp_inside(point, 40.0)
+
 ## ---------- 技能通用：创建技能子弹 ----------
 ## 复用现有BULLET_SCENE创建子弹，设置技能伤害/速度/颜色
 func _spawn_skill_bullet(direction: Vector2, dmg: int, speed: float, color: Color) -> Area2D:
+	## 默认出生点：自身位置沿发射方向前移30px，避免子弹一出生就压在BOSS体内
+	return _spawn_skill_bullet_at(
+		direction, dmg, speed, color, global_position + direction * 30.0)
+
+## 创建技能子弹（指定出生点）：追踪导弹需要从屏幕外指定坐标出生
+## 参数：spawn_pos - 子弹出生坐标
+func _spawn_skill_bullet_at(direction: Vector2, dmg: int, speed: float,
+		color: Color, spawn_pos: Vector2) -> Area2D:
 	if BULLET_SCENE == null:
 		return null
 	var bullet_data: BulletDataClass = BulletDataClass.new()
@@ -1062,7 +1376,7 @@ func _spawn_skill_bullet(direction: Vector2, dmg: int, speed: float, color: Colo
 	bullet.collision_layer = 8
 	bullet.collision_mask = 1
 	bullet.set_direction(direction)
-	bullet.global_position = global_position + direction * 30.0
+	bullet.global_position = spawn_pos
 	get_parent().add_child(bullet)
 	bullet.monitoring = true
 	## 技能子弹染色

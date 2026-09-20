@@ -59,6 +59,12 @@ var _has_hit: bool = false
 ## 每次命中前由碰撞回调重置为false，避免状态残留
 var _keep_alive: bool = false
 
+## 出场边界豁免时间（秒）：大于0时不做屏幕边界销毁判定
+## 数据流：Enemy._spawn_tracking_missile 为屏幕外生成的追踪导弹赋值 → _physics_process 递减 →
+##           豁免期内子弹可安全从屏幕外飞入，豁免结束后恢复常规边界回收
+## 设计意图：终极BOSS追踪导弹要求在屏幕外出生并飞向玩家，若沿用常规边界判定会被立即销毁
+var _boundary_grace: float = 0.0
+
 ## ========== 拖尾系统（运行时数据） ==========
 
 ## 是否启用拖尾（由追踪/加速等特效在首次触发时调用 enable_trail 开启）
@@ -130,6 +136,41 @@ func get_bullet_data() -> BulletDataClass:
 ## 参数：group_name - 阵营名称（"player"或"enemy"）
 func set_owner_group(group_name: String) -> void:
 	_owner_group = group_name
+
+## ========== 可击落子弹（终极BOSS追踪导弹专用） ==========
+
+## 受到伤害（对外接口，供玩家子弹命中时调用）
+## 数据流：玩家子弹area_entered命中导弹 → 导弹.take_damage() → 扣减meta计数
+##        → 计数归零则播放击落特效 + 音效 + 销毁
+## 参数：_amount - 伤害数值（可击落子弹按"命中次数"计数，不区分单发伤害大小）
+func take_damage(_amount: float) -> void:
+	## 非可击落子弹直接忽略：普通子弹没有生命值概念，不响应任何伤害
+	if not has_meta("shootdown_health"):
+		return
+	var remain: int = int(get_meta("shootdown_health")) - 1
+	set_meta("shootdown_health", remain)
+	## 命中反馈：被击落时火花更多更大，未击落时是小范围受击火花
+	_spawn_shootdown_sparks(remain <= 0)
+	if remain > 0:
+		return
+	if AudioManager:
+		AudioManager.play_2d("hit_explosion", global_position, 0.5)
+	_destroy()
+
+## 播放导弹被玩家命中的火花（复用对象池残影向四周散开，零节点分配开销）
+## 参数：destroyed - 是否被打爆（打爆时火花更多、飞散更远）
+func _spawn_shootdown_sparks(destroyed: bool) -> void:
+	var world: Node = get_parent()
+	if world == null:
+		return
+	var color: Color = get_meta("homing_color", Color(0.65, 0.85, 1.0, 1.0))
+	var count: int = 10 if destroyed else 4
+	var size: float = 10.0 if destroyed else 6.0
+	var drift_len: float = 110.0 if destroyed else 70.0
+	for i in range(count):
+		var angle: float = TAU * float(i) / float(count)
+		TrailGhostClass.spawn(world, global_position, color, size, 0.35, 0.2,
+			Vector2.RIGHT.rotated(angle) * drift_len)
 
 ## ========== 拖尾系统方法 ==========
 
@@ -211,6 +252,10 @@ func _physics_process(delta: float) -> void:
 	## 追踪弹逻辑：检查是否被标记为追踪弹（由Enemy._skill_homing_shot设置meta）
 	_update_homing(delta)
 
+	## 递减出场边界豁免时间（终极BOSS屏幕外追踪导弹入场用），最小钳制到0
+	if _boundary_grace > 0.0:
+		_boundary_grace = maxf(_boundary_grace - delta, 0.0)
+
 	## 更新拖尾残影（若已被特效启用）
 	_update_trail(delta)
 
@@ -272,6 +317,10 @@ func _draw() -> void:
 ## 检查子弹是否超出屏幕边界，超出则自动销毁
 ## 性能设计：相机/屏幕尺寸使用缓存（每0.5秒刷新），避免每帧的查找开销
 func _check_screen_boundary() -> void:
+	## 出场豁免期内不做边界销毁：终极BOSS追踪导弹从屏幕外飞入需要时间，豁免结束才恢复回收
+	if _boundary_grace > 0.0:
+		return
+
 	## 相机刷新计时：每0.5秒重新查找一次相机并缓存屏幕尺寸
 	## 数据流：计时器归零 → get_camera_2d重新查找 → 更新缓存引用
 	_camera_refresh_timer += get_physics_process_delta_time()
@@ -369,8 +418,12 @@ func _on_area_entered(area: Area2D) -> void:
 			{"direction": _direction}
 		)
 	
-	## 找到区域的父节点（通常是CharacterBody2D）
-	var target: Node2D = area.get_parent()
+	## 找到命中目标（通常是区域父节点，如玩家Hitbox → Player角色本体）
+	## 特例：区域自身就是"可击落子弹"（终极BOSS追踪导弹直接挂在世界节点下，
+	##       此时 get_parent() 会取到世界节点=错误目标），必须以区域自身为命中目标
+	var target: Node2D = area
+	if not area.has_meta("shootdown_health"):
+		target = area.get_parent()
 	if target == null:
 		target = area
 	

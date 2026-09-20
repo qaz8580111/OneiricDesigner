@@ -38,7 +38,7 @@ enum ProductType {
 ## 商品类型（决定效果与价格档位）
 @export var product_type: ProductType = ProductType.HEALTH
 
-## 售价（梦境碎片数量，价格体系见 .trae/docs 清单，由 Shop 生成器按品类/稀有度赋值）
+## 售价（梦境碎片数量，价格体系见 docs 清单，由 Shop 生成器按品类/稀有度赋值）
 @export var price: int = 0
 
 ## ========== 运行时商品载荷（非导出，由生成器填充） ==========

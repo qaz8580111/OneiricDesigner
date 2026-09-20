@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="GameTheme" load_steps=14 format=3]
+[gd_resource type="Resource" script_class="GameTheme" load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/skin/GameTheme.gd" id="1_theme"]
 [ext_resource type="Script" path="res://scripts/resources/skin/CharacterSkin.gd" id="2_skin"]
@@ -173,6 +173,22 @@ accessory_type = "skull"
 accessory_color = Color(1, 0.15, 0.5, 1)
 outline_color = Color(0.4, 0.2, 0.05, 0.9)
 
+; 终极BOSS「梦境根源」：霓虹品红巨型圆形 + 亮青凶眼（终局专属）
+; 关键：target_size=150x150（普通Boss兜底皮肤30x30的5倍），这是终极BOSS体积的唯一生效入口
+; ——Enemy 的 placeholder_size 分支因皮肤兜底恒非null而不可达，体积必须靠皮肤尺寸表达
+; 配件从简：配件绘制多为固定像素偏移，放大体型后配件会严重偏小，故本皮肤不配任何配件
+[sub_resource type="Resource" id="skin_ultimate_boss"]
+script = ExtResource("2_skin")
+skin_id = "neon_ultimate_boss"
+shape = "circle"
+main_color = Color(0.85, 0.05, 0.5, 1)
+accent_color = Color(1, 0.45, 0.85, 1)
+target_size = Vector2(150, 150)
+move_bounce_scale = 0.04
+move_bounce_speed = 4.0
+eye_color = Color(0.3, 1, 1, 1)
+outline_color = Color(0.35, 0, 0.3, 0.9)
+
 ; ------------------------------ 主题包本体 ------------------------------
 [resource]
 script = ExtResource("1_theme")
@@ -188,7 +204,8 @@ enemy_skins = {
 "thundermage": SubResource("skin_thundermage"),
 "skeleton": SubResource("skin_skeleton"),
 "tank": SubResource("skin_tank"),
-"elite_001": SubResource("skin_elite")
+"elite_001": SubResource("skin_elite"),
+"ultimate_boss": SubResource("skin_ultimate_boss")
 }
 ; 世界背景色：提亮至约0.11（旧值0.07近纯黑），保持紫调霓虹氛围
 bg_color = Color(0.11, 0.08, 0.18, 1)

@@ -67,8 +67,9 @@ var _enemy_pool_total_weight: float = 0.0
 ## 敌人生成间隔（秒），控制敌人出现频率
 @export var enemy_spawn_interval: float = 2.0
 
-## 屏幕上同时存在的最大敌人数，防止敌人过多导致性能问题
-@export var max_enemies: int = 100
+## 屏幕上同时存在的最大敌人数（基础值），防止敌人过多导致性能问题
+## 实际上限由 DifficultyManager.get_max_enemies() 按难度递增，10级封顶于100只
+@export var max_enemies: int = 70
 
 ## ========== 精英怪配置 ==========
 
@@ -80,6 +81,13 @@ var _enemy_pool_total_weight: float = 0.0
 
 ## 精英怪数据资源（配置精英怪的属性、掉落等）
 @export var elite_enemy_data: EnemyDataClass = null
+
+## ========== 刷怪总开关（终极关卡用） ==========
+
+## 常规刷怪总开关：false = 暂停一切常规刷怪（普通/精英/波次/直播事件）
+## 设计意图：终极关卡需要"清场后只面对终极 BOSS"，业务刷怪链路必须整体静默；
+##          仅在 _spawn_enemy() 咽喉点拦截，切面自建实体（StageDirector 直接 add_child）不受影响
+var spawning_enabled: bool = true
 
 ## ========== 中央商店配置 ==========
 
@@ -442,12 +450,16 @@ func _spawn_enemies(delta: float) -> void:
 	## 如果计时器归零，生成新敌人
 	if _spawn_timer <= 0.0:
 		_spawn_enemy()
-		## 动态间隔：刷新间隔随难度等级压缩（越打越快，下限0.35秒）
+		## 动态间隔：刷新间隔随难度等级压缩（越打越快，下限0.4秒）
 		_spawn_timer = DifficultyManager.get_spawn_interval(enemy_spawn_interval)
 
 ## 生成单个敌人
 ## 参数：is_elite - 是否为精英怪, override_data - 外部指定的敌人数据（直播事件用，null=随机/精英池）
 func _spawn_enemy(is_elite: bool = false, override_data: EnemyDataClass = null) -> void:
+	## 刷怪总开关：终极关卡期间暂停一切常规刷怪
+	## 单点拦截即覆盖全部刷怪路径（普通/精英/波次/直播事件），无需逐处加门禁
+	if not spawning_enabled:
+		return
 	## 实例化敌人节点
 	var enemy: CharacterBody2D = ENEMY_SCENE.instantiate()
 
@@ -862,14 +874,18 @@ func _on_live_gift(_uname: String, _gift_name: String, _value: float, \
 
 ## ========== 清理方法 ==========
 
-## 清理所有游戏对象（用于场景切换或游戏结束）
+## 清理所有游戏对象（用于场景切换、游戏结束或终极关卡清场）
+## 说明：以 "enemy" 组为唯一真源做兜底清场 —— 除 _enemies 管理列表内的业务敌人外，
+##      还覆盖不在业务列表内的实体（如 StageDirector 切面自建的 Boss），避免清场残留
 func clear_all() -> void:
-	## 清理所有敌人
-	for enemy in _enemies:
-		if enemy.is_inside_tree():
-			enemy.queue_free()
+	## 清理所有敌人（切面自建 Boss 同样挂在 GameWorld 下且带 "enemy" 组标记，一并清掉）
+	for child in get_children():
+		if child.is_in_group("enemy") and not child.is_queued_for_deletion():
+			child.queue_free()
 	_enemies.clear()
 	_enemy_count = 0
+	## 精英计数必须同步归零：否则清场后精英怪会被"幽灵计数"永久卡在上限不再刷新
+	_elite_enemy_count = 0
 
 	## 清理所有子弹
 	for bullet in _bullets:

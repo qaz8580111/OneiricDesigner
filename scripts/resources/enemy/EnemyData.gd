@@ -65,6 +65,13 @@ const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 ## 扩展：新增技能类型只需在MonsterSkill.SkillType加枚举+Enemy._perform_skill加分支
 @export var monster_skill: Resource = null
 
+## 怪物技能列表（多技能敌人专属：终极BOSS使用，可填多个技能）
+## 与 monster_skill 的区别：monster_skill 是"单技能串行"（一个冷却门禁，释放期间独占），
+## monster_skills 是"多技能并发"——Enemy._init_skill_slots() 为每个技能建立独立计时槽，
+## 各自到点即释放、互不排队，从而可能出现2~3个技能同时存在
+## 两者互斥使用：多技能敌人只填 monster_skills（monster_skill 留 null 走并发路径）
+@export var monster_skills: Array[Resource] = []
+
 ## 技能冷却时间（秒，独立于attack_cooldown，控制技能释放频率）
 ## 越高级的怪物冷却越短，技能更频繁
 @export var skill_cooldown: float = 8.0

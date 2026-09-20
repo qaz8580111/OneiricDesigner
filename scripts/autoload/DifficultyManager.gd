@@ -22,9 +22,14 @@ signal wave_started(wave_number: int, spawn_count: int)
 
 ## ========== 调参常量（难度曲线的核心配置，集中管理便于平衡调整） ==========
 
-## 每提升1级难度所需时间（秒）：70秒一级，让前期节奏更舒缓，玩家有充分时间成长
-## 旧值40s→70s：原节奏下10分钟到16级，现在约17分钟，循序渐进感更强
-const LEVEL_INTERVAL: float = 70.0
+## 每提升1级难度所需时间（秒）：110秒一级（落在用户要求的100~120秒区间内）
+## 旧值70s→110s：配合"难度上限压缩到10级"的改造，让整局节奏落在15~20分钟
+## 满级总耗时 ≈ 110 * 9 = 990秒 ≈ 16.5分钟（不含终极BOSS战）
+const LEVEL_INTERVAL: float = 110.0
+
+## 难度等级硬上限：10级封顶（用户要求：把原来的30级曲线压缩进10级）
+## 达到上限后难度曲线停止爬升，游戏交给 StageDirector 的终极关卡收尾
+const MAX_LEVEL: int = 10
 
 ## 敌人血量成长系数：每级+18%（乘算叠加）
 const HEALTH_MULT_PER_LEVEL: float = 0.18
@@ -46,10 +51,10 @@ const SPAWN_ACCEL_PER_LEVEL: float = 0.05
 ## 刷怪间隔下限（秒）：再快也不低于0.4秒一只（性能保护）
 const SPAWN_INTERVAL_MIN: float = 0.4
 
-## 同屏敌人上限成长：每级+2只（旧值+3，放缓前期同屏数量增长）
-const MAX_ENEMIES_PER_LEVEL: int = 2
-## 同屏敌人硬上限：性能保护的绝对天花板
-const MAX_ENEMIES_HARD_CAP: int = 140
+## 同屏敌人上限成长：每级+4只（配合基础上限70只，10级恰好爬到硬上限100只）
+const MAX_ENEMIES_PER_LEVEL: int = 4
+## 同屏敌人硬上限：100只（用户要求，替代旧的140只，兼顾性能与体验）
+const MAX_ENEMIES_HARD_CAP: int = 100
 
 ## 精英怪刷新间隔压缩系数：每级-5%（精英怪越出越频繁）
 const ELITE_ACCEL_PER_LEVEL: float = 0.05
@@ -103,10 +108,17 @@ func _process(delta: float) -> void:
 	## 只在游戏进行时累计时间（暂停/菜单/结算时冻结难度曲线）
 	if not GameManager.is_playing():
 		return
+	## 已达难度上限：曲线停止爬升，直接跳过（不再累计时间，省去无意义运算）
+	if level >= MAX_LEVEL:
+		return
 	## 累计游戏时间
 	_elapsed += delta
 	## 检查是否到达难度提升时间点（while处理极端情况下的连升）
+	## 循环内必须二次判断上限：_advance_level() 封顶后会直接return、不再推进
+	## _next_level_time，若此处不break将导致死循环卡死整个游戏
 	while _elapsed >= _next_level_time:
+		if level >= MAX_LEVEL:
+			break
 		_advance_level()
 
 ## 重置本局难度状态（响应GameManager.game_started）
@@ -124,7 +136,7 @@ func _on_game_started() -> void:
 	_wave_count = 0
 
 	## ---- 跳跃到配置的开局难度 ----
-	var target: int = clamp(_configured_start_level, 1, 10)
+	var target: int = clampi(_configured_start_level, 1, MAX_LEVEL)
 	if target > 1:
 		## 先把累计时间 "拨快"，等于已经经历了(target-1)个难度周期
 		_elapsed = float(target - 1) * LEVEL_INTERVAL
@@ -137,9 +149,9 @@ func _on_game_started() -> void:
 ## ========== 外部 API（Settings.gd / Main.gd 使用） ==========
 
 ## 设置开局起始等级（Settings 界面点击应用后调用）
-## 参数：start_level - 下次新游戏的起始难度等级（1~10，越大约猛）
+## 参数：start_level - 下次新游戏的起始难度等级（1~MAX_LEVEL，越大约猛）
 func set_start_level(start_level: int) -> void:
-	_configured_start_level = clamp(start_level, 1, 10)
+	_configured_start_level = clampi(start_level, 1, MAX_LEVEL)
 	## 同时保存到 settings.cfg（确保关闭游戏再打开仍然记得）
 	_save_start_level_to_config()
 	print("[DifficultyManager] 配置开局难度等级 = ", _configured_start_level)
@@ -188,7 +200,11 @@ func _save_start_level_to_config() -> void:
 ## ========== 难度提升核心逻辑 ==========
 
 ## 提升一级难度：更新等级、广播信号、按条件触发波次事件
+## 已达 MAX_LEVEL 时直接返回（封顶，不再提升也不推进计时，防止等级无限膨胀）
 func _advance_level() -> void:
+	## 难度封顶判断（双保险：调用方 _process 也会先判断）
+	if level >= MAX_LEVEL:
+		return
 	## 等级+1，并推后下一次提升时间点（基于当前时间累加，避免时间漂移）
 	level += 1
 	_next_level_time += LEVEL_INTERVAL
@@ -228,7 +244,7 @@ func get_speed_mult() -> float:
 ## 参数：base_interval - GameWorld配置的基础间隔
 ## 返回：压缩后的间隔（不低于SPAWN_INTERVAL_MIN）
 func get_spawn_interval(base_interval: float) -> float:
-	## 间隔按每级-7%压缩：间隔 = 基础 / (1 + 0.07*(等级-1))
+	## 间隔按每级-5%压缩：间隔 = 基础 / (1 + 0.05*(等级-1))
 	var compressed: float = base_interval / (1.0 + SPAWN_ACCEL_PER_LEVEL * (level - 1))
 	return maxf(compressed, SPAWN_INTERVAL_MIN)
 
@@ -240,8 +256,8 @@ func get_elite_spawn_interval(base_interval: float) -> float:
 	return maxf(compressed, ELITE_INTERVAL_MIN)
 
 ## 获取缩放后的同屏敌人上限
-## 参数：base_max - GameWorld配置的基础上限
-## 返回：上限值（不超过硬上限）
+## 参数：base_max - GameWorld配置的基础上限（当前为70）
+## 返回：上限值（1级=基础上限，逐级+4，10级封顶于 MAX_ENEMIES_HARD_CAP=100）
 func get_max_enemies(base_max: int) -> int:
 	return mini(base_max + MAX_ENEMIES_PER_LEVEL * (level - 1), MAX_ENEMIES_HARD_CAP)
 
