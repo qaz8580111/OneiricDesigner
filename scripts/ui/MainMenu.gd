@@ -12,6 +12,9 @@ signal start_game()
 ## 打开设置信号：当用户点击设置按钮时发出，通知上层打开设置界面
 signal open_settings()
 
+## 打开排行榜信号：当用户点击排行榜按钮时发出，通知上层打开排行榜界面
+signal open_leaderboard()
+
 ## 退出游戏信号：当用户点击退出游戏按钮时发出，通知上层退出游戏
 signal quit_game()
 
@@ -28,6 +31,9 @@ signal quit_game()
 
 ## 设置按钮（打开设置界面）
 @onready var settings_button: Button = $VBoxContainer/SettingsButton
+
+## 排行榜按钮（打开排行榜界面：通关榜 / 登塔榜）
+@onready var leaderboard_button: Button = $VBoxContainer/LeaderboardButton
 
 ## 退出游戏按钮
 @onready var quit_button: Button = $VBoxContainer/QuitButton
@@ -53,6 +59,7 @@ func _ready() -> void:
 	## 连接按钮信号到处理方法
 	start_button.pressed.connect(_on_start_button_pressed)
 	settings_button.pressed.connect(_on_settings_button_pressed)
+	leaderboard_button.pressed.connect(_on_leaderboard_button_pressed)
 	quit_button.pressed.connect(_on_quit_button_pressed)
 	
 	## 监听语言变化信号（语言切换时更新界面文本）
@@ -83,6 +90,7 @@ func _update_text() -> void:
 	subtitle_label.text = TranslationManager.t("MENU_SUBTITLE")
 	start_button.text = TranslationManager.t("BUTTON_START_GAME")
 	settings_button.text = TranslationManager.t("BUTTON_SETTINGS")
+	leaderboard_button.text = TranslationManager.t("BUTTON_LEADERBOARD")
 	quit_button.text = TranslationManager.t("BUTTON_QUIT_GAME")
 	version_label.text = TranslationManager.t("VERSION") + " 1.0.0"
 
@@ -101,6 +109,11 @@ func _on_start_button_pressed() -> void:
 func _on_settings_button_pressed() -> void:
 	print("Opening settings...")
 	open_settings.emit()
+
+## 排行榜按钮点击回调：发出打开排行榜信号
+func _on_leaderboard_button_pressed() -> void:
+	print("Opening leaderboard...")
+	open_leaderboard.emit()
 
 ## 退出游戏按钮点击回调：发出退出游戏信号
 func _on_quit_button_pressed() -> void:

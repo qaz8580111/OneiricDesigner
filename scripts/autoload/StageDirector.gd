@@ -80,7 +80,8 @@ const ULTIMATE_BOSS_HITBOX_RADIUS: float = 66.0
 enum StageEventType {
 	MOB_WAVE,    ## 怪潮事件：一波"等级+1"的怪物
 	BOSS,        ## 守门 Boss 事件：阶段 N.5 出现的阶段 Boss
-	FINAL_BOSS   ## 关底 Boss 事件：阶段 10.5 出现的"梦境之主"
+	FINAL_BOSS,  ## 关底 Boss 事件：阶段 10.5 出现的"梦境之主"（通关模式专属）
+	TOWER        ## 登塔事件：阶段 10.5 的替代事件（无尽模式专属，接管后续节奏）
 }
 
 ## ========== 信号定义（供未来扩展使用，当前切面内部消费） ==========
@@ -137,6 +138,12 @@ const BOSS_ENTRY_TIME_STOP_FRAMES: int = 12  ## 60fps × 0.2s = 12帧
 ## GameWorld 缓存引用（懒查找，场景切换后自动失效重查）
 var _world_cache: Node2D = null
 
+## ---------- 终极 BOSS 战计时（通关榜的数据源，仅通关模式使用） ----------
+## 是否处于终极 BOSS 战：从「梦境根源」登场置 true，被击杀置 false
+var _ultimate_boss_active: bool = false
+## 终极 BOSS 战已进行的时间（秒）：通关榜记录的就是这段用时
+var _ultimate_boss_time: float = 0.0
+
 ## ========== UI 组件引用（切面自建 CanvasLayer，不改 GameHUD） ==========
 
 ## 切面专属 UI 层（阶段字幕 / Boss 血条 / 进度标签都挂这里）
@@ -165,6 +172,8 @@ func _ready() -> void:
 	_build_hud_layer()
 	## 前置通知：每局开始时重置进度状态
 	GameManager.game_started.connect(_on_game_started)
+	## 登塔层数变化（无尽模式）：更新进度标签并播报登层
+	TowerManager.floor_changed.connect(_on_tower_floor_changed)
 
 ## _process() - 切面主循环：推进计时、管理活动事件、触发已到点事件
 ## 数据流：is_playing 门禁 → 累计时间 → 活动事件完结检查 → 下一事件触发
@@ -174,6 +183,11 @@ func _process(delta: float) -> void:
 		return
 	## 门禁 2：已进入终极关卡 → 时间轴退役，本局进度由终极 BOSS 战独立接管
 	if _run_completed:
+		## 终极 BOSS 战计时：实时把用时刷到左上角进度标签，让玩家看得见自己的挑战进度
+		## （无尽模式登塔时 _ultimate_boss_active 保持 false，此标签由登塔播报独立维护）
+		if _ultimate_boss_active:
+			_ultimate_boss_time += delta
+			_update_stage_label("终极关卡 · 用时 %.1f 秒" % _ultimate_boss_time)
 		return
 
 	## 累计游戏时间
@@ -201,9 +215,16 @@ func _build_timeline() -> Array:
 			"type": StageEventType.MOB_WAVE,
 			"stage": stage,
 		})
-		## 阶段 N.5：阶段 10 之前是守门 Boss，阶段 10 之后是关底 Boss
+		## 阶段 N.5：阶段 10 之前是守门 Boss；阶段 10.5 按模式分叉
+		## 通关模式 → 关底 Boss「梦境之主」（击杀后进入终极关卡打「梦境根源」）
+		## 无尽模式 → 登塔事件（难度已封顶10，之后由 TowerManager 每分钟+1层无限推进）
 		var boss_time: float = base_time + STAGE_INTERVAL * 0.5
-		var boss_type: int = StageEventType.FINAL_BOSS if stage == MAX_STAGE else StageEventType.BOSS
+		var boss_type: int = StageEventType.BOSS
+		if stage == MAX_STAGE:
+			if GameManager.current_mode == GameManager.RunMode.ENDLESS:
+				boss_type = StageEventType.TOWER
+			else:
+				boss_type = StageEventType.FINAL_BOSS
 		timeline.append({
 			"time": boss_time,
 			"type": boss_type,
@@ -237,6 +258,11 @@ func _try_fire_next_event() -> void:
 		StageEventType.BOSS, StageEventType.FINAL_BOSS:
 			if _fire_boss(ev):
 				_active_type = ev.type
+				_event_index += 1
+		StageEventType.TOWER:
+			## 登塔事件：触发即宣告阶段流程终结（_fire_tower 内部置位 _run_completed），
+			## 因此不设置 _active_type——时间轴已退役，无需再等待任何事件完结
+			if _fire_tower(ev):
 				_event_index += 1
 
 ## 更新活动事件状态：怪潮完结检测 + Boss 引用兜底清理
@@ -551,6 +577,49 @@ func _on_boss_killed(boss: Node, is_final: bool) -> void:
 		_show_banner("守门者已被击败", Color(0.6, 1.0, 0.6), 1.5)
 		print("[StageDirector] 守门 Boss 已被击败，下一阶段事件解锁")
 
+## ========== 无尽模式：登塔事件（阶段 10.5 的替代分支） ==========
+
+## 触发登塔事件：无尽模式在本局阶段流程的终点，之后由 TowerManager 接管节奏
+## 与 _enter_ultimate_stage 的关键差异：
+##   1. 不停止常规刷怪——登塔阶段的压力来源是"逐层增幅的敌人"，停刷就没有内容
+##   2. 不生成终极 BOSS——无尽模式没有终点，玩家死亡才是本局结束
+##   3. 不触发 run_completed——通关信号是通关模式的专用收尾，无尽模式不适用
+## 参数：ev - 事件字典 {time, type, stage}（当前未使用，保留以匹配触发分发签名）
+## 返回：true=触发成功（游标可前进）；false=世界未就绪（下帧重试）
+func _fire_tower(_ev: Dictionary) -> bool:
+	var world: Node2D = _get_world()
+	if world == null:
+		return false
+
+	## ---- 1. 时间轴退役：不再触发任何阶段事件（进度交由 TowerManager 接管） ----
+	_run_completed = true
+	_active_type = -1
+	_wave_enemies.clear()
+	## 狂暴状态复位：Boss 阶段的状态不能带进登塔（虽无 Boss，但防御性保持一致）
+	_boss_enraged = false
+
+	## ---- 2. 清掉场上残敌：登塔从干净的战场开始（常规刷怪保持开启，新怪立即带增幅） ----
+	if world.has_method("clear_all"):
+		world.call("clear_all")
+
+	## ---- 3. 宣告 + 开启登塔（增幅由 TowerManager 每层写入 DifficultyManager） ----
+	_update_stage_label("登塔 · 第 1 层")
+	if AudioManager:
+		AudioManager.play("difficulty_up", 1.0)
+		AudioManager.play("wave_start", 0.8)
+	_show_banner("★ 登 塔 开 始 ★\n难度已达上限 · 每分钟登高一层", Color(0.7, 0.9, 1.0), 3.5)
+	TowerManager.begin_tower()
+	print("[StageDirector] 无尽模式：难度10已达成，登塔开启")
+	return true
+
+## 登塔层数提升回调（响应 TowerManager.floor_changed：无尽模式专属）
+## 参数：floor - 新层数
+func _on_tower_floor_changed(floor: int) -> void:
+	_update_stage_label("登塔 · 第 %d 层" % floor)
+	_show_banner("▲ 登塔 · 第 %d 层 ▲" % floor, Color(0.7, 0.9, 1.0), 2.0)
+	if AudioManager:
+		AudioManager.play("difficulty_up", 0.8)
+
 ## ========== 终极关卡（终局流程：清场 → 停刷怪 → 终极 BOSS） ==========
 
 ## 进入终极关卡：本局阶段流程的终点，之后只面对终极 BOSS「梦境根源」
@@ -591,6 +660,11 @@ func _enter_ultimate_stage() -> void:
 ## 说明：终极 BOSS 与阶段事件解耦——不推进事件游标、不参与难度缩放，数值为终局固定形态
 ## 参数：world - 游戏世界（Boss 挂载容器 / 掉落路由目标）
 func _spawn_ultimate_boss(world: Node2D) -> void:
+	## ---- 通关榜计时起点：从「梦境根源」登场这一刻开始计时 ----
+	## 说明：计时在 _process 内累加，暂停/结算期间自然冻结，与实际战斗耗时一致
+	_ultimate_boss_active = true
+	_ultimate_boss_time = 0.0
+
 	## 构建数据副本（深拷贝，绝不污染共享 .tres——项目硬性约定）
 	var boss_data: EnemyDataClass = _build_ultimate_boss_data(world)
 
@@ -767,13 +841,19 @@ func _on_ultimate_boss_killed(_boss: Node) -> void:
 	_current_boss = null
 	_active_type = -1
 	_hide_boss_hud()
-	_show_banner("★ 梦境根源已被击碎 ★\n梦境终结 · 恭喜通关", Color(1.0, 0.9, 0.4), 6.0)
-	_update_stage_label("通关")
+	## ---- 通关榜：记录终极 BOSS 战用时（从「梦境根源」登场到被击杀） ----
+	## 停表：计时以本局最后一次 _process 累加值为准（击杀帧的 delta 已计入）
+	_ultimate_boss_active = false
+	var battle_time: float = _ultimate_boss_time
+	var rank: int = LeaderboardManager.record_classic_time(battle_time)
+	var time_text: String = LeaderboardManager.format_time(battle_time)
+	_update_stage_label("通关 · 用时 %s" % time_text)
+	_show_banner("★ 梦境根源已被击碎 ★\n梦境终结 · 恭喜通关\n终极BOSS战用时：%s" % time_text, Color(1.0, 0.9, 0.4), 6.0)
 	if AudioManager:
 		AudioManager.play("buff_pickup", 1.0)
 		AudioManager.play("upgrade_pick", 1.0)
 	run_completed.emit()
-	print("[StageDirector] 终极 BOSS 已被击败：本局通关")
+	print("[StageDirector] 终极 BOSS 已被击败：本局通关，BOSS战用时 %.1f 秒（榜内第 %d 名）" % [battle_time, rank])
 
 ## Boss 掉落补路由：Boss 不在业务管理列表，drops_generated 信号由切面转接
 ## 参数：position - 掉落位置，drops - 掉落物数组，world - 游戏世界
@@ -955,6 +1035,8 @@ func _on_game_started() -> void:
 	_wave_check_accum = 0.0
 	_current_boss = null
 	_boss_enraged = false  ## 重置濒死狂暴状态（新局从满血开始）
+	_ultimate_boss_active = false  ## 重置终极 BOSS 战计时（新局未开打）
+	_ultimate_boss_time = 0.0
 	_world_cache = null  ## 场景可能已重建，强制重查 GameWorld
 	## 切面 UI 复位
 	_hide_boss_hud()
@@ -968,7 +1050,12 @@ func _on_game_started() -> void:
 ## ========== 工具方法 ==========
 
 ## 懒查找并缓存 GameWorld 引用（切面与业务解耦：不依赖场景结构的具体路径）
-## 查找策略：current_scene 下名为 "GameWorld" 的节点 + has_method 特征校验（切点匹配）
+## 查找策略：从 current_scene 起深度优先遍历，取首个具备 _spawn_enemy 特征的节点（切点匹配）
+## 背景修正：Main.tscn 的 "GameWorld" 是**无脚本容器**，真正的世界实例是
+##           GameWorld.tscn 根节点，挂在 Main/GameWorld/GameWorld（多一层嵌套）。
+##           旧实现只查 current_scene 的直接子节点 → 命中无脚本容器 → 特征校验失败 → 返回 null，
+##           导致 _fire_mob_wave/_fire_boss 永远提前 return，阶段事件游标不前进（终极 BOSS 永不出现）。
+##           改为递归特征查找后，无论世界嵌多深都能正确解析。
 func _get_world() -> Node2D:
 	if _world_cache != null and is_instance_valid(_world_cache):
 		return _world_cache
@@ -976,10 +1063,22 @@ func _get_world() -> Node2D:
 	var scene: Node = get_tree().current_scene
 	if scene == null:
 		return null
-	var gw: Node = scene.get_node_or_null("GameWorld")
-	if gw != null and gw.has_method("_spawn_enemy"):
-		_world_cache = gw
+	_world_cache = _find_world_node(scene)
 	return _world_cache
+
+## 深度优先查找首个具备 _spawn_enemy 特征的世界节点（切点匹配，与场景层级解耦）
+## 参数：root - 查找起点节点
+## 返回：找到的世界节点；未找到返回 null（下帧会自动重试）
+func _find_world_node(root: Node) -> Node2D:
+	## 特征校验优先：节点自身即世界（兼容"世界直接作为 current_scene"的场景结构）
+	if root is Node2D and root.has_method("_spawn_enemy"):
+		return root as Node2D
+	## 递归子节点（深度优先，命中即返回，避免无谓的全树遍历）
+	for child in root.get_children():
+		var found: Node2D = _find_world_node(child)
+		if found != null:
+			return found
+	return null
 
 ## ========== 直播增强：Boss登场特效 ==========
 

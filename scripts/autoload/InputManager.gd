@@ -47,6 +47,12 @@ var _cached_movement: Vector2 = Vector2.ZERO
 ## 缓存的右摇杆瞄准向量（手柄双摇杆射击专用，已做径向死区过滤）
 var _cached_aim: Vector2 = Vector2.ZERO
 
+## 缓存的左摇杆"物理偏转"向量（仅反映左摇杆本身，不含键盘方向键）
+## 用途：菜单导航/滑条调值的持续输入。game_move_* 同时绑定键盘方向键，
+##       菜单若直接用它会在键盘上产生"一次按键走两格"的双重响应，
+##       故单独缓存纯摇杆分量供 UI 层使用
+var _cached_stick: Vector2 = Vector2.ZERO
+
 ## 缓存的动作按下状态（_input 中捕获，_physics_process 中消费后清除）
 var _just_pressed_actions: Dictionary = {}
 
@@ -196,6 +202,13 @@ func get_movement() -> Vector2:
 ## 获取导航向量（已处理死区+归一化）- UI菜单导航专用
 func get_navigation_vector() -> Vector2:
 	return _cached_movement
+
+## 获取"左摇杆专用"向量（已处理死区）- 菜单持续导航/滑条连续调值专用
+## 与 get_navigation_vector() 的区别：后者来自 game_move_* 动作，键盘方向键也会计入；
+## 键盘方向键同时绑定 ui_*（由 _unhandled_input 单次处理），若菜单轮询再处理一次，
+## 就会出现"按一下走两格/滑条跳两格"。本接口只返回摇杆物理偏转，二者互不重叠。
+func get_stick_vector() -> Vector2:
+	return _cached_stick
 
 
 ## 获取右摇杆瞄准向量（已做径向死区过滤，未归一时保留摇杆倾斜强度）
@@ -377,6 +390,20 @@ func _cache_movement_input() -> void:
 		input_y = Input.get_axis("game_move_up", "game_move_down")
 
 	_cached_movement = Vector2(input_x, input_y)
+
+	# ---------- 左摇杆物理偏转（纯摇杆分量，供菜单导航/滑条调值） ----------
+	# 必须直接读轴而非动作：game_move_* 同时绑定键盘方向键，仅凭动作无法区分来源。
+	# 遍历所有已连接手柄取偏转最大者，避免依赖 _active_joypad_id 的检测时序。
+	var stick_vec: Vector2 = Vector2.ZERO
+	for device_id in Input.get_connected_joypads():
+		var candidate: Vector2 = Vector2(
+			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
+			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
+		)
+		if candidate.length() > stick_vec.length():
+			stick_vec = candidate
+	# 径向死区过滤：与瞄准轴同一策略，避免斜推时的残留漂移
+	_cached_stick = stick_vec if stick_vec.length() >= JOYSTICK_DEADZONE else Vector2.ZERO
 
 	# ---------- 右摇杆瞄准轴（手柄独占；动作缺失时视为零输入） ----------
 	var aim_x: float = 0.0

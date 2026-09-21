@@ -31,6 +31,14 @@ enum GameState {
 	GAME_OVER  ## 游戏结束：玩家死亡
 }
 
+## 定义游戏模式
+## CLASSIC：通关模式——难度10后走完终极BOSS战即通关（榜单按 BOSS 战用时升序）
+## ENDLESS：无尽模式——难度10后进入登塔，层数每分钟+1、敌人属性逐层增幅（榜单按层数降序）
+enum RunMode {
+	CLASSIC,   ## 通关模式：击败终极BOSS「梦境根源」即通关
+	ENDLESS    ## 无尽模式：难度10后无限登塔，直至死亡
+}
+
 ## ========== 成员变量（运行时数据） ==========
 
 ## 当前游戏状态
@@ -39,11 +47,15 @@ var current_state: GameState = GameState.MENU
 ## 当前游戏种子（用于生成随机地图、敌人等）
 var game_seed: int = 0
 
+## 当前游戏模式（在 start_new_game 中定稿，game_started 之前写入，各监听者可在回调中读取）
+var current_mode: RunMode = RunMode.CLASSIC
+
 ## ========== 核心方法（游戏生命周期） ==========
 
 ## 开始新游戏
 ## 参数：seed - 游戏种子（0表示自动生成随机种子）
-func start_new_game(seed: int = 0) -> void:
+##       mode - 游戏模式（通关/无尽），默认通关模式
+func start_new_game(seed: int = 0, mode: RunMode = RunMode.CLASSIC) -> void:
 	## 如果未指定种子，生成真正随机的种子
 	if seed == 0:
 		game_seed = RandomManager.generate_true_random_seed()
@@ -51,6 +63,9 @@ func start_new_game(seed: int = 0) -> void:
 		## 使用指定的种子（用于测试或重播）
 		game_seed = seed
 	
+	## 定稿本局模式：必须在 game_started 之前写入，
+	## 确保各监听者（RunStats/StageDirector/TowerManager 等）在回调里读到的模式已就位
+	current_mode = mode
 	## 将种子设置到随机管理器（确保游戏内所有随机数基于此种子）
 	## 顺序关键：必须先定种子再发game_started——监听者初始化期间产生的随机数也已确定可复现
 	RandomManager.set_seed(game_seed)
@@ -59,7 +74,7 @@ func start_new_game(seed: int = 0) -> void:
 	## 发出游戏开始信号（通知其他节点开始游戏逻辑）
 	game_started.emit()
 	## 输出日志（用于调试和记录）
-	print("Game started with seed: ", game_seed)
+	print("Game started with seed: ", game_seed, " mode: ", RunMode.keys()[current_mode])
 
 ## 结束游戏（玩家死亡时调用）
 func end_game() -> void:

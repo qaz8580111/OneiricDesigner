@@ -67,6 +67,10 @@ var translations: Dictionary = {
 		"BUTTON_BACK":  "返回",
 		"BUTTON_RESET": "重置为默认",
 		"BUTTON_APPLY": "应用",
+
+		## 设置菜单翻译（操作提示行：手柄/键盘引导）
+		"SETTINGS_HINT": "LT / RT 切换分类 · 方向键选择 · 左右调节数值 · A 确认 · B 返回",
+
 		
 		## 难度选项翻译
 		"DIFFICULTY_EASY":   "简单",
@@ -97,7 +101,30 @@ var translations: Dictionary = {
 		"EVENT_HEAL": "治疗",
 		"EVENT_DAMAGE": "伤害",
 		"EVENT_TREASURE": "发现宝藏",
-		"EVENT_TRAP": "触发陷阱"
+		"EVENT_TRAP": "触发陷阱",
+
+		## 模式选择面板翻译
+		"MODE_SELECT_TITLE": "选择游戏模式",
+		"MODE_SELECT_HINT": "LT / RT 切换模式 · A 确认开始 · B 返回",
+		"MODE_CLASSIC": "通关模式",
+		"MODE_ENDLESS": "无尽模式",
+		"MODE_CLASSIC_DESC": "难度随时间提升，最高10级。\n达到10级后再战约1-2分钟，小怪将被清场，进入终极BOSS战「梦境根源」。\n击败它即通关，成绩取BOSS战用时——用时越短排名越高。",
+		"MODE_ENDLESS_DESC": "难度随时间提升，最高10级。\n达到10级后进入「登塔」：每分钟登高一层，敌人数量上限不变，\n但属性全面增幅12%/层，层层叠加，直至你倒下。\n成绩取最终登塔层数——层数越高排名越高。",
+		"BUTTON_CONFIRM_START": "开始游戏",
+
+		## 排行榜翻译
+		"BUTTON_LEADERBOARD": "排行榜",
+		"LEADERBOARD_TITLE": "排行榜",
+		"LEADERBOARD_TAB_CLASSIC": "通关榜",
+		"LEADERBOARD_TAB_TOWER": "登塔榜",
+		"LEADERBOARD_COL_RANK": "排名",
+		"LEADERBOARD_COL_TIME": "BOSS战用时",
+		"LEADERBOARD_COL_FLOOR": "登塔层数",
+		"LEADERBOARD_COL_DATE": "记录时间",
+		"LEADERBOARD_EMPTY": "暂无记录 · 快去创造第一条成绩吧",
+		"LEADERBOARD_BEST": "历史最佳",
+		"LEADERBOARD_FLOOR_UNIT": "层",
+		"LEADERBOARD_HINT": "LT / RT 切换榜单 · B 返回"
 	},
 	"en_US": {
 		## 主菜单翻译（英文）
@@ -144,6 +171,10 @@ var translations: Dictionary = {
 		"BUTTON_BACK":  "Back",
 		"BUTTON_RESET": "Reset to Default",
 		"BUTTON_APPLY": "Apply",
+
+		## 设置菜单翻译（英文 - 操作提示行）
+		"SETTINGS_HINT": "LT / RT Switch Tab · D-Pad Navigate · Left / Right Adjust · A Confirm · B Back",
+
 		
 		## 难度选项翻译（英文）
 		"DIFFICULTY_EASY":   "Easy",
@@ -174,7 +205,30 @@ var translations: Dictionary = {
 		"EVENT_HEAL": "Healing",
 		"EVENT_DAMAGE": "Damage",
 		"EVENT_TREASURE": "Treasure Found",
-		"EVENT_TRAP": "Trap Triggered"
+		"EVENT_TRAP": "Trap Triggered",
+
+		## 模式选择面板翻译（英文）
+		"MODE_SELECT_TITLE": "Select Game Mode",
+		"MODE_SELECT_HINT": "LT / RT Switch Mode · A Start · B Back",
+		"MODE_CLASSIC": "Classic Mode",
+		"MODE_ENDLESS": "Endless Mode",
+		"MODE_CLASSIC_DESC": "Difficulty rises over time, capping at level 10.\nAfter reaching level 10, fight on for about 1-2 minutes: mobs are cleared\nand the final boss \"Origin of Dreams\" appears.\nDefeat it to clear the run. Your score is the boss fight time - shorter is better.",
+		"MODE_ENDLESS_DESC": "Difficulty rises over time, capping at level 10.\nAfter that, the Tower Climb begins: one floor higher every minute.\nThe enemy cap stays the same, but all enemy stats gain +12% per floor,\nstacking endlessly - until you fall.\nYour score is the final floor reached - higher is better.",
+		"BUTTON_CONFIRM_START": "Start Game",
+
+		## 排行榜翻译（英文）
+		"BUTTON_LEADERBOARD": "Leaderboard",
+		"LEADERBOARD_TITLE": "Leaderboard",
+		"LEADERBOARD_TAB_CLASSIC": "Classic Board",
+		"LEADERBOARD_TAB_TOWER": "Tower Board",
+		"LEADERBOARD_COL_RANK": "Rank",
+		"LEADERBOARD_COL_TIME": "Boss Fight Time",
+		"LEADERBOARD_COL_FLOOR": "Floor Reached",
+		"LEADERBOARD_COL_DATE": "Date",
+		"LEADERBOARD_EMPTY": "No records yet - go set the first one!",
+		"LEADERBOARD_BEST": "Best",
+		"LEADERBOARD_FLOOR_UNIT": "F",
+		"LEADERBOARD_HINT": "LT / RT Switch Board · B Back"
 	}
 }
 

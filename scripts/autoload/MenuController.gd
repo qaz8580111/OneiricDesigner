@@ -20,7 +20,9 @@ enum Direction { UP, DOWN, LEFT, RIGHT }
 @export var joystick_deadzone: float = 0.2
 ## 首次拨动方向后的持续触发延迟（秒）：长按超过此时间才进入连发，防止轻拨连跳选项
 @export var initial_delay: float = 0.4
-## 连发重复间隔（秒）：预留调参项，当前_process连发直接复用initial_delay作为间隔
+## 连发重复间隔（秒）：焦点在滑条/下拉框上做"就地调节"时使用的连发间隔。
+## 就地调值需要快速扫过量程（音量0~100每档5，慢间隔会让玩家等到不耐烦），
+## 故此处用远小于 initial_delay 的间隔；普通焦点移动仍用 initial_delay，避免选项跳得过快
 @export var repeat_delay: float = 0.15
 
 # 当前管理的可聚焦控件列表（activate时递归收集，按场景树顺序排列）
@@ -53,8 +55,11 @@ func _ready() -> void:
 	set_process_unhandled_input(false)
 
 ## 激活导航器：开启输入处理、收集可聚焦控件、注册输入上下文
-## 参数：parent - 菜单根控件，其子树中的Button/OptionButton/CheckBox/HSlider将纳入导航
-func activate(parent: Control) -> void:
+## 参数：parent  - 菜单根控件，其子树中的Button/OptionButton/CheckBox/HSlider将纳入导航
+##       context - 注册的输入上下文名；默认 "PAUSE_MENU"（暂停菜单/主菜单），
+##                 设置界面应传 "SETTINGS"（该上下文不放行 game_pause，
+##                 避免在设置页按开始键误触发暂停逻辑）
+func activate(parent: Control, context: String = "PAUSE_MENU") -> void:
 	is_active = true
 	_parent = parent
 	set_process(true)
@@ -63,8 +68,12 @@ func activate(parent: Control) -> void:
 	## 自动把焦点落到第一个可聚焦控件，手柄玩家无需先按键即可开始导航
 	if focusable_controls.size() > 0:
 		_set_focus(0)
+	## 监听视口焦点变化：鼠标点击/其他逻辑抢走焦点时反向同步 current_index，
+	## 否则"就地调节"（左右键调值）会作用到与视觉焦点不一致的控件上
+	if not get_viewport().gui_focus_changed.is_connected(_on_viewport_gui_focus_changed):
+		get_viewport().gui_focus_changed.connect(_on_viewport_gui_focus_changed)
 	# 注册 UI 上下文（屏蔽GAMEPLAY动作，仅放行ui_前缀输入）
-	InputManager.push_context("PAUSE_MENU")
+	InputManager.push_context(context)
 
 ## 停用导航器：关闭处理、清空控件列表并注销输入上下文（菜单关闭时调用，防输入残留）
 func deactivate() -> void:
@@ -75,6 +84,10 @@ func deactivate() -> void:
 	focusable_controls.clear()
 	current_index = 0
 	_reset_joystick_state()
+	## 断开视口焦点监听（避免菜单关闭后仍被其他界面的焦点变化回调到）
+	var vp: Viewport = get_viewport()
+	if vp != null and vp.gui_focus_changed.is_connected(_on_viewport_gui_focus_changed):
+		vp.gui_focus_changed.disconnect(_on_viewport_gui_focus_changed)
 	# 注销 UI 上下文
 	InputManager.pop_context()
 
@@ -138,6 +151,16 @@ func _set_focus(index: int) -> void:
 	var control: Control = focusable_controls[current_index]
 	control.grab_focus()
 
+## 视口焦点变化回调：把 current_index 同步为实际获得焦点的控件索引
+## 触发来源：鼠标点击控件、切页、其他界面主动 grab_focus
+## 焦点控件不在本导航列表内（例如别的界面）时保持原索引不变
+func _on_viewport_gui_focus_changed(control: Control) -> void:
+	if not is_active or control == null:
+		return
+	var idx: int = focusable_controls.find(control)
+	if idx >= 0:
+		current_index = idx
+
 ## 移动焦点：按屏幕几何方向寻找最近控件（而非简单索引±1），贴合视觉布局
 func _move_focus(direction: Direction) -> void:
 	if focusable_controls.is_empty():
@@ -145,11 +168,6 @@ func _move_focus(direction: Direction) -> void:
 
 	var old_index: int = current_index
 	var current: Control = focusable_controls[current_index]
-
-	# 如果当前焦点在 TabContainer 上，先尝试切换标签
-	if current is TabContainer and (direction == Direction.LEFT or direction == Direction.RIGHT):
-		if _handle_tab_container_navigation(current, direction):
-			return
 
 	match direction:
 		Direction.UP:
@@ -213,44 +231,60 @@ func _get_control_center(control: Control) -> Vector2:
 	return Vector2.ZERO
 
 ## 确认当前焦点控件：按控件类型模拟"点击"（手柄A键等价于鼠标点击按钮）
-## HSlider与TabContainer不在此模拟：滑条拖动/标签切换由各自的原生焦点/输入机制处理
+## 滑条（HSlider）与下拉框（OptionButton）不在此模拟：
+##   二者的值由左右方向键/摇杆在焦点上"就地调节"（见_adjust_current_value），
+##   手柄无需展开下拉弹窗（弹窗是窗口级Popup，焦点易被抢，主机端通用做法是就地轮换选项）
 func _confirm_current() -> void:
 	if focusable_controls.is_empty():
 		return
 	var control: Control = focusable_controls[current_index]
 	if control is Button:
 		(control as Button).pressed.emit()
-	elif control is OptionButton:
-		## 下拉已展开：直接确认当前选中项；未展开：先抓焦点（展开选项列表）由玩家再选
-		if (control as OptionButton).popup.visible:
-			(control as OptionButton).popup.select(control.selected)
-			(control as OptionButton).id_pressed.emit(control.selected)
-		else:
-			(control as OptionButton).grab_focus()
 	elif control is CheckBox:
 		## 先翻转勾选态（不自动发信号），再手动补发toggled：保证监听方收到且只收到一次变更
 		(control as CheckBox).set_pressed_no_signal(!(control as CheckBox).is_pressed())
 		(control as CheckBox).toggled.emit((control as CheckBox).is_pressed())
-	elif control is HSlider:
-		pass
-	elif control is TabContainer:
-		pass
 	confirm_pressed.emit(control)
 
-## 处理 TabContainer 的左右切换（已到边界标签时返回false，交回通用几何导航移动焦点）
-## 返回：true=已消耗本次方向输入（成功切换了标签）
-func _handle_tab_container_navigation(control: Control, direction: Direction) -> bool:
-	if control is TabContainer:
-		var tab = control as TabContainer
-		if direction == Direction.LEFT:
-			if tab.current_tab > 0:
-				tab.current_tab -= 1
-				return true
-		elif direction == Direction.RIGHT:
-			if tab.current_tab < tab.get_tab_count() - 1:
-				tab.current_tab += 1
-				return true
-	return false
+## 判断控件是否支持"聚焦后就地调节"（左右键增减数值/切换选项，而非移动焦点）
+## HSlider：左右键按 step 增减数值；OptionButton：左右键循环切换选中项
+## 参数可能为 null（焦点列表为空/索引失效时），统一返回 false
+func _is_in_place_adjustable(control: Control) -> bool:
+	return control != null and (control is HSlider or control is OptionButton)
+
+## 就地调节当前焦点控件的数值/选项（方向仅取 LEFT/RIGHT，其余忽略）
+## 返回：true=已完成就地调节（调用方应消费本次输入，不再移动焦点）
+func _adjust_current_value(direction: Direction) -> bool:
+	if focusable_controls.is_empty():
+		return false
+	var control: Control = focusable_controls[current_index]
+	if not _is_in_place_adjustable(control):
+		return false
+
+	## 方向→步进符号：RIGHT=+1（增大/下一项），LEFT=-1（减小/上一项）
+	var sign_step: int = 0
+	if direction == Direction.RIGHT:
+		sign_step = 1
+	elif direction == Direction.LEFT:
+		sign_step = -1
+	if sign_step == 0:
+		return false
+
+	if control is HSlider:
+		## 滑条：按 step 增减并钳制到量程；set_value 会发出 value_changed，
+		## 消费方（如设置页音量滑块）据此实时应用，无需在此额外发信号
+		var slider: HSlider = control as HSlider
+		slider.set_value(clamp(slider.value + slider.step * sign_step, slider.min_value, slider.max_value))
+	elif control is OptionButton:
+		## 下拉框：循环切换选中项（到边界回卷）。
+		## select() 为程序化接口，不会自发 item_selected，故手动补发让监听方（如主题下拉）同步生效
+		var option: OptionButton = control as OptionButton
+		var count: int = option.item_count
+		if count <= 0:
+			return false
+		option.select((option.selected + sign_step + count) % count)
+		option.item_selected.emit(option.selected)
+	return true
 
 ## 重置摇杆状态
 func _reset_joystick_state() -> void:
@@ -266,8 +300,9 @@ func _process(delta: float) -> void:
 	if InputManager.current_device != "joypad":
 		return
 
-	# 使用 InputManager 公共接口获取导航向量
-	var nav_vector: Vector2 = InputManager.get_navigation_vector()
+	# 获取"摇杆专用"向量：键盘方向键/D-Pad 已由 _unhandled_input（ui_*）单次处理，
+	# 这里只负责摇杆的持续输入，避免同一按键被"事件 + 轮询"各处理一次（按一下走两格）
+	var nav_vector: Vector2 = InputManager.get_stick_vector()
 	var joy_x: float = nav_vector.x
 	var joy_y: float = nav_vector.y
 
@@ -280,16 +315,29 @@ func _process(delta: float) -> void:
 		current_direction = Direction.RIGHT if joy_x > 0 else Direction.LEFT
 
 	if current_direction >= 0:
+		## 判断本次拨动是否为"就地调节"（焦点在滑条/下拉框上且方向为左右）：
+		## 是则连续增减数值/轮换选项，连发间隔用更快的 repeat_delay；
+		## 否则为普通焦点移动，仍用 initial_delay 防止选项跳得过快
+		var in_place: bool = (current_direction == Direction.LEFT or current_direction == Direction.RIGHT) \
+			and _is_in_place_adjustable(get_current_control())
+		var repeat_interval: float = repeat_delay if in_place else initial_delay
+
 		if current_direction != _joystick_last_direction:
-			## 方向刚变化：立即移动一次并清零计时（首次响应零延迟，手感关键）
+			## 方向刚变化：立即响应一次并清零计时（首次响应零延迟，手感关键）
 			_joystick_last_direction = current_direction
 			_joystick_hold_time = 0.0
-			_move_focus(current_direction)
-		else:
-			## 同方向持续按住：累计时间，超过首延迟后进入连发（间隔复用initial_delay）
-			_joystick_hold_time += delta
-			if _joystick_hold_time >= initial_delay:
+			if in_place:
+				_adjust_current_value(current_direction)
+			else:
 				_move_focus(current_direction)
+		else:
+			## 同方向持续按住：累计时间，超过阈值后进入连发
+			_joystick_hold_time += delta
+			if _joystick_hold_time >= repeat_interval:
+				if in_place:
+					_adjust_current_value(current_direction)
+				else:
+					_move_focus(current_direction)
 				_joystick_hold_time = 0.0
 	else:
 		## 摇杆回中：清空状态，下次拨动视为全新输入
@@ -312,11 +360,14 @@ func _unhandled_input(_event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		
 	elif InputManager.is_action_just_pressed_safe("ui_left"):
-		_move_focus(Direction.LEFT)
+		## 焦点在滑条/下拉框上：左右键就地调节数值或选项；否则按几何方向移动焦点
+		if not _adjust_current_value(Direction.LEFT):
+			_move_focus(Direction.LEFT)
 		get_viewport().set_input_as_handled()
 		
 	elif InputManager.is_action_just_pressed_safe("ui_right"):
-		_move_focus(Direction.RIGHT)
+		if not _adjust_current_value(Direction.RIGHT):
+			_move_focus(Direction.RIGHT)
 		get_viewport().set_input_as_handled()
 	
 	elif InputManager.is_action_just_pressed_safe("ui_confirm"):
@@ -326,7 +377,3 @@ func _unhandled_input(_event: InputEvent) -> void:
 	elif InputManager.is_action_just_pressed_safe("ui_cancel"):
 		cancel_pressed.emit()
 		get_viewport().set_input_as_handled()
-
-## 检测是否有手柄连接（委托InputManager统一判定，避免各处自行查询设备状态）
-func _has_connected_joypad() -> bool:
-	return InputManager.current_device == "joypad"

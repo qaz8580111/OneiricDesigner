@@ -25,6 +25,15 @@ signal go_back()
 ## 设置应用信号：当用户点击应用按钮时发出，携带当前设置字典
 signal settings_applied(settings: Dictionary)
 
+## ========== 音量默认值（单一来源） ==========
+## 这三处曾各自写死数值且互相冲突（成员变量=85/45、配置文件缺省回退=70/90、场景滑块=70/90），
+## 导致"恢复默认"与"首次加载"得到的音量不同。此处收敛为唯一常量，
+## 成员变量初始化、_reset_defaults()、_load_settings() 缺省回退、场景滑块初始值全部对齐到它。
+## 取值依据：BGM 调高(85) + 音效调低(45)，让背景音乐主导、音效辅助（AudioManager 导出默认值同为此比例）
+const DEFAULT_MASTER_VOLUME: float = 80.0
+const DEFAULT_MUSIC_VOLUME: float = 85.0
+const DEFAULT_SFX_VOLUME: float = 45.0
+
 ## ========== 设置数据（运行时配置） ==========
 
 ## 游戏性设置：难度等级（0=简单，1=普通，2=困难，3=专家）
@@ -37,15 +46,15 @@ var show_fps: bool = false
 var auto_shoot: bool = true
 
 ## 音频设置：主音量（0~100）
-var master_volume: float = 80.0
+var master_volume: float = DEFAULT_MASTER_VOLUME
 
 ## 音频设置：音乐音量（0~100）
 ## 调高让 BGM 占主导，与音效形成舒适主次
-var music_volume: float = 85.0
+var music_volume: float = DEFAULT_MUSIC_VOLUME
 
 ## 音频设置：音效音量（0~100）
 ## 调低避免弹幕密集时盖过音乐
-var sfx_volume: float = 45.0
+var sfx_volume: float = DEFAULT_SFX_VOLUME
 
 ## 视频设置：分辨率索引（对应RESOLUTIONS数组的索引）
 ## 默认=1 → "1920x1280"，即项目默认 viewport 分辨率
@@ -114,6 +123,9 @@ var theme_id: String = "default"
 ## ---- 语言标签页：标签文本 + 控件 ----
 @onready var language_label: Label
 @onready var language_option: OptionButton
+
+## ---- 操作提示行（手柄/键盘引导文本） ----
+@onready var hint_label: Label
 
 ## ---- 底部按钮 ----
 @onready var back_button: Button
@@ -186,8 +198,8 @@ func _ready() -> void:
 		_navigator.cancel_pressed.connect(_on_back_button_pressed)
 		## 等待一帧确保节点完全加入场景树
 		await get_tree().process_frame
-		## 激活导航器
-		_navigator.activate(self)
+		## 激活导航器（显式注册 SETTINGS 上下文：不放行 game_pause，避免设置页误触暂停）
+		_navigator.activate(self, "SETTINGS")
 	else:
 		print("MenuNavigator script not found!")
 
@@ -200,47 +212,53 @@ func _exit_tree() -> void:
 ## ========== UI初始化方法 ==========
 
 ## 查找所有UI元素节点（通过节点路径获取引用）
+## 【路径说明】四个Tab页在场景中是 ScrollContainer（页内滚动），
+##   其下统一有一层 PageContent(VBoxContainer) 才是真正的行容器，
+##   故所有页内控件路径都必须带 PageContent 这一层，否则取不到节点。
 func _find_all_ui_elements() -> void:
 	## 顶部主标题
 	title_label = $VBoxContainer/Title
 	tab_container = $VBoxContainer/TabContainer
 
 	## 分区小标题（各Tab内部标题）
-	gameplay_title_label = $VBoxContainer/TabContainer/Gameplay/GameplayTitle
-	audio_title_label    = $VBoxContainer/TabContainer/Audio/AudioTitle
-	video_title_label    = $VBoxContainer/TabContainer/Video/VideoTitle
-	language_title_label = $VBoxContainer/TabContainer/Language/LanguageTitle
+	gameplay_title_label = $VBoxContainer/TabContainer/Gameplay/PageContent/GameplayTitle
+	audio_title_label    = $VBoxContainer/TabContainer/Audio/PageContent/AudioTitle
+	video_title_label    = $VBoxContainer/TabContainer/Video/PageContent/VideoTitle
+	language_title_label = $VBoxContainer/TabContainer/Language/PageContent/LanguageTitle
 
 	## 游戏性标签页元素
-	difficulty_label   = $VBoxContainer/TabContainer/Gameplay/DifficultyHBox/DifficultyLabel
-	difficulty_option  = $VBoxContainer/TabContainer/Gameplay/DifficultyHBox/DifficultyOption
-	fps_label          = $VBoxContainer/TabContainer/Gameplay/FPSHBox/FPSLabel
-	fps_check          = $VBoxContainer/TabContainer/Gameplay/FPSHBox/FPSCheck
-	auto_shoot_label   = $VBoxContainer/TabContainer/Gameplay/AutoShootHBox/AutoShootLabel
-	auto_shoot_check   = $VBoxContainer/TabContainer/Gameplay/AutoShootHBox/AutoShootCheck
+	difficulty_label   = $VBoxContainer/TabContainer/Gameplay/PageContent/DifficultyHBox/DifficultyLabel
+	difficulty_option  = $VBoxContainer/TabContainer/Gameplay/PageContent/DifficultyHBox/DifficultyOption
+	fps_label          = $VBoxContainer/TabContainer/Gameplay/PageContent/FPSHBox/FPSLabel
+	fps_check          = $VBoxContainer/TabContainer/Gameplay/PageContent/FPSHBox/FPSCheck
+	auto_shoot_label   = $VBoxContainer/TabContainer/Gameplay/PageContent/AutoShootHBox/AutoShootLabel
+	auto_shoot_check   = $VBoxContainer/TabContainer/Gameplay/PageContent/AutoShootHBox/AutoShootCheck
 
 	## 音频标签页元素
-	master_label       = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterLabel
-	master_slider      = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterSlider
-	master_value       = $VBoxContainer/TabContainer/Audio/MasterHBox/MasterValue
-	music_label        = $VBoxContainer/TabContainer/Audio/MusicHBox/MusicLabel
-	music_slider       = $VBoxContainer/TabContainer/Audio/MusicHBox/MusicSlider
-	music_value        = $VBoxContainer/TabContainer/Audio/MusicHBox/MusicValue
-	sfx_label          = $VBoxContainer/TabContainer/Audio/SFXHBox/SFXLabel
-	sfx_slider         = $VBoxContainer/TabContainer/Audio/SFXHBox/SFXSlider
-	sfx_value          = $VBoxContainer/TabContainer/Audio/SFXHBox/SFXValue
+	master_label       = $VBoxContainer/TabContainer/Audio/PageContent/MasterHBox/MasterLabel
+	master_slider      = $VBoxContainer/TabContainer/Audio/PageContent/MasterHBox/MasterSlider
+	master_value       = $VBoxContainer/TabContainer/Audio/PageContent/MasterHBox/MasterValue
+	music_label        = $VBoxContainer/TabContainer/Audio/PageContent/MusicHBox/MusicLabel
+	music_slider       = $VBoxContainer/TabContainer/Audio/PageContent/MusicHBox/MusicSlider
+	music_value        = $VBoxContainer/TabContainer/Audio/PageContent/MusicHBox/MusicValue
+	sfx_label          = $VBoxContainer/TabContainer/Audio/PageContent/SFXHBox/SFXLabel
+	sfx_slider         = $VBoxContainer/TabContainer/Audio/PageContent/SFXHBox/SFXSlider
+	sfx_value          = $VBoxContainer/TabContainer/Audio/PageContent/SFXHBox/SFXValue
 
 	## 视频标签页元素
-	resolution_label   = $VBoxContainer/TabContainer/Video/ResolutionHBox/ResolutionLabel
-	resolution_option  = $VBoxContainer/TabContainer/Video/ResolutionHBox/ResolutionOption
-	fullscreen_label   = $VBoxContainer/TabContainer/Video/FullscreenHBox/FullscreenLabel
-	fullscreen_check   = $VBoxContainer/TabContainer/Video/FullscreenHBox/FullscreenCheck
-	vsync_label        = $VBoxContainer/TabContainer/Video/VSyncHBox/VSyncLabel
-	vsync_check        = $VBoxContainer/TabContainer/Video/VSyncHBox/VSyncCheck
+	resolution_label   = $VBoxContainer/TabContainer/Video/PageContent/ResolutionHBox/ResolutionLabel
+	resolution_option  = $VBoxContainer/TabContainer/Video/PageContent/ResolutionHBox/ResolutionOption
+	fullscreen_label   = $VBoxContainer/TabContainer/Video/PageContent/FullscreenHBox/FullscreenLabel
+	fullscreen_check   = $VBoxContainer/TabContainer/Video/PageContent/FullscreenHBox/FullscreenCheck
+	vsync_label        = $VBoxContainer/TabContainer/Video/PageContent/VSyncHBox/VSyncLabel
+	vsync_check        = $VBoxContainer/TabContainer/Video/PageContent/VSyncHBox/VSyncCheck
 
 	## 语言标签页元素
-	language_label     = $VBoxContainer/TabContainer/Language/LanguageHBox/LanguageLabel
-	language_option    = $VBoxContainer/TabContainer/Language/LanguageHBox/LanguageOption
+	language_label     = $VBoxContainer/TabContainer/Language/PageContent/LanguageHBox/LanguageLabel
+	language_option    = $VBoxContainer/TabContainer/Language/PageContent/LanguageHBox/LanguageOption
+
+	## 操作提示行
+	hint_label = $VBoxContainer/HintLabel
 
 	## 底部按钮
 	back_button  = $VBoxContainer/ButtonContainer/BackButton
@@ -251,9 +269,11 @@ func _find_all_ui_elements() -> void:
 ## 设计意图：主题列表由 ThemeManager 运行时扫描决定（新主题 .tres 即插即用），
 ##           场景文件写死选项会失去灵活性，故此行整体动态创建
 func _build_theme_row() -> void:
-	## 找到游戏性 Tab 容器
-	var gameplay_tab: VBoxContainer = tab_container.get_node("Gameplay") as VBoxContainer
-	if gameplay_tab == null:
+	## 找到游戏性 Tab 的内容容器：
+	## Gameplay 节点是 ScrollContainer（页内滚动容器），行容器是它下面的 PageContent，
+	## 故此处必须取 "Gameplay/PageContent"——直接转 VBoxContainer 会得到 null，主题行会静默丢失
+	var gameplay_content: VBoxContainer = tab_container.get_node("Gameplay/PageContent") as VBoxContainer
+	if gameplay_content == null:
 		return
 	## ---- 行容器：尺寸/对齐完全对齐 DifficultyHBox（820宽/48高/间距20） ----
 	theme_hbox = HBoxContainer.new()
@@ -272,12 +292,27 @@ func _build_theme_row() -> void:
 	theme_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	theme_option.custom_minimum_size = Vector2(0, 40)
 	theme_option.add_theme_font_size_override("font_size", 20)
+	## ---- 焦点框：动态创建的控件引用不到场景内的 SBFocusBorder 子资源，
+	##      这里按完全相同的参数内联构建，保证手柄聚焦主题下拉时
+	##      与其他下拉框一样能看到亮青色描边（不改动场景文件） ----
+	var focus_box: StyleBoxFlat = StyleBoxFlat.new()
+	focus_box.draw_center = false
+	focus_box.border_width_left = 2
+	focus_box.border_width_top = 2
+	focus_box.border_width_right = 2
+	focus_box.border_width_bottom = 2
+	focus_box.border_color = Color(0.62, 0.93, 1.0, 1)
+	focus_box.corner_radius_top_left = 4
+	focus_box.corner_radius_top_right = 4
+	focus_box.corner_radius_bottom_right = 4
+	focus_box.corner_radius_bottom_left = 4
+	theme_option.add_theme_stylebox_override("focus", focus_box)
 	## 组装行：标签 + 下拉
 	theme_hbox.add_child(theme_label)
 	theme_hbox.add_child(theme_option)
-	gameplay_tab.add_child(theme_hbox)
+	gameplay_content.add_child(theme_hbox)
 	## 移到 BottomSpacer 之前（保持"标题→设置行→底部留白"的排版结构）
-	gameplay_tab.move_child(theme_hbox, gameplay_tab.get_child_count() - 2)
+	gameplay_content.move_child(theme_hbox, gameplay_content.get_child_count() - 2)
 	## 切换下拉选项即时换肤（直播演示友好：边玩边切主题全场实时变化）
 	theme_option.item_selected.connect(_on_theme_selected)
 
@@ -407,6 +442,9 @@ func _update_text() -> void:
 	## ---- 语言 Tab 标签 ----
 	language_label.text = TranslationManager.t("LANGUAGE_LANGUAGE") + ":"
 
+	## ---- 操作提示行（手柄/键盘操作引导，随语言切换刷新） ----
+	hint_label.text = TranslationManager.t("SETTINGS_HINT")
+
 	## ---- 底部按钮文本 ----
 	back_button.text  = TranslationManager.t("BUTTON_BACK")
 	reset_button.text = TranslationManager.t("BUTTON_RESET")
@@ -481,9 +519,9 @@ func _reset_to_defaults() -> void:
 		ThemeManager.set_theme(theme_id)
 	## ---- 音频默认值 ----
 	## BGM 调高(85) + 音效调低(45)，让背景音乐主导、音效辅助
-	master_volume = 80.0
-	music_volume = 85.0
-	sfx_volume = 45.0
+	master_volume = DEFAULT_MASTER_VOLUME
+	music_volume = DEFAULT_MUSIC_VOLUME
+	sfx_volume = DEFAULT_SFX_VOLUME
 	## ---- 视频默认值（默认分辨率=1 → 1920x1280 项目默认） ----
 	resolution_index = 1
 	fullscreen = false
@@ -584,7 +622,31 @@ func _apply_settings() -> void:
 			var width: int = int(res_parts[0])
 			var height: int = int(res_parts[1])
 			if width > 0 and height > 0:
-				get_window().size = Vector2i(width, height)
+				_apply_window_size_safely(Vector2i(width, height))
+
+## 设置窗口尺寸，并保证窗口完整落在当前屏幕可用区域内
+## 修复"点 Apply 后底部按钮莫名消失"：旧实现直接 get_window().size = 目标尺寸，
+## 当目标分辨率超过屏幕时（如 1080p 屏幕选 1920x1280 / 2560x1440），窗口底部会落到
+## 屏幕物理边界之外，位于界面最底部的 Back/Reset/Apply 被裁掉，看起来就是"按钮消失"。
+## 处理：尺寸先按屏幕可用区域收敛，再把窗口居中回可见区域。
+func _apply_window_size_safely(target_size: Vector2i) -> void:
+	var win: Window = get_window()
+	if win == null:
+		return
+
+	## 当前窗口所在屏幕的可用区域（已扣除任务栏等系统占用）
+	var screen_id: int = DisplayServer.window_get_current_screen()
+	var usable: Rect2i = DisplayServer.screen_get_usable_rect(screen_id)
+
+	## 尺寸不得超过屏幕可用区域，否则必然被物理裁切
+	var safe_size: Vector2i = Vector2i(
+		mini(target_size.x, usable.size.x),
+		mini(target_size.y, usable.size.y)
+	)
+	win.size = safe_size
+
+	## 居中到屏幕可用区域内，确保窗口四边（尤其是底部）都在可见范围内
+	win.position = usable.position + (usable.size - safe_size) / 2
 
 	## ---- 5) 难度：将选择的难度档映射为起始等级，通知 DifficultyManager ----
 	## 下次开始新游戏时，DifficultyManager._on_game_started() 会读取 user://settings.cfg
@@ -655,9 +717,11 @@ func _load_settings() -> void:
 		##      这里只同步到本地变量供下拉框回填，不重复应用） ----
 		theme_id         = str(config.get_value("Settings", "current_theme", "default"))
 		## ---- 音频设置 ----
-		master_volume    = config.get_value("Settings", "master_volume",     80.0)
-		music_volume     = config.get_value("Settings", "music_volume",      70.0)
-		sfx_volume       = config.get_value("Settings", "sfx_volume",        90.0)
+		## 缺省回退必须与 DEFAULT_* 常量一致：旧配置若缺这三个键，
+		## 用 70/90 回退会与"恢复默认"的 85/45 产生跳变（同一份设置两种结果）
+		master_volume    = config.get_value("Settings", "master_volume",   DEFAULT_MASTER_VOLUME)
+		music_volume     = config.get_value("Settings", "music_volume",    DEFAULT_MUSIC_VOLUME)
+		sfx_volume       = config.get_value("Settings", "sfx_volume",      DEFAULT_SFX_VOLUME)
 		## ---- 视频设置 ----
 		resolution_index = config.get_value("Settings", "resolution_index",  1)  # 默认1920x1280
 		fullscreen       = config.get_value("Settings", "fullscreen",        false)

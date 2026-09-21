@@ -78,6 +78,11 @@ const DROP_VALUE_MULT_MAX: float = 2.0
 ## 当前难度等级（从1开始，游戏开始后随时间提升；开局档可通过 set_start_level() 调整）
 var level: int = 1
 
+## 登塔增幅系数（无尽模式专用）：由 TowerManager 每层递增写入，1.0=未登塔
+## 设计：难度曲线本身在10级封顶，登塔阶段的"继续变强"改由此系数承担——
+##       它只参与属性缩放（血量/伤害/移速），不改变任何上限（敌人数量上限保持恒定）
+var tower_multiplier: float = 1.0
+
 ## 已配置的开局起始等级（Settings 界面设置后生效，下次新游戏从这里起步）
 ## 默认=1（新手标准）；值范围 1~10（过大开局会直接秒杀玩家）
 var _configured_start_level: int = 1
@@ -134,6 +139,8 @@ func _on_game_started() -> void:
 	_elapsed = 0.0
 	_next_level_time = LEVEL_INTERVAL
 	_wave_count = 0
+	## 登塔增幅复位：每局从无增幅开始（TowerManager 会在无尽模式登塔时重新赋值）
+	tower_multiplier = 1.0
 
 	## ---- 跳跃到配置的开局难度 ----
 	var target: int = clampi(_configured_start_level, 1, MAX_LEVEL)
@@ -271,6 +278,19 @@ func get_drop_value_mult() -> float:
 func get_difficulty_label() -> String:
 	return "难度 %d" % level
 
+## ========== 登塔增幅接口（无尽模式专用，由 TowerManager 驱动） ==========
+
+## 设置登塔增幅系数（TowerManager 每登一层调用一次）
+## 参数：mult - 累计增幅系数（1.0 = 未登塔，逐层按固定百分比累乘）
+func set_tower_multiplier(mult: float) -> void:
+	## 下限保护：增幅系数不允许低于1.0（登塔只会更难，不会变简单）
+	tower_multiplier = maxf(mult, 1.0)
+
+## 获取当前登塔增幅系数
+## 返回：1.0（未登塔）或更高
+func get_tower_multiplier() -> float:
+	return tower_multiplier
+
 ## ========== 敌人数据缩放应用 ==========
 
 ## 将当前难度缩放应用到敌人数据副本上
@@ -286,9 +306,11 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 	## 精英怪使用0.6倍的缩放强度：自身基础高，避免与难度曲线叠加过猛
 	var intensity: float = 0.6 if is_elite else 1.0
 	## 计算实际应用的各级系数（1.0 + 增量*缩放强度）
-	var health_mult: float = 1.0 + (get_health_mult() - 1.0) * intensity
-	var damage_mult: float = 1.0 + (get_damage_mult() - 1.0) * intensity
-	var speed_mult: float = 1.0 + (get_speed_mult() - 1.0) * intensity
+	## 登塔增幅在难度曲线之后再乘一次：无尽模式难度10封顶后，唯一继续变强的来源，
+	## 且对普通怪/精英怪一视同仁（"全面增幅"，不再享受精英的温和折扣）
+	var health_mult: float = (1.0 + (get_health_mult() - 1.0) * intensity) * tower_multiplier
+	var damage_mult: float = (1.0 + (get_damage_mult() - 1.0) * intensity) * tower_multiplier
+	var speed_mult: float = (1.0 + (get_speed_mult() - 1.0) * intensity) * tower_multiplier
 
 	## 缩放基础属性（使用"in"检查保证对任意EnemyData子类安全）
 	if "max_health" in enemy_data:

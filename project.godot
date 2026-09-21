@@ -30,6 +30,8 @@ ThemeManager="*res://scripts/autoload/ThemeManager.gd"
 ComboManager="*res://scripts/autoload/ComboManager.gd"
 StageDirector="*res://scripts/autoload/StageDirector.gd"
 LiveBridgeManager="*res://scripts/autoload/LiveBridgeManager.gd"
+TowerManager="*res://scripts/autoload/TowerManager.gd"
+LeaderboardManager="*res://scripts/autoload/LeaderboardManager.gd"
 
 [display]
 

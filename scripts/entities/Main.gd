@@ -20,7 +20,9 @@ enum Screen {
 	GAME,       ## 游戏中：玩家进行游戏的界面
 	SETTINGS,   ## 设置：游戏设置界面
 	PAUSED,     ## 暂停：游戏暂停界面
-	GAME_OVER   ## 游戏结束：玩家死亡后的界面
+	GAME_OVER,  ## 游戏结束：玩家死亡后的界面
+	MODE_SELECT,  ## 模式选择：主菜单点开始游戏后，选择通关模式/无尽模式
+	LEADERBOARD   ## 排行榜：查看通关榜（用时升序）与登塔榜（层数降序）
 }
 
 ## ========== 成员变量（运行时数据） ==========
@@ -88,6 +90,12 @@ var GAME_HUD_SCENE: PackedScene = preload("res://scenes/ui/GameHUD.tscn")
 ## 结算面板脚本（纯代码构建UI，死亡后展示本局统计与重开入口）
 var GAME_OVER_PANEL_SCRIPT: GDScript = preload("res://scripts/ui/GameOverPanel.gd")
 
+## 模式选择面板脚本（纯代码构建UI，开局前选择通关模式/无尽模式）
+var MODE_SELECT_PANEL_SCRIPT: GDScript = preload("res://scripts/ui/ModeSelectPanel.gd")
+
+## 排行榜面板脚本（纯代码构建UI，查看通关榜/登塔榜）
+var LEADERBOARD_PANEL_SCRIPT: GDScript = preload("res://scripts/ui/LeaderboardPanel.gd")
+
 ## 玩家场景
 var PLAYER_SCENE: PackedScene = preload("res://scenes/gameplay/Player.tscn")
 
@@ -145,13 +153,51 @@ func _show_main_menu() -> void:
 	## 实例化主菜单场景
 	active_ui = MAIN_MENU_SCENE.instantiate()
 	## 连接主菜单按钮信号
-	active_ui.start_game.connect(_on_start_game)        ## 开始游戏按钮
+	active_ui.start_game.connect(_on_start_game)        ## 开始游戏按钮（先进入模式选择）
 	active_ui.open_settings.connect(_on_open_settings_from_menu)  ## 打开设置按钮
+	active_ui.open_leaderboard.connect(_on_open_leaderboard_from_menu)  ## 打开排行榜按钮
 	active_ui.quit_game.connect(_on_quit_game)          ## 退出游戏按钮
 	## 将主菜单添加到UI栈
 	ui_stack.add_child(active_ui)
 	## 清除游戏元素（玩家、敌人等）
 	_clear_game()
+
+## 显示模式选择界面（主菜单点"开始游戏"后弹出）
+## 设计意图：开局前定稿局类型（通关/无尽），两种模式的流程分叉从这里开始
+func _show_mode_select() -> void:
+	## 清除当前所有UI界面（把主菜单收掉）
+	_clear_ui()
+	## 设置当前屏幕状态为MODE_SELECT
+	current_screen = Screen.MODE_SELECT
+	## 切换输入上下文到SETTINGS（含 ui_* 与 game_choice_prev/next，支持 LT/RT 切换与确认）
+	InputManager.reset_context("SETTINGS")
+	## 用脚本创建模式选择面板（纯代码UI，无.tscn）
+	active_ui = MODE_SELECT_PANEL_SCRIPT.new()
+	## 面板必须ALWAYS处理模式（避免残留暂停态下无法交互）
+	active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	## 连接面板信号：确认开始（携带模式）/ 返回主菜单
+	active_ui.start_requested.connect(_on_mode_selected)
+	active_ui.cancelled.connect(_on_mode_select_cancelled)
+	## 添加到UI栈显示
+	ui_stack.add_child(active_ui)
+
+## 显示排行榜界面（主菜单点"排行榜"后弹出）
+## 设计意图：双榜（通关榜/登塔榜）只在主菜单可查，LT/RT 切页，不占用游戏内节奏
+func _show_leaderboard() -> void:
+	## 清除当前所有UI界面（把主菜单收掉）
+	_clear_ui()
+	## 设置当前屏幕状态为LEADERBOARD
+	current_screen = Screen.LEADERBOARD
+	## 切换输入上下文到SETTINGS（含 ui_* 与 game_choice_prev/next，支持 LT/RT 切榜）
+	InputManager.reset_context("SETTINGS")
+	## 用脚本创建排行榜面板（纯代码UI，无.tscn）
+	active_ui = LEADERBOARD_PANEL_SCRIPT.new()
+	## 面板必须ALWAYS处理模式（避免残留暂停态下无法交互）
+	active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	## 连接面板信号：返回主菜单
+	active_ui.back_requested.connect(_on_back_to_menu_from_leaderboard)
+	## 添加到UI栈显示
+	ui_stack.add_child(active_ui)
 
 ## 显示设置界面
 func _show_settings() -> void:
@@ -225,7 +271,9 @@ func _show_game_over_panel(victory: bool = false) -> void:
 ## ========== 游戏控制方法 ==========
 
 ## 开始游戏
-func _start_game() -> void:
+## 参数：mode - 本局模式（GameManager.RunMode.CLASSIC / ENDLESS），
+##              由模式选择面板定稿后透传，必须显式传入（不做默认值，避免开局模式含糊）
+func _start_game(mode: int) -> void:
 	## ---------- 全局状态重置 ----------
 	## 确保死亡慢动作残留不会影响新一局
 	_is_death_slowmo = false
@@ -248,8 +296,8 @@ func _start_game() -> void:
 	InputManager.reset_context("GAMEPLAY")
 	## 重置死亡遮罩状态（确保游戏开始时屏幕正常）
 	_reset_death_overlay()
-	## 调用GameManager开始新游戏
-	GameManager.start_new_game()
+	## 调用GameManager开始新游戏（把模式透传下去，StageDirector/TowerManager 据此分叉流程）
+	GameManager.start_new_game(0, mode)
 
 ## 生成游戏元素（玩家、游戏世界、HUD）
 func _spawn_game_elements() -> void:
@@ -323,8 +371,26 @@ func _clear_ui() -> void:
 ## ========== 信号回调方法 ==========
 
 ## 开始游戏按钮回调
+## 注意：不再直接开局——先弹模式选择面板，由玩家定稿通关/无尽后再进游戏
 func _on_start_game() -> void:
-	_start_game()
+	_show_mode_select()
+
+## 模式选择面板确认回调（响应 ModeSelectPanel.start_requested）
+## 参数：mode - 玩家选定的 GameManager.RunMode 枚举值
+func _on_mode_selected(mode: int) -> void:
+	_start_game(mode)
+
+## 模式选择面板返回回调（响应 ModeSelectPanel.cancelled，B键/返回按钮）
+func _on_mode_select_cancelled() -> void:
+	_show_main_menu()
+
+## 从主菜单打开排行榜回调
+func _on_open_leaderboard_from_menu() -> void:
+	_show_leaderboard()
+
+## 排行榜返回主菜单回调（响应 LeaderboardPanel.back_requested）
+func _on_back_to_menu_from_leaderboard() -> void:
+	_show_main_menu()
 
 ## 从主菜单打开设置回调
 func _on_open_settings_from_menu() -> void:
@@ -358,7 +424,8 @@ func _on_quit_to_menu() -> void:
 ## 结算面板"再来一局"回调（响应GameOverPanel.restart_requested，R键同效）
 func _on_restart_from_game_over() -> void:
 	## 直接重启新局（死亡流程已解除暂停，_start_game内部会重置状态并重新生成元素）
-	_start_game()
+	## 沿用上一局的模式：结算面板没有模式选择入口，重开不应让玩家"被换模式"
+	_start_game(GameManager.current_mode)
 
 ## 结算面板"返回主菜单"回调（响应GameOverPanel.back_to_menu_requested）
 func _on_back_to_menu_from_game_over() -> void:
@@ -395,6 +462,11 @@ func _on_game_started() -> void:
 func _on_game_ended() -> void:
 	## 设置当前屏幕状态为GAME_OVER
 	current_screen = Screen.GAME_OVER
+	## ---------- 无尽榜：记录本局最终登塔层数 ----------
+	## 只在无尽模式写榜（通关模式没有登塔概念）；
+	## record_tower_floor 内部对 floor<1（难度10前就阵亡，本局未登塔）自保护，不会污染榜单
+	if GameManager.current_mode == GameManager.RunMode.ENDLESS:
+		LeaderboardManager.record_tower_floor(TowerManager.get_current_floor())
 	## 播放游戏结束音效（全局播放，宣告死亡）
 	if AudioManager:
 		AudioManager.play("game_over", 0.9)
@@ -543,6 +615,15 @@ func _process(delta: float) -> void:
 		return
 	var ctx: String = InputManager.get_current_context()
 	if ctx == "TEMPLE_CHOICE" or ctx == "SHOP_CHOICE":
+		return
+
+	## 主菜单衍生面板（模式选择/排行榜/设置）打开期间：本函数不消费任何按键。
+	## 这些面板都是通过 InputManager 的消费式接口(is_action_just_pressed_safe)读取 B键返回的，
+	## 而 Main 是树上的父节点、_process 先于面板执行——若此处先用 ui_cancel 做暂停判定，
+	## 按键会被"读取即消费"吃掉，面板永远收不到返回键
+	## （表现为B键在排行榜/设置里失灵，设置页无法用手柄返回）
+	if current_screen == Screen.MODE_SELECT or current_screen == Screen.LEADERBOARD \
+			or current_screen == Screen.SETTINGS:
 		return
 
 	## 检测暂停/取消按钮：

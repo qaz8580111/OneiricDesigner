@@ -1,23 +1,27 @@
-; load_steps=5：1个外部脚本资源 + 3个子资源（Tab面板样式框 + 复选框样式框x2） + 场景本身
-[gd_scene load_steps=5 format=3 uid="uid://bsettings"]
+; load_steps=12：1个外部脚本资源 + 10个子资源（Tab面板 + 复选框x2 + 滑块x3 + 按钮x3 + 通用焦点框）
+;                + 场景本身
+[gd_scene load_steps=12 format=3 uid="uid://bsettings"]
 
 ; ==============================================================================
-; Settings.tscn - 设置界面（美化+居中版）
+; Settings.tscn - 设置界面（居中 + 可滚动版）
 ; 职责：定义游戏设置界面，包含游戏玩法、音频、视频、语言等设置选项
 ; 所属脚本：Settings.gd (根节点) - 设置控制器，处理设置加载/保存、界面交互等
 ;
-; 美化设计说明：
-;   1. 所有Tab页的设置行统一使用 SHRINK_CENTER + 固定最小宽度(820px)，
+; 布局设计说明：
+;   1. 每个Tab页内容外包一层 ScrollContainer：设置行总高超过Tab可视高度时在页内滚动，
+;      而不是把底部按钮挤出窗口——修复"切换到较低分辨率后应用按钮消失"的问题。
+;      ScrollContainer 不向父级传递子节点最小尺寸，故 TabContainer 高度始终稳定。
+;      scroll 内容用 VBoxContainer 且不设纵向 EXPAND，纵向撑满会导致永不触发滚动。
+;   2. follow_focus=true：手柄/键盘把焦点移到不可见行时，自动滚动使其进入视野。
+;   3. 所有Tab页的设置行统一使用 SHRINK_CENTER + 固定最小宽度(820px)，
 ;      确保在1920x1280或任意分辨率下，设置项始终水平居中而非贴在左边。
-;   2. 每行内：Label固定260px + 右对齐 + 中间间隔20px + 控件，
+;   4. 每行内：Label固定260px + 右对齐 + 中间间隔20px + 控件，
 ;      下拉框/滑块 expand/fill 延伸到行尾；复选框行 alignment=0 靠左排列，
 ;      复选框固定36px紧跟标签——所有控件左边缘统一对齐，视觉上整齐划一。
-;   3. Tab页VBox：vertical separation = 22，上下spacer 40/50，
-;      行之间留出足够呼吸空间，避免全部挤在一起。
-;   4. 分区标题使用 HeaderSmall + 下方 16px spacer，与设置项拉开层次。
-;   5. 按钮区域 separation=20，每个按钮左右padding，尺寸均匀。
+;   5. 字号层级：主标题46 / Tab标签24 / 分区标题26 / 行标签22 / 下拉20，
+;      逐级递减，层次清楚且在大分辨率下不显臃肿。
 ;   6. 配色三层递进：页面背景(0.13,0.16,0.26) → Tab面板(0.17,0.2,0.32)
-;      → 复选框底(0.28,0.32,0.46)，亮度逐级提升保证控件清晰可见。
+;      → 复选框底(0.28,0.32,0.46)；分区标题用淡蓝(0.72,0.86,1.0)与白色行标签区分层级。
 ; ==============================================================================
 
 [ext_resource type="Script" path="res://scripts/ui/Settings.gd" id="1_settings"]
@@ -61,6 +65,108 @@ corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
 
+; ↓↓↓ 滑块（HSlider）样式组：解决"手柄聚焦滑块时看不出焦点、调节手感差"的问题 ↓↓↓
+; 说明：Slider::get_minimum_size() 取 max(轨道样式高, grabber图标高)，轨道高度由
+;       StyleBoxFlat 的 content_margin_top/bottom 共同撑出（上下各8 → 轨道16px，圆角8成胶囊形）。
+;       三个样式必须用完全相同的 content_margin，否则"已填充条"与"轨道"会错位。
+
+; SBSliderTrack - 滑块轨道（凹槽）：比Tab面板更深的底色，与亮色填充形成强对比
+[sub_resource type="StyleBoxFlat" id="SBSliderTrack"]
+content_margin_top = 8.0
+content_margin_bottom = 8.0
+bg_color = Color(0.1, 0.13, 0.22, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+; SBSliderFill - 滑块已填充部分（正常态）：亮蓝，明确指示当前数值位置
+[sub_resource type="StyleBoxFlat" id="SBSliderFill"]
+content_margin_top = 8.0
+content_margin_bottom = 8.0
+bg_color = Color(0.35, 0.7, 1.0, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+; SBSliderFillHL - 滑块已填充部分（悬停/手柄聚焦态）：更亮的青蓝 + 白描边，
+; 手柄用摇杆/十字键选中滑块时整条填充会明显发亮，玩家一眼可见当前焦点
+[sub_resource type="StyleBoxFlat" id="SBSliderFillHL"]
+content_margin_top = 8.0
+content_margin_bottom = 8.0
+bg_color = Color(0.62, 0.93, 1.0, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+; ↓↓↓ 按钮 / 复选框焦点样式组：手柄导航时焦点必须一眼可辨 ↓↓↓
+
+; SBButtonNormal - 底部操作按钮默认态（比Tab面板亮一档的蓝灰 + 细描边）
+[sub_resource type="StyleBoxFlat" id="SBButtonNormal"]
+content_margin_left = 16.0
+content_margin_right = 16.0
+bg_color = Color(0.24, 0.28, 0.42, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.42, 0.48, 0.64, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+; SBButtonHover - 按钮悬停态（更亮底色 + 明显描边）
+[sub_resource type="StyleBoxFlat" id="SBButtonHover"]
+content_margin_left = 16.0
+content_margin_right = 16.0
+bg_color = Color(0.33, 0.39, 0.56, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.62, 0.72, 0.92, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+; SBButtonPressed - 按钮按下态（压暗，提供明确的触感反馈）
+[sub_resource type="StyleBoxFlat" id="SBButtonPressed"]
+content_margin_left = 16.0
+content_margin_right = 16.0
+bg_color = Color(0.16, 0.19, 0.3, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.5, 0.6, 0.8, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+; SBFocusBorder - 通用焦点框（仅描边不填充，复用给按钮与复选框）
+; 手柄/键盘把焦点移到某控件时，该亮青色描边即刻出现，解决"看不出焦点在哪"的问题
+[sub_resource type="StyleBoxFlat" id="SBFocusBorder"]
+draw_center = false
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.62, 0.93, 1.0, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
 ; ------------------------------ 根节点 ------------------------------
 ; Settings (Control) - 设置界面根节点
 ; anchors_preset=15：全屏锚定
@@ -92,7 +198,9 @@ color = Color(0.13, 0.16, 0.26, 1)
 
 ; ------------------------------ 主布局 ------------------------------
 ; VBoxContainer - 主垂直布局容器
-; anchors_preset=15 全屏填充，使用 size_flags_vertical=3 让 TabContainer 占满中间区域
+; anchors_preset=15 全屏填充；TabContainer 用 size_flags_vertical=3 占满中间剩余空间
+; 【关键】底部按钮区在VBox内固定高度（非弹性），上下留白均为固定值，
+;        因此窗口再矮也只会压缩TabContainer，按钮永远保留在可视区内
 ; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到子按钮
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
@@ -102,80 +210,89 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_constants/separation = 20
+theme_override_constants/separation = 18
 
-; Title (Label) - 设置标题
-; 字体大小52，居中显示，顶部留出 40px 间距
-; TopSpacer - 主标题上方留白（高30px，mouse_filter=2不拦截鼠标）
+; TopSpacer - 主标题上方留白（高24px，mouse_filter=2不拦截鼠标）
 [node name="TopSpacer" type="Control" parent="VBoxContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 30)
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
 
-; Title (Label) - "Settings" 主标题（HeaderMedium变体，字号52，水平居中）
+; Title (Label) - "Settings" 主标题（字号46，水平居中）
+; 不用 theme_type_variation：项目未定义 HeaderMedium 主题变体，写了也无效，
+; 字号完全由下面的 font_size 覆盖决定（避免误导后续维护者）
 [node name="Title" type="Label" parent="VBoxContainer"]
 layout_mode = 2
 text = "Settings"
 horizontal_alignment = 1
-theme_type_variation = &"HeaderMedium"
-theme_override_font_sizes/font_size = 52
+theme_override_font_sizes/font_size = 46
 theme_override_colors/font_color = Color(1.0, 1.0, 1.0, 1.0)
 
 ; TabContainer - 标签页容器
-; size_flags_vertical=3：垂直方向填充剩余空间
+; size_flags_vertical=3：垂直方向填充VBox中的剩余空间（内容溢出由页内ScrollContainer消化）
 ; tab_alignment=1：Tab标签（游戏玩法/音频/视频/语言）水平居中显示，不再靠左
-; 字体28：Tab标签文字加大，在1920x1280分辨率下更清晰易读
+; 字体24：Tab标签清晰易读，又不会挤占过多纵向空间
 ; panel样式覆盖：Tab内容区使用更亮的圆角面板，与页面背景形成层次
 [node name="TabContainer" type="TabContainer" parent="VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
 tab_alignment = 1
 theme_override_styles/panel = SubResource("SBTabPanel")
-theme_override_font_sizes/font_size = 28
+theme_override_font_sizes/font_size = 24
 
 ; ==============================================================================
 ; ------------------------------ 游戏玩法设置 ------------------------------
-; Gameplay (VBoxContainer) - 游戏玩法设置标签页
-;   separation=22 行间距 + 上下spacer → 避免设置项挤在一起
+; Gameplay (ScrollContainer) - 游戏玩法设置标签页（页内可滚动）
+;   horizontal_scroll_mode=0 禁用横向滚动（行宽已固定820居中，无需横滚）
+;   follow_focus=true 焦点移出视野时自动滚动跟随（手柄长列表导航必需）
+;   PageContent (VBoxContainer)：真正的行容器，separation=22 行间距；
+;     不设 size_flags_vertical（纵向撑满会让最小尺寸=父高度，永不触发滚动）
 ; ==============================================================================
-[node name="Gameplay" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
+[node name="Gameplay" type="ScrollContainer" parent="VBoxContainer/TabContainer"]
 layout_mode = 2
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="PageContent" type="VBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 22
 mouse_filter = 2
 
-; TopSpacer - Tab页顶部留白（30px，四个Tab页格式统一）
-[node name="TopSpacer" type="Control" parent="VBoxContainer/TabContainer/Gameplay"]
+; TopSpacer - Tab页顶部留白（24px，四个Tab页格式统一）
+[node name="TopSpacer" type="Control" parent="VBoxContainer/TabContainer/Gameplay/PageContent"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 30)
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
 
-; 分区标题：居中 + 固定最大宽度，与设置行对齐
-[node name="GameplayTitle" type="Label" parent="VBoxContainer/TabContainer/Gameplay"]
+; 分区标题：居中 + 固定最大宽度，与设置行对齐；淡蓝色与白色行标签区分层级
+[node name="GameplayTitle" type="Label" parent="VBoxContainer/TabContainer/Gameplay/PageContent"]
 layout_mode = 2
 text = "Gameplay Settings"
 horizontal_alignment = 1
+vertical_alignment = 1
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 0)
-theme_type_variation = &"HeaderSmall"
-theme_override_font_sizes/font_size = 28
+theme_override_font_sizes/font_size = 26
+theme_override_colors/font_color = Color(0.72, 0.86, 1.0, 1.0)
 
-; TitleSpacer - 分区标题与设置行之间的间距（10px，四个Tab页格式统一）
-[node name="TitleSpacer" type="Control" parent="VBoxContainer/TabContainer/Gameplay"]
+; TitleSpacer - 分区标题与设置行之间的间距（8px，四个Tab页格式统一）
+[node name="TitleSpacer" type="Control" parent="VBoxContainer/TabContainer/Gameplay/PageContent"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 10)
+custom_minimum_size = Vector2(0, 8)
 mouse_filter = 2
 
-; DifficultyRow - 难度选择行
+; DifficultyHBox - 难度选择行
 ; size_flags_horizontal=4 (SHRINK_CENTER) + min 820px 水平居中
 ; 内部 label 右对齐固定260px + separation=20 + option expand fill
-[node name="DifficultyHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
+[node name="DifficultyHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 1
 theme_override_constants/separation = 20
 
-[node name="DifficultyLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/DifficultyHBox"]
+[node name="DifficultyLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/PageContent/DifficultyHBox"]
 layout_mode = 2
 text = "Difficulty:"
 horizontal_alignment = 2
@@ -185,23 +302,25 @@ theme_override_font_sizes/font_size = 22
 
 ; DifficultyOption - 难度下拉框（expand填充，选项由Settings.gd用翻译后的难度名填充）
 ; 字体20：下拉框文字加大，与放大后的标签匹配
-[node name="DifficultyOption" type="OptionButton" parent="VBoxContainer/TabContainer/Gameplay/DifficultyHBox"]
+; 手柄操作：焦点落在下拉框上时，左右方向键/摇杆就地切换选项（由MenuNavigator驱动）
+[node name="DifficultyOption" type="OptionButton" parent="VBoxContainer/TabContainer/Gameplay/PageContent/DifficultyHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 40)
+theme_override_styles/focus = SubResource("SBFocusBorder")
 theme_override_font_sizes/font_size = 20
 
-; FPSRow - FPS显示开关行
+; FPSHBox - FPS显示开关行
 ; alignment=0(BEGIN)：内容靠左排列——标签固定在行首（与其它行标签对齐），
 ; 复选框固定36px紧跟标签，控件左边缘与下拉框/滑块行的左边缘完全一致
-[node name="FPSHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
+[node name="FPSHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 0
 theme_override_constants/separation = 20
 
-[node name="FPSLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/FPSHBox"]
+[node name="FPSLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/PageContent/FPSHBox"]
 layout_mode = 2
 text = "Show FPS Counter:"
 horizontal_alignment = 2
@@ -214,7 +333,7 @@ theme_override_font_sizes/font_size = 22
 ;   与同行的下拉框/滑块左边缘对齐，整行视觉统一
 ; custom_minimum_size=36x40：固定勾选框尺寸，让样式边框刚好包住勾选图标
 ; 样式覆盖：normal=默认态可见边框，hover/pressed=悬停态高亮边框（解决默认图标被背景吞掉的问题）
-[node name="FPSCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Gameplay/FPSHBox"]
+[node name="FPSCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Gameplay/PageContent/FPSHBox"]
 layout_mode = 2
 size_flags_horizontal = 0
 custom_minimum_size = Vector2(36, 40)
@@ -222,18 +341,19 @@ theme_override_styles/normal = SubResource("SBCheckBoxNormal")
 theme_override_styles/hover = SubResource("SBCheckBoxHover")
 theme_override_styles/pressed = SubResource("SBCheckBoxHover")
 theme_override_styles/hover_pressed = SubResource("SBCheckBoxHover")
+theme_override_styles/focus = SubResource("SBFocusBorder")
 theme_override_font_sizes/font_size = 22
 
-; AutoShootRow - 自动射击开关行
+; AutoShootHBox - 自动射击开关行
 ; alignment=0(BEGIN)：内容靠左排列，与FPS行格式统一
-[node name="AutoShootHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay"]
+[node name="AutoShootHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Gameplay/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 0
 theme_override_constants/separation = 20
 
-[node name="AutoShootLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/AutoShootHBox"]
+[node name="AutoShootLabel" type="Label" parent="VBoxContainer/TabContainer/Gameplay/PageContent/AutoShootHBox"]
 layout_mode = 2
 text = "Auto Shoot:"
 horizontal_alignment = 2
@@ -243,7 +363,7 @@ theme_override_font_sizes/font_size = 22
 
 ; AutoShootCheck - 自动射击复选框（默认勾选，应用后实时同步Player.set_auto_shoot）
 ; 样式与布局说明同FPSCheck：固定尺寸紧跟标签 + 可见边框样式
-[node name="AutoShootCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Gameplay/AutoShootHBox"]
+[node name="AutoShootCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Gameplay/PageContent/AutoShootHBox"]
 layout_mode = 2
 size_flags_horizontal = 0
 custom_minimum_size = Vector2(36, 40)
@@ -252,54 +372,62 @@ theme_override_styles/normal = SubResource("SBCheckBoxNormal")
 theme_override_styles/hover = SubResource("SBCheckBoxHover")
 theme_override_styles/pressed = SubResource("SBCheckBoxHover")
 theme_override_styles/hover_pressed = SubResource("SBCheckBoxHover")
+theme_override_styles/focus = SubResource("SBFocusBorder")
 theme_override_font_sizes/font_size = 22
 
-; BottomSpacer - Tab页底部弹性留白（size_flags_vertical=3撑满剩余空间，让设置行靠上聚拢）
-[node name="BottomSpacer" type="Control" parent="VBoxContainer/TabContainer/Gameplay"]
+; BottomSpacer - Tab页底部留白（固定24px；内容靠上聚拢，溢出时才由ScrollContainer滚动）
+[node name="BottomSpacer" type="Control" parent="VBoxContainer/TabContainer/Gameplay/PageContent"]
 layout_mode = 2
-size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
 
 ; ==============================================================================
 ; ------------------------------ 音频设置 ------------------------------
-; Audio (VBoxContainer) - 音频设置标签页
+; Audio (ScrollContainer) - 音频设置标签页（页内可滚动，结构同Gameplay页）
 ; ==============================================================================
-[node name="Audio" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
+[node name="Audio" type="ScrollContainer" parent="VBoxContainer/TabContainer"]
 layout_mode = 2
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="PageContent" type="VBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 22
 mouse_filter = 2
 
-; TopSpacer - Tab页顶部留白（30px，四个Tab页格式统一）
-[node name="TopSpacer" type="Control" parent="VBoxContainer/TabContainer/Audio"]
+; TopSpacer - Tab页顶部留白（24px，四个Tab页格式统一）
+[node name="TopSpacer" type="Control" parent="VBoxContainer/TabContainer/Audio/PageContent"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 30)
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
 
-; AudioTitle - "Audio Settings" 分区标题（HeaderSmall变体，SHRINK_CENTER + 820px与设置行对齐）
-[node name="AudioTitle" type="Label" parent="VBoxContainer/TabContainer/Audio"]
+; AudioTitle - "Audio Settings" 分区标题（SHRINK_CENTER + 820px与设置行对齐）
+[node name="AudioTitle" type="Label" parent="VBoxContainer/TabContainer/Audio/PageContent"]
 layout_mode = 2
 text = "Audio Settings"
 horizontal_alignment = 1
+vertical_alignment = 1
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 0)
-theme_type_variation = &"HeaderSmall"
-theme_override_font_sizes/font_size = 28
+theme_override_font_sizes/font_size = 26
+theme_override_colors/font_color = Color(0.72, 0.86, 1.0, 1.0)
 
-; TitleSpacer - 分区标题与设置行之间的间距（10px，四个Tab页格式统一）
-[node name="TitleSpacer" type="Control" parent="VBoxContainer/TabContainer/Audio"]
+; TitleSpacer - 分区标题与设置行之间的间距（8px，四个Tab页格式统一）
+[node name="TitleSpacer" type="Control" parent="VBoxContainer/TabContainer/Audio/PageContent"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 10)
+custom_minimum_size = Vector2(0, 8)
 mouse_filter = 2
 
-; MasterRow - 主音量行（标签 + 滑块 + 数值）
-[node name="MasterHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
+; MasterHBox - 主音量行（标签 + 滑块 + 数值）
+[node name="MasterHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 1
 theme_override_constants/separation = 20
 
-[node name="MasterLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/MasterHBox"]
+[node name="MasterLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/PageContent/MasterHBox"]
 layout_mode = 2
 text = "Master Volume:"
 horizontal_alignment = 2
@@ -308,9 +436,9 @@ custom_minimum_size = Vector2(260, 0)
 theme_override_font_sizes/font_size = 22
 
 ; MasterSlider - 主音量滑块（0~100，11个刻度，Settings.gd拖动时实时应用音量）
-; step=5：手柄D-Pad左右键在焦点滑条上原生按step增减（每按一次±5，20档可调），
+; step=5：焦点在滑块上时，左右方向键/摇杆按step增减（每按一次±5，20档可调），
 ;         鼠标拖动同样吸附5步进，与tick_count=11的10格刻度视觉对齐
-[node name="MasterSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/MasterHBox"]
+[node name="MasterSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/PageContent/MasterHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 min_value = 0.0
@@ -320,9 +448,12 @@ value = 80.0
 tick_count = 11
 ticks_on_borders = true
 custom_minimum_size = Vector2(0, 40)
+theme_override_styles/slider = SubResource("SBSliderTrack")
+theme_override_styles/grabber_area = SubResource("SBSliderFill")
+theme_override_styles/grabber_area_highlight = SubResource("SBSliderFillHL")
 
 ; MasterValue - 主音量数值显示（青色高亮，脚本实时更新为整数）
-[node name="MasterValue" type="Label" parent="VBoxContainer/TabContainer/Audio/MasterHBox"]
+[node name="MasterValue" type="Label" parent="VBoxContainer/TabContainer/Audio/PageContent/MasterHBox"]
 layout_mode = 2
 text = "80"
 horizontal_alignment = 1
@@ -331,15 +462,15 @@ custom_minimum_size = Vector2(60, 0)
 theme_override_font_sizes/font_size = 22
 theme_override_colors/font_color = Color(0.5, 0.9, 1.0, 1.0)
 
-; MusicRow - 音乐音量行
-[node name="MusicHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
+; MusicHBox - 音乐音量行
+[node name="MusicHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 1
 theme_override_constants/separation = 20
 
-[node name="MusicLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/MusicHBox"]
+[node name="MusicLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/PageContent/MusicHBox"]
 layout_mode = 2
 text = "Music Volume:"
 horizontal_alignment = 2
@@ -347,20 +478,23 @@ vertical_alignment = 1
 custom_minimum_size = Vector2(260, 0)
 theme_override_font_sizes/font_size = 22
 
-; MusicSlider - 音乐音量滑块（0~100，与主音量滑块格式统一；step=5同主音量：D-Pad每按±5）
-[node name="MusicSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/MusicHBox"]
+; MusicSlider - 音乐音量滑块（0~100，与主音量滑块格式统一；step=5：左右键每按±5）
+[node name="MusicSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/PageContent/MusicHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 min_value = 0.0
 max_value = 100.0
 step = 5.0
-value = 70.0
+value = 85.0
 tick_count = 11
 ticks_on_borders = true
 custom_minimum_size = Vector2(0, 40)
+theme_override_styles/slider = SubResource("SBSliderTrack")
+theme_override_styles/grabber_area = SubResource("SBSliderFill")
+theme_override_styles/grabber_area_highlight = SubResource("SBSliderFillHL")
 
 ; MusicValue - 音乐音量数值显示（青色高亮，脚本实时更新为整数）
-[node name="MusicValue" type="Label" parent="VBoxContainer/TabContainer/Audio/MusicHBox"]
+[node name="MusicValue" type="Label" parent="VBoxContainer/TabContainer/Audio/PageContent/MusicHBox"]
 layout_mode = 2
 text = "70"
 horizontal_alignment = 1
@@ -369,15 +503,15 @@ custom_minimum_size = Vector2(60, 0)
 theme_override_font_sizes/font_size = 22
 theme_override_colors/font_color = Color(0.5, 0.9, 1.0, 1.0)
 
-; SFXRow - 音效音量行
-[node name="SFXHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio"]
+; SFXHBox - 音效音量行
+[node name="SFXHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Audio/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 1
 theme_override_constants/separation = 20
 
-[node name="SFXLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/SFXHBox"]
+[node name="SFXLabel" type="Label" parent="VBoxContainer/TabContainer/Audio/PageContent/SFXHBox"]
 layout_mode = 2
 text = "SFX Volume:"
 horizontal_alignment = 2
@@ -385,20 +519,23 @@ vertical_alignment = 1
 custom_minimum_size = Vector2(260, 0)
 theme_override_font_sizes/font_size = 22
 
-; SFXSlider - 音效音量滑块（0~100，与主音量滑块格式统一；step=5同主音量：D-Pad每按±5）
-[node name="SFXSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/SFXHBox"]
+; SFXSlider - 音效音量滑块（0~100，与主音量滑块格式统一；step=5：左右键每按±5）
+[node name="SFXSlider" type="HSlider" parent="VBoxContainer/TabContainer/Audio/PageContent/SFXHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 min_value = 0.0
 max_value = 100.0
 step = 5.0
-value = 90.0
+value = 45.0
 tick_count = 11
 ticks_on_borders = true
 custom_minimum_size = Vector2(0, 40)
+theme_override_styles/slider = SubResource("SBSliderTrack")
+theme_override_styles/grabber_area = SubResource("SBSliderFill")
+theme_override_styles/grabber_area_highlight = SubResource("SBSliderFillHL")
 
 ; SFXValue - 音效音量数值显示（青色高亮，脚本实时更新为整数）
-[node name="SFXValue" type="Label" parent="VBoxContainer/TabContainer/Audio/SFXHBox"]
+[node name="SFXValue" type="Label" parent="VBoxContainer/TabContainer/Audio/PageContent/SFXHBox"]
 layout_mode = 2
 text = "90"
 horizontal_alignment = 1
@@ -407,52 +544,59 @@ custom_minimum_size = Vector2(60, 0)
 theme_override_font_sizes/font_size = 22
 theme_override_colors/font_color = Color(0.5, 0.9, 1.0, 1.0)
 
-; BottomSpacer - Tab页底部弹性留白（与Gameplay页格式统一）
-[node name="BottomSpacer" type="Control" parent="VBoxContainer/TabContainer/Audio"]
+; BottomSpacer - Tab页底部留白（固定24px，与Gameplay页格式统一）
+[node name="BottomSpacer" type="Control" parent="VBoxContainer/TabContainer/Audio/PageContent"]
 layout_mode = 2
-size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
 
 ; ==============================================================================
 ; ------------------------------ 视频设置 ------------------------------
-; Video (VBoxContainer) - 视频设置标签页
+; Video (ScrollContainer) - 视频设置标签页（页内可滚动，结构同Gameplay页）
 ; ==============================================================================
-[node name="Video" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
+[node name="Video" type="ScrollContainer" parent="VBoxContainer/TabContainer"]
 layout_mode = 2
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="PageContent" type="VBoxContainer" parent="VBoxContainer/TabContainer/Video"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 22
 mouse_filter = 2
 
-; TopSpacer - Tab页顶部留白（30px，四个Tab页格式统一）
-[node name="TopSpacer" type="Control" parent="VBoxContainer/TabContainer/Video"]
+; TopSpacer - Tab页顶部留白（24px，四个Tab页格式统一）
+[node name="TopSpacer" type="Control" parent="VBoxContainer/TabContainer/Video/PageContent"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 30)
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
 
-; VideoTitle - "Video Settings" 分区标题（HeaderSmall变体，SHRINK_CENTER + 820px与设置行对齐）
-[node name="VideoTitle" type="Label" parent="VBoxContainer/TabContainer/Video"]
+; VideoTitle - "Video Settings" 分区标题（SHRINK_CENTER + 820px与设置行对齐）
+[node name="VideoTitle" type="Label" parent="VBoxContainer/TabContainer/Video/PageContent"]
 layout_mode = 2
 text = "Video Settings"
 horizontal_alignment = 1
+vertical_alignment = 1
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 0)
-theme_type_variation = &"HeaderSmall"
-theme_override_font_sizes/font_size = 28
+theme_override_font_sizes/font_size = 26
+theme_override_colors/font_color = Color(0.72, 0.86, 1.0, 1.0)
 
-; TitleSpacer - 分区标题与设置行之间的间距（10px，四个Tab页格式统一）
-[node name="TitleSpacer" type="Control" parent="VBoxContainer/TabContainer/Video"]
+; TitleSpacer - 分区标题与设置行之间的间距（8px，四个Tab页格式统一）
+[node name="TitleSpacer" type="Control" parent="VBoxContainer/TabContainer/Video/PageContent"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 10)
+custom_minimum_size = Vector2(0, 8)
 mouse_filter = 2
 
-; ResolutionRow - 分辨率选择行
-[node name="ResolutionHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
+; ResolutionHBox - 分辨率选择行
+[node name="ResolutionHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 1
 theme_override_constants/separation = 20
 
-[node name="ResolutionLabel" type="Label" parent="VBoxContainer/TabContainer/Video/ResolutionHBox"]
+[node name="ResolutionLabel" type="Label" parent="VBoxContainer/TabContainer/Video/PageContent/ResolutionHBox"]
 layout_mode = 2
 text = "Resolution:"
 horizontal_alignment = 2
@@ -462,22 +606,24 @@ theme_override_font_sizes/font_size = 22
 
 ; ResolutionOption - 分辨率下拉框（选项来自Settings.gd的RESOLUTIONS数组，默认1920x1280）
 ; 字体20：下拉框文字加大，与放大后的标签匹配
-[node name="ResolutionOption" type="OptionButton" parent="VBoxContainer/TabContainer/Video/ResolutionHBox"]
+; 手柄操作：焦点落在下拉框上时，左右方向键/摇杆就地切换选项（由MenuNavigator驱动）
+[node name="ResolutionOption" type="OptionButton" parent="VBoxContainer/TabContainer/Video/PageContent/ResolutionHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 40)
+theme_override_styles/focus = SubResource("SBFocusBorder")
 theme_override_font_sizes/font_size = 20
 
-; FullscreenRow - 全屏开关行
+; FullscreenHBox - 全屏开关行
 ; alignment=0(BEGIN)：内容靠左排列，与FPS行格式统一
-[node name="FullscreenHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
+[node name="FullscreenHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 0
 theme_override_constants/separation = 20
 
-[node name="FullscreenLabel" type="Label" parent="VBoxContainer/TabContainer/Video/FullscreenHBox"]
+[node name="FullscreenLabel" type="Label" parent="VBoxContainer/TabContainer/Video/PageContent/FullscreenHBox"]
 layout_mode = 2
 text = "Fullscreen:"
 horizontal_alignment = 2
@@ -487,7 +633,7 @@ theme_override_font_sizes/font_size = 22
 
 ; FullscreenCheck - 全屏复选框（应用后切换窗口/全屏模式，影响分辨率是否生效）
 ; 样式与布局说明同FPSCheck：固定尺寸紧跟标签 + 可见边框样式
-[node name="FullscreenCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Video/FullscreenHBox"]
+[node name="FullscreenCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Video/PageContent/FullscreenHBox"]
 layout_mode = 2
 size_flags_horizontal = 0
 custom_minimum_size = Vector2(36, 40)
@@ -495,18 +641,19 @@ theme_override_styles/normal = SubResource("SBCheckBoxNormal")
 theme_override_styles/hover = SubResource("SBCheckBoxHover")
 theme_override_styles/pressed = SubResource("SBCheckBoxHover")
 theme_override_styles/hover_pressed = SubResource("SBCheckBoxHover")
+theme_override_styles/focus = SubResource("SBFocusBorder")
 theme_override_font_sizes/font_size = 22
 
-; VSyncRow - 垂直同步开关行
+; VSyncHBox - 垂直同步开关行
 ; alignment=0(BEGIN)：内容靠左排列，与FPS行格式统一
-[node name="VSyncHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video"]
+[node name="VSyncHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Video/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 0
 theme_override_constants/separation = 20
 
-[node name="VSyncLabel" type="Label" parent="VBoxContainer/TabContainer/Video/VSyncHBox"]
+[node name="VSyncLabel" type="Label" parent="VBoxContainer/TabContainer/Video/PageContent/VSyncHBox"]
 layout_mode = 2
 text = "V-Sync:"
 horizontal_alignment = 2
@@ -516,7 +663,7 @@ theme_override_font_sizes/font_size = 22
 
 ; VSyncCheck - 垂直同步复选框（默认勾选，应用后切换VSYNC_ENABLED/DISABLED）
 ; 样式与布局说明同FPSCheck：固定尺寸紧跟标签 + 可见边框样式
-[node name="VSyncCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Video/VSyncHBox"]
+[node name="VSyncCheck" type="CheckBox" parent="VBoxContainer/TabContainer/Video/PageContent/VSyncHBox"]
 layout_mode = 2
 size_flags_horizontal = 0
 custom_minimum_size = Vector2(36, 40)
@@ -525,54 +672,62 @@ theme_override_styles/normal = SubResource("SBCheckBoxNormal")
 theme_override_styles/hover = SubResource("SBCheckBoxHover")
 theme_override_styles/pressed = SubResource("SBCheckBoxHover")
 theme_override_styles/hover_pressed = SubResource("SBCheckBoxHover")
+theme_override_styles/focus = SubResource("SBFocusBorder")
 theme_override_font_sizes/font_size = 22
 
-; BottomSpacer - Tab页底部弹性留白（与Gameplay页格式统一）
-[node name="BottomSpacer" type="Control" parent="VBoxContainer/TabContainer/Video"]
+; BottomSpacer - Tab页底部留白（固定24px，与Gameplay页格式统一）
+[node name="BottomSpacer" type="Control" parent="VBoxContainer/TabContainer/Video/PageContent"]
 layout_mode = 2
-size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
 
 ; ==============================================================================
 ; ------------------------------ 语言设置 ------------------------------
-; Language (VBoxContainer) - 语言设置标签页
+; Language (ScrollContainer) - 语言设置标签页（页内可滚动，结构同Gameplay页）
 ; ==============================================================================
-[node name="Language" type="VBoxContainer" parent="VBoxContainer/TabContainer"]
+[node name="Language" type="ScrollContainer" parent="VBoxContainer/TabContainer"]
 layout_mode = 2
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="PageContent" type="VBoxContainer" parent="VBoxContainer/TabContainer/Language"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 22
 mouse_filter = 2
 
-; TopSpacer - Tab页顶部留白（30px，四个Tab页格式统一）
-[node name="TopSpacer" type="Control" parent="VBoxContainer/TabContainer/Language"]
+; TopSpacer - Tab页顶部留白（24px，四个Tab页格式统一）
+[node name="TopSpacer" type="Control" parent="VBoxContainer/TabContainer/Language/PageContent"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 30)
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
 
-; LanguageTitle - "Language Settings" 分区标题（HeaderSmall变体，SHRINK_CENTER + 820px与设置行对齐）
-[node name="LanguageTitle" type="Label" parent="VBoxContainer/TabContainer/Language"]
+; LanguageTitle - "Language Settings" 分区标题（SHRINK_CENTER + 820px与设置行对齐）
+[node name="LanguageTitle" type="Label" parent="VBoxContainer/TabContainer/Language/PageContent"]
 layout_mode = 2
 text = "Language Settings"
 horizontal_alignment = 1
+vertical_alignment = 1
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 0)
-theme_type_variation = &"HeaderSmall"
-theme_override_font_sizes/font_size = 28
+theme_override_font_sizes/font_size = 26
+theme_override_colors/font_color = Color(0.72, 0.86, 1.0, 1.0)
 
-; TitleSpacer - 分区标题与设置行之间的间距（10px，四个Tab页格式统一）
-[node name="TitleSpacer" type="Control" parent="VBoxContainer/TabContainer/Language"]
+; TitleSpacer - 分区标题与设置行之间的间距（8px，四个Tab页格式统一）
+[node name="TitleSpacer" type="Control" parent="VBoxContainer/TabContainer/Language/PageContent"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 10)
+custom_minimum_size = Vector2(0, 8)
 mouse_filter = 2
 
-; LanguageRow - 语言选择行
-[node name="LanguageHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Language"]
+; LanguageHBox - 语言选择行
+[node name="LanguageHBox" type="HBoxContainer" parent="VBoxContainer/TabContainer/Language/PageContent"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(820, 48)
 alignment = 1
 theme_override_constants/separation = 20
 
-[node name="LanguageLabel" type="Label" parent="VBoxContainer/TabContainer/Language/LanguageHBox"]
+[node name="LanguageLabel" type="Label" parent="VBoxContainer/TabContainer/Language/PageContent/LanguageHBox"]
 layout_mode = 2
 text = "Language:"
 horizontal_alignment = 2
@@ -582,23 +737,38 @@ theme_override_font_sizes/font_size = 22
 
 ; LanguageOption - 语言下拉框（选项显示名由TranslationManager提供，zh_CN/en_US）
 ; 字体20：下拉框文字加大，与放大后的标签匹配
-[node name="LanguageOption" type="OptionButton" parent="VBoxContainer/TabContainer/Language/LanguageHBox"]
+; 手柄操作：焦点落在下拉框上时，左右方向键/摇杆就地切换选项（由MenuNavigator驱动）
+[node name="LanguageOption" type="OptionButton" parent="VBoxContainer/TabContainer/Language/PageContent/LanguageHBox"]
 layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 40)
+theme_override_styles/focus = SubResource("SBFocusBorder")
 theme_override_font_sizes/font_size = 20
 
-; BottomSpacer - Tab页底部弹性留白（与Gameplay页格式统一）
-[node name="BottomSpacer" type="Control" parent="VBoxContainer/TabContainer/Language"]
+; BottomSpacer - Tab页底部留白（固定24px，与Gameplay页格式统一）
+[node name="BottomSpacer" type="Control" parent="VBoxContainer/TabContainer/Language/PageContent"]
 layout_mode = 2
-size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2
+
+; HintLabel - 操作提示行（手柄/键盘引导）
+; 摆放位置：TabContainer 与底部按钮之间，属固定高度区，不参与弹性填充
+; 字体18 + 淡蓝灰配色：作为引导信息存在感低于正文标签，不与设置项抢视觉重心
+; 文本由 Settings.gd._update_text() 通过 TranslationManager 填充（支持中英切换）
+[node name="HintLabel" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "LT / RT 切换分类 · 方向键选择 · 左右调节数值 · A 确认 · B 返回"
+horizontal_alignment = 1
+vertical_alignment = 1
+mouse_filter = 2
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.6, 0.7, 0.85, 1)
 
 ; ==============================================================================
 ; ------------------------------ 按钮区域 ------------------------------
-; ButtonContainer - 按钮水平布局容器
+; ButtonSpacer - 按钮区上方间距（固定10px）
+; 【关键】按钮区全部为固定高度，不做弹性填充，保证任何窗口高度下都可见
 ; ==============================================================================
-; ButtonSpacer - 按钮区上方间距（10px）
 [node name="ButtonSpacer" type="Control" parent="VBoxContainer"]
 layout_mode = 2
 custom_minimum_size = Vector2(0, 10)
@@ -612,12 +782,17 @@ custom_minimum_size = Vector2(900, 0)
 theme_override_constants/separation = 24
 
 ; BackButton - 返回按钮（发出go_back信号，由Main.gd决定返回主菜单还是暂停菜单）
+; 样式：统一按钮底色 + 亮青焦点框（手柄聚焦时一眼可见）
 [node name="BackButton" type="Button" parent="VBoxContainer/ButtonContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 48)
 text = "Back"
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("SBButtonNormal")
+theme_override_styles/hover = SubResource("SBButtonHover")
+theme_override_styles/pressed = SubResource("SBButtonPressed")
+theme_override_styles/focus = SubResource("SBFocusBorder")
 
 ; ResetButton - 恢复默认按钮（仅重置UI与音量，需再点Apply才写入配置文件）
 [node name="ResetButton" type="Button" parent="VBoxContainer/ButtonContainer"]
@@ -625,7 +800,11 @@ layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 48)
 text = "Reset to Default"
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("SBButtonNormal")
+theme_override_styles/hover = SubResource("SBButtonHover")
+theme_override_styles/pressed = SubResource("SBButtonPressed")
+theme_override_styles/focus = SubResource("SBFocusBorder")
 
 ; ApplyButton - 应用按钮（收集设置→保存cfg→应用到引擎/单例→广播settings_applied信号）
 [node name="ApplyButton" type="Button" parent="VBoxContainer/ButtonContainer"]
@@ -633,10 +812,14 @@ layout_mode = 2
 size_flags_horizontal = 3
 custom_minimum_size = Vector2(0, 48)
 text = "Apply"
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 20
+theme_override_styles/normal = SubResource("SBButtonNormal")
+theme_override_styles/hover = SubResource("SBButtonHover")
+theme_override_styles/pressed = SubResource("SBButtonPressed")
+theme_override_styles/focus = SubResource("SBFocusBorder")
 
-; BottomSpacer - 界面底部收尾留白（30px）
+; BottomSpacer - 界面底部收尾留白（固定24px，不做弹性填充）
 [node name="BottomSpacer" type="Control" parent="VBoxContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(0, 30)
+custom_minimum_size = Vector2(0, 24)
 mouse_filter = 2

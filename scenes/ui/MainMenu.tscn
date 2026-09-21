@@ -14,6 +14,7 @@
 ;       ├── Spacer1 (Control) - 间距（50像素）
 ;       ├── StartButton (Button) - 开始游戏按钮
 ;       ├── SettingsButton (Button) - 设置按钮
+;       ├── LeaderboardButton (Button) - 排行榜按钮
 ;       ├── QuitButton (Button) - 退出游戏按钮
 ;       ├── Spacer2 (Control) - 间距（30像素）
 ;       └── VersionLabel (Label) - 版本号显示
@@ -53,7 +54,9 @@ color = Color(0.13, 0.16, 0.26, 1)
 
 ; ------------------------------ 菜单内容 ------------------------------
 ; VBoxContainer - 垂直布局容器
-; anchors_preset=8：居中锚定，偏移-150,-150到150,150形成300x300的居中区域
+; anchors_preset=8：居中锚定，偏移-150,-220到150,220形成300x440的居中区域
+; 高度说明：新增"排行榜"按钮后共4个大按钮，原300高会让内容溢出容器导致视觉上偏下，
+;           故把垂直偏移扩大到±220，保证标题到版本号的整块内容仍以屏幕中心对称分布
 ; mouse_filter=2（MOUSE_FILTER_IGNORE）：不接收鼠标事件，事件穿透到子按钮
 [node name="VBoxContainer" type="VBoxContainer" parent="."]
 layout_mode = 1
@@ -63,9 +66,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -150.0
-offset_top = -150.0
+offset_top = -220.0
 offset_right = 150.0
-offset_bottom = 150.0
+offset_bottom = 220.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
@@ -106,6 +109,14 @@ theme_type_variation = &"ButtonLarge"
 [node name="SettingsButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Settings"
+theme_type_variation = &"ButtonLarge"
+
+; LeaderboardButton (Button) - 排行榜按钮
+; 打开排行榜界面（通关榜/登塔榜，LT/RT 切换）
+; 使用ButtonLarge主题变体，与其它主菜单按钮保持一致的视觉层级
+[node name="LeaderboardButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Leaderboard"
 theme_type_variation = &"ButtonLarge"
 
 ; QuitButton (Button) - 退出游戏按钮
