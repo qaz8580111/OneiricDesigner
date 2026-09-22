@@ -39,13 +39,15 @@ const DROP_FOLDER: String = "敌人掉落"
 ##           新增掉落物种类时：美术放 icon_xxx.png 到"敌人掉落"目录 + 本表加一行，零代码改动
 ## 取值来源：Enemy._generate_default_drops() 动态生成的 item_id，以及 data/items/*.tres 的预留 id
 const DROP_ICON_MAP: Dictionary = {
-	## 梦境碎片：小碎片用小图；中碎片/精英碎片共用大图（大小掉落从图标尺寸上也能区分）
+	## 梦境碎片：小碎片用小图；中碎片/精英碎片/Boss碎片共用大图（大小掉落从图标尺寸上也能区分）
 	"fragment_small": "icon_fragments_small",
 	"fragment_medium": "icon_fragments_big",
 	"elite_fragment": "icon_fragments_big",
-	## 血包：普通小血包/精英大血包（回复量不同，图标大小区分）
+	"boss_fragment": "icon_fragments_big",
+	## 血包：普通小血包/精英大血包/Boss大血包（回复量不同，图标大小区分）
 	"health_small": "icon_blood_small",
 	"elite_health": "icon_blood_big",
+	"boss_health": "icon_blood_big",
 	## 特效技能书：普通怪与精英怪/Boss 的即时技能奖励共用技能图标
 	## 设计意图：技能书已拆分为"特效技能"与"属性技能"两类掉落，
 	##           本组 id 统一映射 icon_skill，拾取后只展示特效技能三选一
@@ -108,9 +110,13 @@ static func get_drop_icon(item_id: String) -> Texture2D:
 
 ## ========== 内部方法 ==========
 
-## 统一加载入口：正/负缓存 + 文件存在性检查 + load
+## 统一加载入口：正/负缓存 + 文件存在性检查 + load + Image兜底
 ## 参数：path - 完整 res:// 图标路径
 ## 返回：纹理或 null
+## 加载策略（两层兜底）：
+##   1. 先走 Godot 的 load()（依赖 .ctex 导入产物，引擎级缓存、GPU 友好）
+##   2. load 失败时用 Image.load() 直接读 PNG 像素数据 → ImageTexture.create_from_image()
+##      （绕开导入链路，适合 .import/.ctex 失步的紧急修复；性能略低但能跑）
 static func _load_icon(path: String) -> Texture2D:
 	## 正缓存命中：直接返回（零查询开销）
 	if _cache.has(path):
@@ -121,11 +127,27 @@ static func _load_icon(path: String) -> Texture2D:
 	## 文件不存在：记入负缓存（某词条没做图是常态，只查一次盘）
 	if not FileAccess.file_exists(path):
 		_miss_cache[path] = true
+		print("[IconLibrary] MISS (file_not_found): ", path)
 		return null
-	## 正式加载并写入正缓存（load 失败返回 null 时也记负缓存，防反复报错刷屏）
+	## 第一层：Godot 标准 load() 依赖 .ctex 导入产物
 	var tex: Texture2D = load(path) as Texture2D
-	if tex == null:
-		_miss_cache[path] = true
-	else:
+	if tex != null:
 		_cache[path] = tex
+		return tex
+	## 第二层兜底：直接从 PNG 像素数据构造纹理（绕过导入链路）
+	## 适用场景：.import/.ctex 失步或完全缺失时，确保掉落物能显示图标而不是色块
+	var img: Image = Image.new()
+	var err: Error = img.load(path)
+	if err == OK and img.get_data() != null:
+		## 确保格式为 RGBA8（ImageTexture 要求有 alpha 通道才能正常透明渲染）
+		if img.get_format() != Image.FORMAT_RGBA8:
+			img.convert(Image.FORMAT_RGBA8)
+		tex = ImageTexture.create_from_image(img)
+		if tex != null:
+			_cache[path] = tex
+			print("[IconLibrary] FALLBACK Image.load() OK: ", path, " size=", img.get_width(), "x", img.get_height())
+			return tex
+	## 彻底失败：记入负缓存，打印诊断日志便于排查 PNG 格式问题
+	_miss_cache[path] = true
+	print("[IconLibrary] FAIL (load + Image.load both null): ", path, " Image.load err=", err)
 	return tex

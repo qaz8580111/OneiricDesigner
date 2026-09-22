@@ -850,11 +850,14 @@ func _on_ultimate_boss_killed(_boss: Node) -> void:
 	_current_boss = null
 	_active_type = -1
 	_hide_boss_hud()
-	## ---- 通关榜：记录终极 BOSS 战用时（从「梦境根源」登场到被击杀） ----
+	## ---- 通关榜：暂存终极 BOSS 战用时（不立即落盘） ----
 	## 停表：计时以本局最后一次 _process 累加值为准（击杀帧的 delta 已计入）
 	_ultimate_boss_active = false
 	var battle_time: float = _ultimate_boss_time
-	var rank: int = LeaderboardManager.record_classic_time(battle_time)
+	## 暂存到 LeaderboardManager 内存变量：等玩家在结算面板输入昵称后由
+	## GameOverPanel 调 commit_pending_classic_time(nickname) 正式落盘
+	## （rank 现在拿不到，因为昵称输入后才会排序，只在 commit 返回值里给面板用）
+	LeaderboardManager.set_pending_classic_time(battle_time)
 	var time_text: String = LeaderboardManager.format_time(battle_time)
 	_update_stage_label("通关 · 用时 %s" % time_text)
 	_show_banner("★ 梦境根源已被击碎 ★\n梦境终结 · 恭喜通关\n终极BOSS战用时：%s" % time_text, Color(1.0, 0.9, 0.4), 6.0)
@@ -862,7 +865,7 @@ func _on_ultimate_boss_killed(_boss: Node) -> void:
 		AudioManager.play("buff_pickup", 1.0)
 		AudioManager.play("upgrade_pick", 1.0)
 	run_completed.emit()
-	print("[StageDirector] 终极 BOSS 已被击败：本局通关，BOSS战用时 %.1f 秒（榜内第 %d 名）" % [battle_time, rank])
+	print("[StageDirector] 终极 BOSS 已被击败：本局通关，BOSS战用时 %.1f 秒（待玩家输入昵称后落盘）" % battle_time)
 
 ## Boss 掉落补路由：Boss 不在业务管理列表，drops_generated 信号由切面转接
 ## 参数：position - 掉落位置，drops - 掉落物数组，world - 游戏世界

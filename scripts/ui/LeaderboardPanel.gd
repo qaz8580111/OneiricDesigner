@@ -42,9 +42,10 @@ const NORMAL_MODULATE: Color = Color(1.0, 1.0, 1.0)
 const SELECT_TWEEN_TIME: float = 0.06
 
 ## ---------- 表格列宽（固定值保证两个榜单切换时列对齐一致） ----------
-const COL_RANK_WIDTH: float = 120.0   ## 排名列
-const COL_VALUE_WIDTH: float = 320.0  ## 成绩列（用时 / 层数）
-const COL_DATE_WIDTH: float = 340.0   ## 日期列
+const COL_RANK_WIDTH: float = 80.0    ## 排名列（"1"~"10" 仅 2 字符，缩窄留出空间给昵称列）
+const COL_NICKNAME_WIDTH: float = 200.0  ## 昵称列（玩家输入的昵称，最长 MAX_NICKNAME_LENGTH=12 字符）
+const COL_VALUE_WIDTH: float = 300.0  ## 成绩列（用时 / 层数）
+const COL_DATE_WIDTH: float = 320.0   ## 日期列
 
 ## ========== 生命周期方法 ==========
 
@@ -101,11 +102,11 @@ func _ready() -> void:
 		tab_hbox.add_child(tab_btn)
 		_tab_buttons.append(tab_btn)
 
-	## ---------- 榜单表格（3列：排名/成绩/日期） ----------
+	## ---------- 榜单表格（4列：排名/昵称/成绩/日期） ----------
 	_grid = GridContainer.new()
-	_grid.columns = 3
+	_grid.columns = 4
 	## 行距与列距：数值较小以保证10行能在1920×1280内完整显示
-	_grid.add_theme_constant_override("h_separation", 18)
+	_grid.add_theme_constant_override("h_separation", 16)
 	_grid.add_theme_constant_override("v_separation", 6)
 	_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(_grid)
@@ -113,7 +114,8 @@ func _ready() -> void:
 	## ---------- 空榜提示（无记录时替代表格） ----------
 	_empty_label = Label.new()
 	_empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_empty_label.custom_minimum_size = Vector2(COL_RANK_WIDTH + COL_VALUE_WIDTH + COL_DATE_WIDTH, 80)
+	## 空榜宽度=4列总宽，保证空榜提示与表格左右对齐
+	_empty_label.custom_minimum_size = Vector2(COL_RANK_WIDTH + COL_NICKNAME_WIDTH + COL_VALUE_WIDTH + COL_DATE_WIDTH, 80)
 	_empty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_empty_label.add_theme_font_size_override("font_size", 22)
 	_empty_label.add_theme_color_override("font_color", Color(0.6, 0.63, 0.72))
@@ -241,13 +243,15 @@ func _rebuild_list() -> void:
 	var header_value: String = TranslationManager.t("LEADERBOARD_COL_TIME") if is_classic \
 			else TranslationManager.t("LEADERBOARD_COL_FLOOR")
 	var header_date: String = TranslationManager.t("LEADERBOARD_COL_DATE")
-	_add_row(header_rank, header_value, header_date, Color(0.7, 0.76, 0.9), true)
+	_add_row(header_rank, TranslationManager.t("LEADERBOARD_COL_NICKNAME"), header_value, header_date, Color(0.7, 0.76, 0.9), true)
 
 	## ---------- 数据行 ----------
 	for i in entries.size():
 		var entry: Dictionary = entries[i]
 		## 排名：1~10
 		var rank_text: String = "%d" % (i + 1)
+		## 昵称：玩家输入或历史数据回读（LeaderboardManager 已规整空值为 "佚名"）
+		var nickname_text: String = str(entry.get("nickname", LeaderboardManager.DEFAULT_NICKNAME))
 		var value_text: String = ""
 		if is_classic:
 			value_text = LeaderboardManager.format_time(float(entry.get("time", 0.0)))
@@ -256,18 +260,18 @@ func _rebuild_list() -> void:
 		var date_text: String = str(entry.get("date", ""))
 		## 前三名用金色区分（荣誉感），其余用常规色
 		var row_color: Color = Color(1.0, 0.88, 0.55) if i < 3 else Color(0.87, 0.9, 0.96)
-		_add_row(rank_text, value_text, date_text, row_color, false)
+		_add_row(rank_text, nickname_text, value_text, date_text, row_color, false)
 
 	_refresh_best_label()
 
-## 向表格追加一行（3个等宽标签）
-## 参数：rank/value/date - 三列的文本
+## 向表格追加一行（4个等宽标签：排名/昵称/成绩/日期）
+## 参数：rank/nickname/value/date - 四列的文本
 ##       color - 文本颜色
 ##       is_header - 是否表头（表头加粗底色区分）
-func _add_row(rank: String, value: String, date: String, color: Color, is_header: bool) -> void:
-	var texts: Array[String] = [rank, value, date]
-	var widths: Array[float] = [COL_RANK_WIDTH, COL_VALUE_WIDTH, COL_DATE_WIDTH]
-	for i in 3:
+func _add_row(rank: String, nickname: String, value: String, date: String, color: Color, is_header: bool) -> void:
+	var texts: Array[String] = [rank, nickname, value, date]
+	var widths: Array[float] = [COL_RANK_WIDTH, COL_NICKNAME_WIDTH, COL_VALUE_WIDTH, COL_DATE_WIDTH]
+	for i in 4:
 		var cell: Label = Label.new()
 		cell.text = texts[i]
 		cell.custom_minimum_size = Vector2(widths[i], 34 if is_header else 30)
@@ -275,6 +279,11 @@ func _add_row(rank: String, value: String, date: String, color: Color, is_header
 		cell.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		cell.add_theme_font_size_override("font_size", 22 if is_header else 20)
 		cell.add_theme_color_override("font_color", color)
+		## 昵称列文本超长裁剪：玩家昵称最长 12 字，正常情况不会溢出；
+		## 但保险起见启用 ELLIPSIS 避免极端情况下撑破布局
+		if i == 1:
+			cell.clip_text = true
+			cell.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		_grid.add_child(cell)
 
 ## ========== 导航辅助方法 ==========

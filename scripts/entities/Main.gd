@@ -260,6 +260,11 @@ func _show_game_over_panel(victory: bool = false) -> void:
 	## 通关/死亡共用同一面板，仅切换标题与配色
 	## 时序关键：必须在 add_child 之前写入 victory —— 面板的 _ready() 会在入树瞬间构建UI
 	active_ui.victory = victory
+	## 通关结算时把 LeaderboardManager 暂存的通关用时注入面板：
+	## 面板据此决定是否展示昵称输入框，以及按钮回调时调 commit_pending_classic_time 落盘
+	## 死亡结算路径无 pending（LeaderboardManager._pending_classic_time 为 -1.0），面板不展示输入框
+	if victory and LeaderboardManager.has_pending_classic_time():
+		active_ui.pending_classic_time = LeaderboardManager.get_pending_classic_time()
 	## 面板必须ALWAYS处理模式（死亡瞬间场景树可能仍处于暂停）
 	active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
 	## 连接结算面板信号：再来一局 / 返回主菜单
