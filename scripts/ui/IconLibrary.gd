@@ -46,9 +46,23 @@ const DROP_ICON_MAP: Dictionary = {
 	## 血包：普通小血包/精英大血包（回复量不同，图标大小区分）
 	"health_small": "icon_blood_small",
 	"elite_health": "icon_blood_big",
-	## 随机技能书：普通怪与精英怪的即时技能奖励共用技能图标
+	## 特效技能书：普通怪与精英怪/Boss 的即时技能奖励共用技能图标
+	## 设计意图：技能书已拆分为"特效技能"与"属性技能"两类掉落，
+	##           本组 id 统一映射 icon_skill，拾取后只展示特效技能三选一
 	"buff_attack": "icon_skill",
 	"elite_buff_attack": "icon_skill",
+	"boss_buff": "icon_skill",
+	## 属性技能书：拾取后只展示属性技能三选一（与特效技能掉落完全分离）
+	"buff_attribute": "icon_AS",
+	## 弹道构型书：拾取后只展示弹道构型三选一（构型不叠层，选定即替换当前弹道）
+	"shot_pattern": "icon_BC",
+	## 护盾掉落：基础/特效护盾在地面掉落物阶段统一显示同一张"基础护盾"图标
+	## 设计意图：掉落物只需告知玩家"这是一个护盾"，具体护盾种类由拾取后的三选一决定，
+	##           故 4 种护盾 id 全部映射到 icon_shield_basic（不再显示各特效护盾专属图标）
+	"shield_basic": "icon_shield_basic",
+	"shield_poison": "icon_shield_basic",
+	"shield_frost": "icon_shield_basic",
+	"shield_reflect": "icon_shield_basic",
 }
 
 ## ========== 静态缓存 ==========
@@ -72,7 +86,7 @@ static func get_upgrade_icon(upgrade_id: String, rarity: int) -> Texture2D:
 	var folder: String = RARITY_FOLDERS.get(rarity, "白色普通")
 	return _load_icon("%s/%s/icon_%s.png" % [BASE_PATH, folder, upgrade_id])
 
-## 获取护盾装备图标（掉落物贴图用）
+## 获取护盾装备图标（HUD护盾栏 / 暂停菜单装备展示用，不再用于地面掉落物）
 ## 参数：shield_id - 护盾唯一标识（如 "shield_basic"）
 ## 返回：图标纹理；缺失或 id 为空时返回 null（调用方回退占位色块）
 static func get_shield_icon(shield_id: String) -> Texture2D:

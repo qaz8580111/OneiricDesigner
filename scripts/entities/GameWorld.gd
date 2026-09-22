@@ -683,48 +683,119 @@ func _on_temple_tree_exiting(temple: Area2D) -> void:
 
 ## 玩家发射子弹时的回调（响应player.shot信号）
 ## 参数：position - 子弹发射位置，direction - 子弹飞行方向，bullet_data - 玩家配置的子弹数据
+## 说明：具体发几发由 bullet_data 上的弹道构型决定，本回调只负责把开火请求交给统一发射器
 func _on_player_shot(position: Vector2, direction: Vector2, bullet_data: BulletDataClass) -> void:
+	spawn_shot_pattern(position, direction, bullet_data, "player")
+
+## 统一弹道构型发射出口（玩家与敌人的普通射击共用）
+## 参数：origin - 发射位置；direction - 瞄准方向；bullet_data - 子弹配置（承载弹道构型）；
+##       owner_group - 阵营 "player"/"enemy"（决定碰撞层与同阵营过滤）
+## 数据流：bullet_data.get_final_shot_pattern().build_shots() → ShotSpec 列表 → 逐发 _spawn_one_bullet
+func spawn_shot_pattern(origin: Vector2, direction: Vector2,
+		bullet_data: BulletDataClass, owner_group: String) -> void:
+	## 子弹场景缺失时直接返回（与原有守卫一致）
+	if BULLET_SCENE == null:
+		return
+	var data_to_use: BulletDataClass = bullet_data if bullet_data != null else default_bullet_data
+	if data_to_use == null:
+		return
+	## 构型只负责算弹道（不实例化子弹），从而被任意发射者无条件复用
+	var shots: Array = data_to_use.get_final_shot_pattern().build_shots(
+		origin, direction, data_to_use)
+	for spec in shots:
+		var delay: float = float(spec.get("delay", 0.0))
+		if delay <= 0.0:
+			_spawn_one_bullet(spec, data_to_use, owner_group, origin)
+		else:
+			## 延迟弹单独协程，不阻塞后续弹道；delay 语义为"距开火时刻"
+			_spawn_one_bullet_deferred(spec, data_to_use, owner_group, origin, delay)
+
+## 延迟弹协程：等待 delay 后生成单发（世界已释放则静默退出）
+func _spawn_one_bullet_deferred(spec: Dictionary, base_data: BulletDataClass,
+		owner_group: String, origin: Vector2, delay: float) -> void:
+	await get_tree().create_timer(delay, false).timeout
+	## 等待期间可能切场景/游戏结束导致世界已释放，协程恢复时守卫退出
+	if not is_instance_valid(self) or BULLET_SCENE == null:
+		return
+	_spawn_one_bullet(spec, base_data, owner_group, origin)
+
+## 生成单发子弹（玩家/敌人共用，原 _on_player_shot 的实例化流程收敛于此）
+## 参数：spec - 单条弹道描述（direction/offset/damage_mult/speed_mult/scale_mult/extra_effects）
+##       base_data - 承载构型的原始子弹数据；owner_group - 阵营；origin - 发射原点
+func _spawn_one_bullet(spec: Dictionary, base_data: BulletDataClass,
+		owner_group: String, origin: Vector2) -> void:
+	## 方向兜底：构型可能返回零向量，统一归一化后交给子弹
+	var dir: Vector2 = spec.get("direction", Vector2.RIGHT)
+	if dir == Vector2.ZERO:
+		dir = Vector2.RIGHT
+	dir = dir.normalized()
+
 	## 实例化子弹节点
 	var bullet: Area2D = BULLET_SCENE.instantiate()
-	## 将子弹添加到场景树中
+	## 复制子弹数据（每个子弹独立一份，避免共享数据被修改）
+	## 性能优化：无特效的子弹直接共享原始数据（只读），避免无意义深拷贝
+	## 满级技能后子弹可能带16个特效，deep copy深拷贝每个子资源开销大；
+	## 无特效子弹的damage/speed在创建后不会被修改，共享安全
+	## 注意：数据必须在 add_child 之前注入 —— Bullet._ready() 会依据数据应用外观与 ON_SPAWN 特效
+	bullet.set_bullet_data(_build_bullet_data(base_data, spec))
+
+	## 先禁用碰撞检测（避免刚加入场景树时与发射者自身碰撞）
+	if owner_group == "enemy":
+		bullet.monitoring = false
+		## 设置子弹碰撞层为8（敌人子弹层）/ 掩码为1（只检测玩家层）
+		bullet.collision_layer = 8
+		bullet.collision_mask = 1
+
+	## 设置子弹飞行方向
+	bullet.set_direction(dir)
+	## 设置子弹所属阵营（防止误伤同阵营单位）
+	bullet.set_owner_group(owner_group)
+	## 整体缩放（重弹用）：CollisionShape2D 为子节点，随节点缩放同步放大
+	var scale_mult: float = float(spec.get("scale_mult", 1.0))
+	if not is_equal_approx(scale_mult, 1.0):
+		bullet.scale = Vector2.ONE * scale_mult
+
+	## 将子弹添加到父节点（GameWorld）的场景树中
 	add_child(bullet)
-	## 设置子弹发射位置
-	bullet.global_position = position
+	## 设置子弹生成位置（origin + 构型偏移）
+	bullet.global_position = origin + Vector2(spec.get("offset", Vector2.ZERO))
 	## 重置物理插值：物理插值开启后，add_child后传送必须重置，
 	## 否则子弹会从原点(0,0)平滑滑向发射位置（视觉bug）
 	if bullet.has_method("reset_physics_interpolation"):
 		bullet.reset_physics_interpolation()
 
-	## 复制子弹数据（每个子弹独立一份，避免共享数据被修改）
-	## 性能优化：无特效的子弹直接共享原始数据（只读），避免无意义深拷贝
-	## 满级技能后子弹可能带16个特效，duplicate(true)深拷贝每个子资源开销大；
-	## 无特效子弹的damage/speed在创建后不会被修改，共享安全
-	var bullet_data_to_use: BulletDataClass = bullet_data
-	if bullet_data_to_use == null:
-		bullet_data_to_use = default_bullet_data
+	## 添加到场景树后再启用碰撞检测
+	if owner_group == "enemy":
+		bullet.monitoring = true
 
-	var bullet_data_copy: BulletDataClass
-	if bullet_data_to_use.effects.is_empty():
-		## 无特效：直接引用共享数据（只读，不会被子弹逻辑修改）
-		bullet_data_copy = bullet_data_to_use
-	else:
-		## 有特效：深拷贝确保特效叠层状态独立（stack_count等运行时字段）
-		bullet_data_copy = bullet_data_to_use.duplicate()
-	## 设置子弹数据
-	if bullet.has_method("set_bullet_data"):
-		bullet.set_bullet_data(bullet_data_copy)
-
-	## 设置子弹飞行方向
-	bullet.set_direction(direction)
-	## 设置子弹所属阵营为"player"（防止误伤玩家）
-	bullet.set_owner_group("player")
 	## 将子弹添加到管理列表
 	_bullets.append(bullet)
-
 	## 连接子弹命中信号：当子弹命中目标时触发回调
 	bullet.hit.connect(_on_bullet_hit)
 	## 连接子弹销毁信号：当子弹销毁时触发回调（绑定子弹实例）
 	bullet.destroyed.connect(_on_bullet_destroyed.bind(bullet))
+
+## 按弹道系数派生子弹数据（返回共享或副本）
+## 性能：无系数改动、无额外特效、原数据无特效时直接共享（只读），复刻原有优化
+func _build_bullet_data(base: BulletDataClass, spec: Dictionary) -> BulletDataClass:
+	var dmg_mult: float = float(spec.get("damage_mult", 1.0))
+	var spd_mult: float = float(spec.get("speed_mult", 1.0))
+	var extra: Array = spec.get("extra_effects", [])
+	var plain: bool = is_equal_approx(dmg_mult, 1.0) and is_equal_approx(spd_mult, 1.0) \
+		and extra.is_empty() and base.effects.is_empty()
+	if plain:
+		return base
+	## 有系数改动/额外特效：拷贝一份，确保特效叠层状态独立（stack_count等运行时字段）
+	var data: BulletDataClass = base.duplicate()
+	if not is_equal_approx(dmg_mult, 1.0):
+		## 伤害保底 1：低伤害弹经系数折算后 int 截断会变 0
+		data.damage = maxi(int(base.damage * dmg_mult), 1)
+	if not is_equal_approx(spd_mult, 1.0):
+		data.speed = base.speed * spd_mult
+	for effect in extra:
+		if effect != null:
+			data.effects.append(effect)
+	return data
 
 ## 子弹命中目标时的回调（响应bullet.hit信号）
 ## 参数：bullet - 命中的子弹实例，target - 被命中的目标节点

@@ -1,7 +1,7 @@
 ## BulletData.gd - 子弹数据资源类
 ## 职责：定义子弹的所有配置数据，实现数据与逻辑分离
 ## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
-## 使用场景：在编辑器中创建 .tres 文件配置子弹属性，支持通过词条系统动态修改伤害、速度、形态、特效
+## 使用场景：在编辑器中创建 .tres 文件配置子弹属性，支持通过词条系统动态修改伤害、速度、形态、弹道构型、特效
 ## 被引用方：Bullet（在生成/飞行/命中/销毁四个生命周期钩子中调用trigger_effects）、
 ##           EnemyData.bullet_data（敌人子弹配置）、GameWorld/武器系统（发射子弹时提供配置）
 ## 数据流：.tres配置 → Bullet.set_bullet_data() → Bullet钩子调用trigger_effects() →
@@ -16,6 +16,9 @@ const BulletFormClass = preload("res://scripts/resources/bullet/BulletForm.gd")
 
 ## 子弹特效资源类，用于配置子弹特效（穿透、爆炸、中毒等）
 const BulletEffectClass = preload("res://scripts/resources/bullet/BulletEffect.gd")
+
+## 弹道构型资源类，用于配置"一次开火产出哪些弹道"（单发/扇形/平行列/连发/环形等）
+const BulletShotPatternClass = preload("res://scripts/resources/bullet/BulletShotPattern.gd")
 
 ## ========== 子弹基础属性 ==========
 
@@ -35,11 +38,18 @@ const BulletEffectClass = preload("res://scripts/resources/bullet/BulletEffect.g
 ## 每个特效有独立的触发时机（生成/飞行/命中/销毁）
 @export var effects: Array[BulletEffectClass] = []
 
+## 弹道构型资源（决定一次开火产出几发、以何角度/时序/偏移飞出）
+## 为空时使用默认单发直线构型（保证现存 .tres 行为零变化）
+@export var shot_pattern: BulletShotPatternClass = null
+
 ## ========== 缓存变量（性能优化） ==========
 
 ## 默认形态缓存，避免每次调用get_final_form()都创建新对象
 ## 使用懒加载方式，第一次需要时才创建
 var _default_form: BulletFormClass = null
+
+## 默认弹道构型缓存，避免每次调用get_final_shot_pattern()都创建新对象
+var _default_shot_pattern: BulletShotPatternClass = null
 
 ## ========== 核心方法（扩展插槽） ==========
 
@@ -66,6 +76,18 @@ func get_final_form() -> BulletFormClass:
 	if _default_form == null:
 		_default_form = BulletFormClass.new()
 	return _default_form
+
+## 获取实际弹道构型资源（扩展插槽）
+## 如果未配置构型，返回缓存的默认单发直线构型
+## 返回：弹道构型配置
+func get_final_shot_pattern() -> BulletShotPatternClass:
+	## 如果配置了构型，直接返回
+	if shot_pattern != null:
+		return shot_pattern
+	## 懒加载默认构型（第一次需要时才创建）
+	if _default_shot_pattern == null:
+		_default_shot_pattern = BulletShotPatternClass.new()
+	return _default_shot_pattern
 
 ## 触发指定时机的特效
 ## 参数：trigger_type - 特效触发时机（生成/飞行/命中/销毁）

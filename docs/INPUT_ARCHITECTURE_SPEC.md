@@ -123,8 +123,8 @@ AI 在本项目中还需额外遵守：
 -   **存档兼容**: InputManager 的自定义键位映射序列化格式必须向后兼容，旧存档加载时缺失的绑定应回退到 Input Map 默认值而非报错。
 -   **性能预算**: `InputManager._input()` 单帧耗时不得超过 0.05ms。禁止在其中执行文件 IO、场景树查询或复杂字符串操作。
 -   **射击键与拾取键强制分离**: 鼠标左键（`MOUSE_BUTTON_LEFT`）在 `project.godot` 中只绑定 `game_shoot`，**禁止**再绑 `game_interact`。`game_interact`（手动拾取非自动吸附物/进神庙）只允许 **E / 空格 / Enter / 手柄A**。历史事故：左键曾同时绑两者，战斗中玩家开枪路过技能书/护盾时在 100px 磁吸范围内被"自动捡走"（实际是开火键触发了拾取）。
--   **手动拾取单一入口**: 非自动吸附掉落物（`BUFF` 技能书、`EQUIPMENT` 护盾）的交互键轮询**只允许**在 `GameWorld._handle_manual_pickup()`（神庙优先级 > 拾取，每物理帧一次）。`PickUp._physics_process` 只负责自动吸附位移，禁止再自行轮询 `game_interact`——双入口竞争同一个"读取即消费"的按下缓存，执行顺序不确定还会吞掉神庙交互。
--   **自动吸附判定唯一来源**: 是否自动吸附以 `DropItem.get_auto_adsorb()` 为准（`DREAM_FRAGMENT`/`HEALTH`=true，`WEAPON`/`ITEM`/`BUFF`/`EQUIPMENT`=false）。注意导出字段 `auto_adsorb=true` 会**强制覆盖**类型默认值，配置 `.tres` 时手动拾取物切勿误置。
+-   **手动拾取单一入口**: 非自动吸附掉落物（`BUFF` 特效技能书、`ATTRIBUTE_SKILL` 属性技能书、`SHOT_PATTERN` 弹道构型书、`EQUIPMENT` 护盾、`WEAPON`、`ITEM`）的交互键轮询**只允许**在 `GameWorld._handle_manual_pickup()`（神庙优先级 > 拾取，就近拾取不按类型过滤，每物理帧一次）。`PickUp._physics_process` 只负责自动吸附位移，禁止再自行轮询 `game_interact`——双入口竞争同一个"读取即消费"的按下缓存，执行顺序不确定还会吞掉神庙交互。
+-   **自动吸附判定唯一来源**: 是否自动吸附以 `DropItem.get_auto_adsorb()` 为准（`DREAM_FRAGMENT`/`HEALTH`=true；`WEAPON`/`ITEM`/`BUFF`/`ATTRIBUTE_SKILL`/`SHOT_PATTERN`/`EQUIPMENT`=false）。注意导出字段 `auto_adsorb=true` 会**强制覆盖**类型默认值，配置 `.tres` 时手动拾取物切勿误置。
 
 ## 6. AI 响应模板
 

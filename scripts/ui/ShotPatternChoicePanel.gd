@@ -1,34 +1,33 @@
-## LevelUpPanel.gd - 升级三选一面板（紧凑底栏样式，不暂停游戏）
-## 职责：展示3个随机词条供玩家选择，选定后发出信号
+## ShotPatternChoicePanel.gd - 弹道构型三选一面板（紧凑底栏样式，不暂停游戏）
+## 职责：展示3个随机弹道构型供玩家选择，选定后发出信号
 ## 设计意图：
-##   1. 紧凑底栏：屏幕底部居中的小面板，不覆盖游戏画面，无全屏蒙层
-##   2. 不暂停游戏：玩家可边战斗边选择，战斗节奏不被打断
-##   3. 水平卡片排列：3张卡片并排，鼠标点击/数字键1/2/3/手柄LT·RT扳机+A选择
-##   4. 描述用tooltip展示：卡片只显示名称，鼠标悬停看详情，减小占用面积
-## 输入架构：选择输入全部经InputManager网关（LEVEL_UP_CHOICE上下文放行
-##           game_choice_prev/next=手柄LT/RT扳机、键盘Q/E，ui_left/right为备用）；
-##           卡片显式FOCUS_NONE，避免Godot内置焦点导航与手动选中索引双重移动
-## 数据流：UpgradeManager.open_level_up_choice() → 创建面板 → setup(choices)
-##        → 玩家选定 upgrade_chosen → UpgradeManager 应用词条、销毁面板
+##   1. 与技能/护盾三选一完全同款：紧凑底栏、不暂停战斗、水平卡片排列，
+##      玩家拾取地面弹道构型书后由"直接替换"改为"自选一种构型"，体验与捡技能宝石一致
+##   2. 复用 ChoiceCardStyle 共享样式库：选中态（粗边框+外发光+提亮+放大）与技能/商店/神庙一致
+##   3. 数据源为 BulletShotPattern（候选由 UpgradeManager 从 data/bullet/pattern/ 随机抽取）
+##   注意：构型不叠层——选定后直接替换玩家当前弹道构型（区别于技能/属性/护盾的叠层语义）
+## 输入架构：选择输入全部经 InputManager 网关（复用 LEVEL_UP_CHOICE 上下文，
+##           与技能三选一放行规则完全相同：game_choice_prev/next=手柄LT/RT扳机、键盘Q/E，
+##           ui_left/right 为备用）；卡片显式 FOCUS_NONE，避免内置焦点导航与手动选中索引双重移动
+## 数据流：DropItem.apply(SHOT_PATTERN) → Player.request_shot_pattern_choice
+##        → UpgradeManager.open_shot_pattern_choice() → 创建面板 → setup(choices)
+##        → 玩家选定 shot_pattern_chosen → UpgradeManager 回调 Player.equip_shot_pattern() 替换弹道 → 销毁面板
 extends Control
 
 ## ========== 预加载资源 ==========
 
-const UpgradeDataClass = preload("res://scripts/resources/upgrade/UpgradeData.gd")
-
-## 图标加载库（按"icon_<id>.png"路径契约自动加载，缺失时回退纯文字卡片）
+## 图标加载库（构型书与地面掉落共用同一张"敌人掉落/icon_BC"图标，缺失时回退纯文字卡片）
 const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
-## 卡片样式共享工具（与商店/神庙同款：粗边框+外发光+底色提亮的选中态）
-## 单一来源维护卡片视觉，避免三个面板各写一份后逐渐漂移
+## 卡片样式共享工具（与技能三选一/商店/神庙同款：粗边框+外发光+底色提亮的选中态）
 const ChoiceCardStyleLib = preload("res://scripts/ui/ChoiceCardStyle.gd")
 
 ## ========== 信号定义 ==========
 
-signal upgrade_chosen(upgrade: Resource)
+signal shot_pattern_chosen(pattern: Resource)
 
-## 玩家取消本次三选一信号（手柄B/键盘ESC，放弃本次拾取，不应用任何词条）
-signal upgrade_cancelled()
+## 玩家取消本次三选一信号（手柄B/键盘ESC，放弃本次拾取，不替换任何构型）
+signal shot_pattern_cancelled()
 
 ## ========== 成员变量 ==========
 
@@ -45,7 +44,13 @@ var _animating: bool = true
 ## 当前选中卡片索引（鼠标悬停/D-Pad左右共用一个选中态，A键/回车确认）
 var _selected_index: int = 0
 
-## ========== 选中态视觉常量 ==========
+## ========== 视觉常量 ==========
+
+## 弹道构型主题色（橙黄：区别于技能金、属性/护盾青蓝，一眼可辨）
+const ACCENT_COLOR: Color = Color(1.0, 0.6, 0.2)
+
+## 构型书图标 id（对应 IconLibrary.DROP_ICON_MAP 中的 "shot_pattern"）
+const DROP_ICON_ID: String = "shot_pattern"
 
 ## 选中态切换动画时长（秒，快速响应不拖沓）；选中的具体样式由 ChoiceCardStyle 统一提供
 const SELECT_TWEEN_TIME: float = 0.06
@@ -58,7 +63,7 @@ const CARD_TIME: float = 0.12    ## 单张卡片入场时长
 
 ## ========== 生命周期方法 ==========
 
-## _ready() - 构建紧凑底栏UI
+## _ready() - 构建紧凑底栏UI（与技能/护盾三选一面板保持完全一致的结构与尺寸）
 func _ready() -> void:
 	## 根Control全屏（用于捕获键盘事件），但鼠标穿透不拦截游戏点击
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -73,14 +78,14 @@ func _ready() -> void:
 	_panel_bg.offset_top = -156.0  ## 面板自身高度约56px（标题+卡片行）
 	_panel_bg.offset_bottom = -100.0  ## 距屏幕底边 100px，位于底部图标栏上方
 
-	## 面板背景样式：半透明深色 + 金色细边框 + 圆角
+	## 面板背景样式：半透明深色 + 主题色细边框 + 圆角
 	var sb: StyleBoxFlat = StyleBoxFlat.new()
 	sb.bg_color = Color(0.06, 0.06, 0.1, 0.92)
 	sb.border_width_top = 1
 	sb.border_width_bottom = 1
 	sb.border_width_left = 1
 	sb.border_width_right = 1
-	sb.border_color = Color(1.0, 0.85, 0.3, 0.5)
+	sb.border_color = Color(ACCENT_COLOR.r, ACCENT_COLOR.g, ACCENT_COLOR.b, 0.5)
 	sb.corner_radius_top_left = 6
 	sb.corner_radius_top_right = 6
 	sb.corner_radius_bottom_left = 6
@@ -96,11 +101,11 @@ func _ready() -> void:
 	vbox.add_theme_constant_override("separation", 3)
 	_panel_bg.add_child(vbox)
 
-	## 标题
+	## 标题（弹道构型主题色：橙黄）
 	var title: Label = Label.new()
-	title.text = "✦ 选择强化 ✦"
+	title.text = "✦ 选择弹道构型 ✦"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	title.add_theme_color_override("font_color", ACCENT_COLOR)
 	vbox.add_child(title)
 
 	## 卡片水平容器
@@ -169,34 +174,23 @@ func setup(choices: Array) -> void:
 
 ## ========== 内部构建方法 ==========
 
-## 创建单个词条卡片按钮（紧凑样式：类型[属性/技能]+稀有度+名称，描述走tooltip）
-func _create_card(upgrade: Resource, index: int) -> Button:
+## 创建单个弹道构型卡片按钮（紧凑样式：[构型]+名称，说明走tooltip）
+## 参数：pattern - 弹道构型资源（运行时为 BulletShotPattern）；index - 卡片下标（0起）
+func _create_card(pattern: Resource, index: int) -> Button:
 	var card: Button = Button.new()
-	var rarity_names: Array = ["普通", "稀有", "史诗"]
-	var rarity_colors: Array = [
-		Color(0.85, 0.85, 0.85),
-		Color(0.35, 0.65, 1.0),
-		Color(0.8, 0.4, 1.0),
-	]
-	var rarity: int = upgrade.rarity if "rarity" in upgrade else 0
-	var display_name: String = upgrade.display_name if "display_name" in upgrade else "???"
-	var desc: String = upgrade.description if "description" in upgrade else ""
-	## 类型标注：明确告诉玩家这是"属性"还是"技能"（判定来源 UpgradeData.is_effect_upgrade()，
-	## 与词条生效逻辑同源，避免出现"显示技能实际是属性"的错标）
-	var type_text: String = "技能" if _is_skill_upgrade(upgrade) else "属性"
-	## 已获得过的词条显示当前等级（第二次拾取起即为Lv.2，满级5后不会再出现在候选中）
-	var level_tag: String = ""
-	var uid: String = upgrade.upgrade_id if "upgrade_id" in upgrade else ""
-	if uid != "" and UpgradeManager:
-		var cur_stacks: int = UpgradeManager.get_upgrade_stacks(uid)
-		if cur_stacks > 0:
-			level_tag = "  [Lv.%d→%d]" % [cur_stacks, cur_stacks + 1]
-	card.text = "%d.[%s][%s] %s%s" % [index + 1, type_text, rarity_names[rarity], display_name, level_tag]
-	card.tooltip_text = "%s（%s）\n%s" % [display_name, type_text, desc]
+	var pattern_id: String = pattern.pattern_id if "pattern_id" in pattern else ""
+	## 显示名优先取构型自身 display_name，未配置时回退 pattern_id（保证卡片永不空白）
+	var display_name: String = pattern.display_name if "display_name" in pattern else ""
+	if display_name.is_empty():
+		display_name = pattern_id
+	var desc: String = pattern.description if "description" in pattern else ""
+	card.text = "%d.[构型] %s" % [index + 1, display_name]
+	## tooltip 展示构型说明（面板只留名称，减小占用面积，与技能三选一一致）
+	card.tooltip_text = "%s（弹道构型）\n%s" % [display_name, desc]
 	card.custom_minimum_size = Vector2(150, 32)
-	## 词条图标：按id+稀有度从IconLibrary加载（assets/art/ui/icons/ 路径契约），
+	## 构型图标：与地面掉落物共用同一张"敌人掉落/icon_BC"图标（按 item_id 走路径契约），
 	## 图标缺失时保持纯文字卡片（容错，游戏不因缺图报错）
-	var icon_tex: Texture2D = IconLibraryLib.get_upgrade_icon(uid, rarity)
+	var icon_tex: Texture2D = IconLibraryLib.get_drop_icon(DROP_ICON_ID)
 	if icon_tex != null:
 		card.icon = icon_tex
 		## 限制图标宽度22px并等比缩放（原图1024px，直接显示会撑爆卡片）
@@ -204,11 +198,11 @@ func _create_card(upgrade: Resource, index: int) -> Button:
 	## 显式关闭引擎焦点导航：选中态由本面板通过_selected_index统一管理，
 	## 否则D-Pad/方向键会同时触发Godot内置焦点移动，导致一次按键跳两格
 	card.focus_mode = Control.FOCUS_NONE
-	card.add_theme_color_override("font_color", rarity_colors[rarity])
+	card.add_theme_color_override("font_color", ACCENT_COLOR)
 	card.add_theme_color_override("font_hover_color", Color(1.0, 0.95, 0.5))
-	## 卡片样式：由共享工具统一生成（强调色=稀有度色，稀有度即视觉主色）
+	## 卡片样式：由共享工具统一生成（强调色=构型主题色）
 	## 这里先套"未选中"组（1px 细边框）；选中态由 _refresh_selection_visual 切换为粗边框+外发光
-	var styles: Dictionary = ChoiceCardStyleLib.build_card_styles(rarity_colors[rarity])
+	var styles: Dictionary = ChoiceCardStyleLib.build_card_styles(ACCENT_COLOR)
 	ChoiceCardStyleLib.apply_card_styles(card, styles, false)
 	_card_styles.append(styles)
 	card.pressed.connect(_choose.bind(index))
@@ -230,7 +224,7 @@ func _set_selection(index: int) -> void:
 	_refresh_selection_visual()
 
 ## 刷新全部卡片的选中态视觉（选中=粗边框+外发光+底色提亮+放大，其余=1px 细边框常态）
-## 具体样式由 ChoiceCardStyle 统一提供，三选一/商店/神庙三处表现完全一致
+## 具体样式由 ChoiceCardStyle 统一提供，构型/技能/护盾/商店/神庙表现完全一致
 func _refresh_selection_visual() -> void:
 	for i in range(_cards.size()):
 		var card: Button = _cards[i]
@@ -238,15 +232,7 @@ func _refresh_selection_visual() -> void:
 			continue
 		ChoiceCardStyleLib.refresh_card(card, _card_styles[i], i == _selected_index, SELECT_TWEEN_TIME)
 
-## 判定词条是"技能"还是"属性"（技能=带子弹效果；与词条生效逻辑同源）
-## 参数：upgrade - 词条资源（Resource，运行时为 UpgradeData）
-## 返回：true=技能（bullet_effect 非空），false=属性（纯数值修改）
-func _is_skill_upgrade(upgrade: Resource) -> bool:
-	if upgrade == null or not upgrade.has_method("is_effect_upgrade"):
-		return false
-	return upgrade.is_effect_upgrade()
-
-## 选择词条（统一入口：鼠标点击/数字键/D-Pad导航后A键确认都走这里）
+## 选择构型（统一入口：鼠标点击/数字键/D-Pad导航后A键确认都走这里）
 func _choose(index: int) -> void:
 	if _locked or _animating:
 		return
@@ -255,17 +241,17 @@ func _choose(index: int) -> void:
 	_locked = true
 	if AudioManager:
 		AudioManager.play("upgrade_confirm", 0.8)
-	upgrade_chosen.emit(_choices[index])
+	shot_pattern_chosen.emit(_choices[index])
 
 ## 取消本次三选一（手柄B/键盘ESC）
-## 与 _choose 共用 _locked 防重入；取消不应用任何词条，由 UpgradeManager 负责关闭面板并放弃本次拾取
+## 与 _choose 共用 _locked 防重入；取消不替换任何构型，由 UpgradeManager 负责关闭面板并放弃本次拾取
 func _cancel() -> void:
 	if _locked:
 		return
 	_locked = true
 	if AudioManager:
 		AudioManager.play("ui_click", 0.7)
-	upgrade_cancelled.emit()
+	shot_pattern_cancelled.emit()
 
 ## ========== 入场动画 ==========
 

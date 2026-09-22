@@ -89,6 +89,8 @@ var translations: Dictionary = {
 		"STATUS_ATTR": "属性",
 		"STATUS_SKILL": "技能",
 		"STATUS_SHIELD": "护盾",
+		"STATUS_PATTERN": "弹道构型",
+		"STATUS_PATTERN_CURRENT": "当前",
 		"STATUS_NONE": "暂无",
 		
 		## 游戏信息翻译
@@ -193,6 +195,8 @@ var translations: Dictionary = {
 		"STATUS_ATTR": "Attributes",
 		"STATUS_SKILL": "Skills",
 		"STATUS_SHIELD": "Shield",
+		"STATUS_PATTERN": "Shot Pattern",
+		"STATUS_PATTERN_CURRENT": "Active",
 		"STATUS_NONE": "None",
 		
 		## 游戏信息翻译（英文）

@@ -2,20 +2,29 @@
 
 ; ==============================================================================
 ; GameHUD.tscn - 游戏HUD界面
-; 职责：定义游戏进行中的抬头显示，包含血量条、梦境碎片、经验条、等级、难度等信息
+; 职责：定义游戏进行中的抬头显示，包含血量条、护盾条、梦境碎片、难度等信息
 ; 所属脚本：GameHUD.gd (根节点) - HUD控制器，更新UI显示、响应游戏事件等
 ;
 ; 场景结构：
 ;   GameHUD (Control) - 全屏覆盖
-;   ├── HealthBar (ProgressBar) - 血量条（左上角）
-;   ├── FragmentLabel (Label) - 梦境碎片数量显示（血量条下方）
-;   └── DiffLabel (Label) - 难度等级显示（顶部居中，状态栏下方）
+;   ├── BottomStatusRow (HBoxContainer) - 屏幕正下方一行：血量条 | 护盾条 | 碎片数
+;   │   ├── HealthBar (ProgressBar) - 血量条
+;   │   └── FragmentLabel (Label) - 梦境碎片数量
+;   └── DiffLabel (Label) - 难度等级（左上角右列第 1 行）
 ;
 ; 以下UI由 GameHUD.gd 代码动态创建（不在本场景文件中）：
-;   顶部状态栏（时间/击杀/最高连击，顶部居中 y=12，原底部栏上移合并）
-;   护盾显示（类型图标+耐久条，左上角 y=84，装备护盾后显示）
-;   Buff三行图标区（按稀有度分行从高到低：史诗 y=130 / 稀有 y=172 / 普通 y=214）
-;   FPS标签（y=256，settings.cfg 开启 show_fps 后显示）
+;   底部图标栏（属性/技能/护盾三组，屏幕底部、底部状态行上方）
+;   护盾显示（名称+耐久条，运行时插入 BottomStatusRow，排在血条与碎片数之间）
+;   左上角信息列（存活时间/击杀数/最高连击，见下方排版契约）
+;   FPS标签（左上角右列第 3 行，settings.cfg 开启 show_fps 后显示）
+;
+; 左上角"两列三行"排版契约（跨脚本，需与 StageDirector 的 _stage_label 保持一致）：
+;           左列 x=20            右列 x=220
+;   y=14    阶段 N/10（StageDirector）  难度 1（DiffLabel）
+;   y=40    ⏱ 时间（脚本）             🔥 最高连击（脚本）
+;   y=66    💀 击杀数（脚本）           FPS: 60（脚本，可选）
+;   行高 26，全部项目统一字号 16
+;   对应 GameHUD.gd 的 TOP_LEFT_X / TOP_LEFT_COL_W / TOP_LEFT_START_Y / TOP_LEFT_LINE_H / TOP_LEFT_FONT_SIZE
 ;
 ; 使用方式：作为UIStack的子节点动态加载到CanvasLayer中
 ; ==============================================================================
@@ -37,41 +46,58 @@ offset_right = 0.0
 offset_bottom = 0.0
 mouse_filter = 2
 
+; ------------------------------ 底部状态行（血条 / 护盾条 / 碎片数） ------------------------------
+; BottomStatusRow (HBoxContainer) - 屏幕正下方居中，三者水平排成一行
+; 用户需求：原左上角的血条、护盾条、碎片数统一移到屏幕正下方一行展示
+; 布局：锚定底部居中（anchors_preset=7），水平双向生长（内容变化始终居中），
+;       垂直向上生长（内容变高不压出屏幕，底边固定）
+; 说明：中间的"护盾条"由 GameHUD.gd 在运行时插入（move_child 到索引 1）
+[node name="BottomStatusRow" type="HBoxContainer" parent="."]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_top = -44.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/separation = 16
+mouse_filter = 2
+
 ; ------------------------------ 血量显示 ------------------------------
-; HealthBar (ProgressBar) - 玩家血量条
-; 位置：左上角 (20, 20)，尺寸：200x20
+; HealthBar (ProgressBar) - 玩家血量条（底部状态行内，容器负责排布，故用 custom_minimum_size）
+; size_flags_vertical=4（SIZE_SHRINK_CENTER）：保持 20px 高度并在行内垂直居中
 ; tint_over=红色：血量部分颜色，tint_under=灰色半透明：背景颜色
-[node name="HealthBar" type="ProgressBar" parent="."]
-position = Vector2(20, 20)
-size = Vector2(200, 20)
+[node name="HealthBar" type="ProgressBar" parent="BottomStatusRow"]
+custom_minimum_size = Vector2(200, 20)
+size_flags_vertical = 4
 max_value = 100.0
 value = 100.0
 tint_over = Color(1, 0.2, 0.2, 1)
 tint_under = Color(0.3, 0.3, 0.3, 0.5)
 
 ; ------------------------------ 梦境碎片显示 ------------------------------
-; FragmentLabel (Label) - 梦境碎片数量
-; 位置：血量条下方 (20, 50)，字体颜色：金色 (1, 0.8, 0, 1)
-[node name="FragmentLabel" type="Label" parent="."]
-position = Vector2(20, 50)
-size = Vector2(200, 20)
+; FragmentLabel (Label) - 梦境碎片数量（底部状态行最右侧）
+; custom_minimum_size 固定宽度：碎片数位数变化时不引起整行左右抖动
+; 字体颜色：金色 (1, 0.8, 0, 1)
+[node name="FragmentLabel" type="Label" parent="BottomStatusRow"]
+custom_minimum_size = Vector2(130, 20)
+size_flags_vertical = 4
 text = "梦境碎片: 0"
-custom_minimum_size = Vector2(200, 0)
+horizontal_alignment = 1
 theme_override_colors/font_color = Color(1, 0.8, 0, 1)
 
 ; ------------------------------ 难度显示 ------------------------------
-; DiffLabel (Label) - 难度等级（随时间提升）
-; 位置：顶部居中（状态栏下方44px），随难度升高的警示色由脚本控制
-; 说明：右上角仅保留小地图，难度信息与顶部状态栏一并居中展示
+; DiffLabel (Label) - 难度等级（随时间提升），随难度升高的警示色由脚本控制
+; 用户需求：原顶部居中的难度改为左上角，参与"两列三行"排版
+; 位置：左上角右列第 1 行（x=220, y=14），字号 16 与其余 5 项统一
+; 注意：本节点位置/字号必须与 GameHUD.gd 的 TOP_LEFT_* 常量保持一致
 [node name="DiffLabel" type="Label" parent="."]
-anchors_preset = 5
-anchor_left = 0.5
-anchor_right = 0.5
-offset_left = -60.0
-offset_top = 44.0
-offset_right = 60.0
-offset_bottom = 64.0
-grow_horizontal = 2
+offset_left = 220.0
+offset_top = 14.0
+offset_right = 420.0
+offset_bottom = 40.0
 text = "难度 1"
-horizontal_alignment = 1
 theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_font_sizes/font_size = 16

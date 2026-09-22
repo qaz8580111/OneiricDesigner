@@ -171,6 +171,13 @@ func get_survival_state() -> Dictionary:
 	
 	return state
 
+## 应用核心血生存类属性词条（转发给 CoreHealthComponent）
+## 参数：invincible_mult - 受击无敌时长乘算倍率（1.0=原始）
+##       hp_regen - 每秒核心血回复量（0=不回复）
+func apply_core_stat_modifiers(invincible_mult: float, hp_regen: float) -> void:
+	if core_health_component and core_health_component.has_method("apply_stat_modifiers"):
+		core_health_component.apply_stat_modifiers(invincible_mult, hp_regen)
+
 ## 开始战斗（用于护盾组件：暂停护盾恢复）
 func start_combat() -> void:
 	if shield_component and shield_component.has_method("start_combat"):

@@ -32,6 +32,15 @@ var _is_critical: bool = false
 ## 是否死亡（核心血量归零时变为true）
 var _is_dead: bool = false
 
+## 受击无敌时长倍率（属性词条 invincible_mult 写入；1.0=原始无敌时长）
+var _invincible_mult: float = 1.0
+
+## 每秒核心血回复量（属性词条 hp_regen 写入；0=不自动回复）
+var _hp_regen: float = 0.0
+
+## 每秒回血累积量（凑够1点才真正回复，避免每帧广播信号导致HUD高频刷新）
+var _hp_regen_accum: float = 0.0
+
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
@@ -64,12 +73,37 @@ func _ready() -> void:
 	
 	## 配置并连接无敌帧计时器
 	if invincible_timer:
-		## 设置无敌帧时长（受击后无敌状态持续时间）
-		invincible_timer.wait_time = core_health_data.invincible_duration
 		## 设置为一次性计时器（触发一次后停止）
 		invincible_timer.one_shot = true
+		## 设置无敌帧时长（基础时长 × 无敌倍率，词条变更时由 apply_stat_modifiers 刷新）
+		_refresh_invincible_duration()
 		## 连接计时器超时信号到回调（无敌状态结束）
 		invincible_timer.timeout.connect(_on_invincible_timeout)
+
+## _process() - 按 hp_regen 每秒回复核心血（属性词条"每秒回复+N"）
+## 死亡时 get_tree().paused=true 会暂停本节点，天然不会在结算后回血
+func _process(delta: float) -> void:
+	## 无回血词条 / 已死亡时不做任何处理
+	if _hp_regen <= 0.0 or _is_dead:
+		return
+	## 已满血时无需回复
+	if _current_hp >= core_health_data.max_hp:
+		return
+	## 累积回血量，凑够1点才调用 heal_core（避免每帧广播信号造成HUD高频刷新）
+	_hp_regen_accum += _hp_regen * delta
+	if _hp_regen_accum < 1.0:
+		return
+	var heal_amount: float = _hp_regen_accum
+	_hp_regen_accum = 0.0
+	## 复用 heal_core，保持红血状态判定与信号广播逻辑一致
+	heal_core(heal_amount)
+
+## 刷新无敌帧时长（基础时长 × 无敌时长倍率）
+## 调用时机：_ready 初始化 / apply_core_mod 配置变更 / apply_stat_modifiers 词条变更
+func _refresh_invincible_duration() -> void:
+	if invincible_timer == null or core_health_data == null:
+		return
+	invincible_timer.wait_time = core_health_data.invincible_duration * _invincible_mult
 
 ## ========== 核心方法（伤害处理） ==========
 
@@ -192,9 +226,9 @@ func apply_core_mod(new_data: CoreHealthDataClass) -> void:
 	if old_max_hp > 0.0:
 		_current_hp = (_current_hp / old_max_hp) * core_health_data.max_hp
 	
-	## 更新无敌帧计时器的等待时间
+	## 更新无敌帧计时器的等待时间（含无敌时长倍率）
 	if invincible_timer:
-		invincible_timer.wait_time = core_health_data.invincible_duration
+		_refresh_invincible_duration()
 	
 	## 记录修改前的红血状态
 	var was_critical: bool = _is_critical
@@ -207,6 +241,17 @@ func apply_core_mod(new_data: CoreHealthDataClass) -> void:
 	
 	## 发出配置变化信号
 	emit_signal("core_config_changed", new_data)
+
+## 应用生存类属性词条加成（Player._sync_upgrade_stats 下发）
+## 参数：invincible_mult - 受击无敌时长乘算倍率（1.0=原始）
+##       hp_regen - 每秒核心血回复量（0=不回复）
+func apply_stat_modifiers(invincible_mult: float, hp_regen: float) -> void:
+	## 倍率下限保护：避免0或负数导致受击后完全没有无敌帧
+	_invincible_mult = maxf(invincible_mult, 0.1)
+	## 回血量不能为负
+	_hp_regen = maxf(hp_regen, 0.0)
+	## 立即刷新无敌帧时长（下次受击即按新时长生效）
+	_refresh_invincible_duration()
 
 ## 扩展核心血量上限（升级词条/道具使用）
 ## 数据流：UpgradeManager属性词条 → Player.apply_max_hp_bonus → 此方法 → 扩容+治疗

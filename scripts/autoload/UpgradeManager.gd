@@ -19,23 +19,49 @@ const UpgradeDataClass = preload("res://scripts/resources/upgrade/UpgradeData.gd
 ## 三选一面板场景脚本（纯代码构建UI，无需.tscn）
 const LEVEL_UP_PANEL_SCRIPT = preload("res://scripts/ui/LevelUpPanel.gd")
 
+## 护盾三选一面板场景脚本（纯代码构建UI，与技能三选一同款紧凑底栏样式）
+const SHIELD_CHOICE_PANEL_SCRIPT = preload("res://scripts/ui/ShieldChoicePanel.gd")
+
+## 弹道构型三选一面板场景脚本（纯代码构建UI，与技能三选一同款紧凑底栏样式）
+const SHOT_PATTERN_CHOICE_PANEL_SCRIPT = preload("res://scripts/ui/ShotPatternChoicePanel.gd")
+
+## 装备护盾数据资源类（data/equipment/*.tres 类型校验用）
+const ShieldEquipmentDataClass = preload("res://scripts/resources/equipment/ShieldEquipmentData.gd")
+
+## 弹道构型资源类（data/bullet/pattern/*.tres 类型校验用）
+const BulletShotPatternClass = preload("res://scripts/resources/bullet/BulletShotPattern.gd")
+
+## 护盾装备池目录（数据驱动扫描，与 Shop._random_shield 同源）
+## 新增护盾类型只需放入 .tres，护盾三选一自动纳入候选
+const SHIELD_POOL_DIR: String = "res://data/equipment"
+
+## 护盾三选一给出的候选数量（池中以随机不重复方式抽取，不足时给出实际数量）
+const SHIELD_CHOICE_COUNT: int = 3
+
+## 弹道构型池目录（数据驱动扫描，与 BulletData.shot_pattern 同源）
+## 新增构型只需放入 .tres，弹道构型三选一自动纳入候选（无需改代码）
+const SHOT_PATTERN_POOL_DIR: String = "res://data/bullet/pattern"
+
+## 弹道构型三选一给出的候选数量（池中以随机不重复方式抽取，不足时给出实际数量）
+const SHOT_PATTERN_CHOICE_COUNT: int = 3
+
 ## 玩家最多同时持有的技能类（子弹特效词条）种类数（满5种后拾取新技能会随机替换旧技能）
 const MAX_EFFECT_SKILL_TYPES: int = 5
 
-## 玩家最多同时持有的属性类（纯数值词条）种类数（满2种后拾取新属性会随机替换旧属性）
+## 玩家最多同时持有的属性类（纯数值词条）种类数（满3种后拾取新属性会随机替换旧属性）
 ## 说明：属性类与技能类数量上限各自独立计算，互不影响
-const MAX_ATTRIBUTE_SKILL_TYPES: int = 2
+const MAX_ATTRIBUTE_SKILL_TYPES: int = 3
 
 ## ========== 神庙强化碎片消耗（累加计价） ==========
 
-## 神庙强化首次消耗的梦境碎片数（第一次2000）
-const TEMPLE_BOOST_BASE_COST: int = 2000
+## 神庙强化首次消耗的梦境碎片数（第一次400）
+const TEMPLE_BOOST_BASE_COST: int = 400
 
-## 神庙强化每次消耗的增量（第二次2500、第三次3000……每次+500）
-const TEMPLE_BOOST_COST_STEP: int = 500
+## 神庙强化每次消耗的增量（第二次500、第三次600……每次+100）
+const TEMPLE_BOOST_COST_STEP: int = 100
 
-## 融合技能固定消耗的梦境碎片数
-const FUSE_SKILL_COST: int = 10000
+## 融合技能固定消耗的梦境碎片数（约为强化起步价的3~4倍，属"攒一会儿即可实现"的大件）
+const FUSE_SKILL_COST: int = 1500
 
 ## ========== 信号定义 ==========
 
@@ -57,6 +83,10 @@ var is_choosing: bool = false
 ##   damage_mult（子弹伤害乘算）/ bullet_speed_mult（弹速乘算）
 ##   fire_rate_mult（射速乘算）/ move_speed_mult（移速乘算）
 ##   max_hp_bonus（核心血上限加值，整数）
+##   shield_max_mult（装备护盾耐久上限乘算，EquipmentShieldComponent消费）
+##   shield_regen_mult（装备护盾回盾速度乘算，EquipmentShieldComponent消费）
+##   hp_regen（每秒核心血回复量，PlayerHealthController消费）
+##   invincible_mult（受击无敌时间乘算，CoreHealthComponent消费）
 ## 值含义：乘算类初始1.0，词条增量累加（如+0.15/层）；加值类初始0
 var player_stats: Dictionary = {
 	"damage_mult": 1.0,
@@ -64,6 +94,10 @@ var player_stats: Dictionary = {
 	"fire_rate_mult": 1.0,
 	"move_speed_mult": 1.0,
 	"max_hp_bonus": 0,
+	"shield_max_mult": 1.0,
+	"shield_regen_mult": 1.0,
+	"hp_regen": 0,
+	"invincible_mult": 1.0,
 }
 
 ## 各词条已叠加层数（upgrade_id → 层数，控制max_stacks上限）
@@ -71,7 +105,7 @@ var _upgrade_stacks: Dictionary = {}
 
 ## ========== 神庙强化 / 融合技能运行时状态 ==========
 
-## 神庙强化已执行次数（每次强化消耗累加：第1次2000、第2次2500……）
+## 神庙强化已执行次数（每次强化消耗累加：第1次400、第2次500……）
 ## 跨神庙累计，游戏开始重置
 var _temple_boost_count: int = 0
 
@@ -86,14 +120,29 @@ var _fused_skill: Dictionary = {}
 ## 所有加载的词条数据（UpgradeData数组）
 var _upgrade_pool: Array = []
 
-## 三选一面板实例（选择期间存在，选择后销毁）
+## 所有加载的护盾装备数据（ShieldEquipmentData数组，护盾三选一候选来源）
+var _shield_pool: Array = []
+
+## 所有加载的弹道构型数据（BulletShotPattern数组，弹道构型三选一候选来源）
+var _shot_pattern_pool: Array = []
+
+## 三选一面板实例（选择期间存在，选择后销毁；技能/属性/护盾/构型三选一共用，同一时刻只会有一个）
 var _panel: Control = null
 
 ## 面板专用 CanvasLayer（隔离 Camera2D 的 canvas_transform，保证面板不受相机偏移影响）
 var _overlay_layer: CanvasLayer = null
 
-## 排队等待的升级次数（面板显示期间又触发升级时，排队等待当前面板关闭后再展示）
+## 排队等待的"特效技能"三选一次数（面板显示期间又触发时排队，当前面板关闭后再展示）
 var _pending_upgrades: int = 0
+
+## 排队等待的"属性技能"三选一次数（同上，与技能书掉落完全分离）
+var _pending_attribute_choices: int = 0
+
+## 排队等待的"护盾"三选一次数（同上）
+var _pending_shield_choices: int = 0
+
+## 排队等待的"弹道构型"三选一次数（同上）
+var _pending_shot_pattern_choices: int = 0
 
 ## ========== 生命周期方法 ==========
 
@@ -101,6 +150,10 @@ var _pending_upgrades: int = 0
 func _ready() -> void:
 	## 扫描并加载所有词条资源
 	_load_upgrade_pool()
+	## 扫描并加载所有护盾装备资源（护盾三选一候选池）
+	_load_shield_pool()
+	## 扫描并加载所有弹道构型资源（弹道构型三选一候选池）
+	_load_shot_pattern_pool()
 	## 监听游戏开始信号：每局开始时重置升级状态
 	GameManager.game_started.connect(_on_game_started)
 
@@ -109,12 +162,19 @@ func _on_game_started() -> void:
 	## 重置层数/属性/选择状态为初始值
 	is_choosing = false
 	_pending_upgrades = 0
+	_pending_attribute_choices = 0
+	_pending_shield_choices = 0
+	_pending_shot_pattern_choices = 0
 	player_stats = {
 		"damage_mult": 1.0,
 		"bullet_speed_mult": 1.0,
 		"fire_rate_mult": 1.0,
 		"move_speed_mult": 1.0,
 		"max_hp_bonus": 0,
+		"shield_max_mult": 1.0,
+		"shield_regen_mult": 1.0,
+		"hp_regen": 0,
+		"invincible_mult": 1.0,
 	}
 	_upgrade_stacks.clear()
 	## 重置神庙强化计数与融合技能状态
@@ -152,10 +212,61 @@ func _load_upgrade_pool() -> void:
 	dir.list_dir_end()
 	print("UpgradeManager: 已加载 %d 条升级词条" % _upgrade_pool.size())
 
+## 扫描 data/equipment/ 目录加载所有护盾装备（护盾三选一候选池）
+## 与 _load_upgrade_pool 同款数据驱动：新增护盾只需放入 .tres，重启即生效，无需改代码
+func _load_shield_pool() -> void:
+	_shield_pool.clear()
+	var dir: DirAccess = DirAccess.open(SHIELD_POOL_DIR)
+	if dir == null:
+		push_warning("UpgradeManager: 无法打开护盾目录 " + SHIELD_POOL_DIR)
+		return
+
+	## 遍历目录下所有文件
+	dir.list_dir_begin()
+	var file_name: String = dir.get_next()
+	while file_name != "":
+		## 只处理.tres资源文件
+		if not dir.current_is_dir() and file_name.ends_with(".tres"):
+			var resource: Resource = load(SHIELD_POOL_DIR + "/" + file_name)
+			## 校验资源类型（防止误放其他装备资源导致崩溃）
+			if resource is ShieldEquipmentDataClass:
+				_shield_pool.append(resource)
+			else:
+				push_warning("UpgradeManager: " + file_name + " 不是ShieldEquipmentData类型，已跳过")
+		file_name = dir.get_next()
+	dir.list_dir_end()
+	print("UpgradeManager: 已加载 %d 件护盾装备" % _shield_pool.size())
+
+## 扫描 data/bullet/pattern/ 目录加载所有弹道构型（弹道构型三选一候选池）
+## 与 _load_shield_pool 同款数据驱动：新增构型只需放入 .tres，重启即生效，无需改代码
+func _load_shot_pattern_pool() -> void:
+	_shot_pattern_pool.clear()
+	var dir: DirAccess = DirAccess.open(SHOT_PATTERN_POOL_DIR)
+	if dir == null:
+		push_warning("UpgradeManager: 无法打开弹道构型目录 " + SHOT_PATTERN_POOL_DIR)
+		return
+
+	## 遍历目录下所有文件
+	dir.list_dir_begin()
+	var file_name: String = dir.get_next()
+	while file_name != "":
+		## 只处理.tres资源文件
+		if not dir.current_is_dir() and file_name.ends_with(".tres"):
+			var resource: Resource = load(SHOT_PATTERN_POOL_DIR + "/" + file_name)
+			## 校验资源类型（防止误放其他资源导致崩溃）
+			if resource is BulletShotPatternClass:
+				_shot_pattern_pool.append(resource)
+			else:
+				push_warning("UpgradeManager: " + file_name + " 不是BulletShotPattern类型，已跳过")
+		file_name = dir.get_next()
+	dir.list_dir_end()
+	print("UpgradeManager: 已加载 %d 种弹道构型" % _shot_pattern_pool.size())
+
 ## ========== 三选一抽取与选择流程 ==========
 
-## 打开三选一选择面板（升级触发入口）
-## 流程：抽取3个可用词条 → 显示紧凑底栏面板（不暂停游戏）→ 玩家选择 → 应用 → 关闭
+## 打开三选一选择面板（特效技能书拾取触发入口）
+## 流程：抽取3个可用特效技能词条 → 显示紧凑底栏面板（不暂停游戏）→ 玩家选择 → 应用 → 关闭
+## 语义：本面板只提供"特效技能"（bullet_effect非空），属性技能由 open_attribute_skill_choice 独立处理
 ## 队列设计：面板显示期间又触发升级（玩家边战斗边捡宝石/神庙交互）时，排队等待，
 ##           当前面板关闭后自动展示下一组选项，避免连续弹出多个面板
 func open_level_up_choice() -> void:
@@ -178,8 +289,8 @@ func _do_open_level_up_choice() -> void:
 		_pending_upgrades = 0
 		return
 
-	## 从词条池抽取3个可用词条
-	var choices: Array = _roll_three_upgrades()
+	## 从词条池抽取3个可用特效技能词条（want_effect=true）
+	var choices: Array = _roll_three_upgrades(true)
 	## 池子耗尽时跳过选择（直接放行，不做任何暂停）
 	if choices.is_empty():
 		is_choosing = false
@@ -213,17 +324,314 @@ func _do_open_level_up_choice() -> void:
 	## 初始化面板显示（传入候选词条）
 	_panel.setup(choices)
 
-## 从词条池按稀有度加权抽取3个不重复的可用词条
+## ========== 护盾三选一抽取与选择流程 ==========
+
+## 打开护盾三选一选择面板（拾取护盾掉落物的触发入口）
+## 流程：随机抽3面护盾 → 显示紧凑底栏面板（不暂停游戏）→ 玩家选择 → 装备 → 关闭
+## 队列设计：与技能三选一共用 is_choosing 锁；面板显示期间又拾取到护盾掉落物时排队，
+##           当前面板关闭后自动展示下一组候选，避免连续弹出多个面板
+func open_shield_choice() -> void:
+	## 正在选择中：排队等待，不重复打开
+	if is_choosing:
+		_pending_shield_choices += 1
+		return
+	## 立即上锁（防止同帧多次触发），实际打开延迟到帧末
+	is_choosing = true
+	_do_open_shield_choice.call_deferred()
+
+## 实际创建护盾选择面板（延迟一帧后执行，避开物理回调的当前帧）
+func _do_open_shield_choice() -> void:
+	## 延迟期间状态可能已变化（重开局/游戏结束）：is_choosing被重置则取消本次打开
+	if not is_choosing:
+		return
+	## 延迟期间游戏可能已结束（玩家死亡）：取消本次护盾选择
+	if GameManager.current_state == GameManager.GameState.GAME_OVER:
+		is_choosing = false
+		_pending_shield_choices = 0
+		return
+
+	## 从护盾池随机抽取候选护盾
+	var choices: Array = _roll_shields()
+	## 池子为空（未配置 data/equipment/*.tres）时跳过选择，不做任何暂停
+	if choices.is_empty():
+		is_choosing = false
+		_process_pending()
+		return
+
+	## 不暂停游戏：玩家可边战斗边选择，紧凑底栏面板不影响游戏画面
+
+	## 创建专用 CanvasLayer 作为面板父节点（独立 transform，面板始终位于屏幕底部）
+	_overlay_layer = CanvasLayer.new()
+	_overlay_layer.name = "ShieldChoiceOverlay"
+	## layer=50 与技能三选一同级（在 HUD 和 StageDirector 之上，用户即时交互必须最显眼）
+	_overlay_layer.layer = 50
+	get_tree().root.add_child(_overlay_layer)
+
+	## 创建护盾三选一面板（挂到 CanvasLayer 下）
+	_panel = SHIELD_CHOICE_PANEL_SCRIPT.new()
+	_overlay_layer.add_child(_panel)
+	## 连接选择信号：玩家选定护盾后真正装备并关闭
+	_panel.shield_chosen.connect(_on_shield_chosen)
+	## 连接取消信号：玩家按B/ESC放弃本次三选一，直接关闭面板不装备护盾
+	_panel.shield_cancelled.connect(_on_shield_cancelled)
+
+	## 复用 LEVEL_UP_CHOICE 上下文：护盾三选一所需的放行输入与技能三选一完全一致
+	## （移动/射击/交互保留 + LT/RT扳机/方向键导航 + A确认 + B取消），
+	## push自带0.2s屏蔽期，防止拾取瞬间残留的交互键直接选中卡片
+	InputManager.push_context("LEVEL_UP_CHOICE")
+
+	## 初始化面板显示（传入候选护盾）
+	_panel.setup(choices)
+
+## 从护盾池随机抽取候选护盾（不重复）
+## 返回：最多 SHIELD_CHOICE_COUNT 个ShieldEquipmentData数组（池子不足时返回实际数量）
+func _roll_shields() -> Array:
+	if _shield_pool.is_empty():
+		return []
+	## 复制一份池子用于抽取，抽中即移除，保证3个候选互不重复
+	var pool: Array = _shield_pool.duplicate()
+	var picks: Array = []
+	var count: int = mini(SHIELD_CHOICE_COUNT, pool.size())
+	for i in range(count):
+		var idx: int = RandomManager.randi_range(0, pool.size() - 1)
+		picks.append(pool[idx])
+		pool.remove_at(idx)
+	return picks
+
+## 玩家选定护盾的回调（响应ShieldChoicePanel.shield_chosen）
+## 参数：shield - 选定的护盾装备数据
+func _on_shield_chosen(shield: Resource) -> void:
+	## 交给玩家真正装备（同类型叠层/不同类型替换逻辑由 EquipmentShieldComponent 负责，保持不变）
+	var player: Node2D = _get_player()
+	if player != null and player.has_method("equip_shield"):
+		player.equip_shield(shield)
+	## 关闭面板
+	_close_panel()
+	## 处理排队中的三选一（技能/护盾）
+	_process_pending()
+
+## 玩家取消护盾三选一的回调（响应ShieldChoicePanel.shield_cancelled）
+## 语义：放弃本次拾取——不装备任何护盾，直接关闭面板并解锁选择状态，
+##       四类排队计数（特效技能/属性技能/护盾/构型）一并清零，
+##       避免残留计数导致后续三选一"跳过"或"多跳"
+func _on_shield_cancelled() -> void:
+	_pending_upgrades = 0
+	_pending_attribute_choices = 0
+	_pending_shield_choices = 0
+	_pending_shot_pattern_choices = 0
+	_close_panel()
+	is_choosing = false
+
+## ========== 属性技能三选一抽取与选择流程 ==========
+
+## 打开属性技能三选一选择面板（拾取属性技能书的触发入口）
+## 流程：从属性词条中抽3个 → 显示紧凑底栏面板（不暂停游戏）→ 玩家选择 → 应用 → 关闭
+## 说明：与特效技能三选一共用 is_choosing 锁、LEVEL_UP_CHOICE 上下文与 LevelUpPanel 面板，
+##       仅候选池不同（只含属性词条，不含特效技能），保证"属性技能书只给属性技能"
+func open_attribute_skill_choice() -> void:
+	## 正在选择中：排队等待，不重复打开
+	if is_choosing:
+		_pending_attribute_choices += 1
+		return
+	## 立即上锁（防止同帧多次触发），实际打开延迟到帧末
+	is_choosing = true
+	_do_open_attribute_skill_choice.call_deferred()
+
+## 实际创建属性技能选择面板（延迟一帧后执行，避开物理回调的当前帧）
+func _do_open_attribute_skill_choice() -> void:
+	## 延迟期间状态可能已变化（重开局/游戏结束）：is_choosing被重置则取消本次打开
+	if not is_choosing:
+		return
+	## 延迟期间游戏可能已结束（玩家死亡）：取消本次属性技能选择
+	if GameManager.current_state == GameManager.GameState.GAME_OVER:
+		is_choosing = false
+		_pending_attribute_choices = 0
+		return
+
+	## 只抽取属性词条（want_effect=false），与特效技能完全分离
+	var choices: Array = _roll_three_upgrades(false)
+	## 池子耗尽时跳过选择（直接放行，不做任何暂停）
+	if choices.is_empty():
+		is_choosing = false
+		_process_pending()
+		return
+
+	## 不暂停游戏：玩家可边战斗边选择，紧凑底栏面板不影响游戏画面
+
+	## 创建专用 CanvasLayer 作为面板父节点（独立 transform，面板始终位于屏幕底部）
+	_overlay_layer = CanvasLayer.new()
+	_overlay_layer.name = "AttributeSkillChoiceOverlay"
+	## layer=50 与其余三选一同级（在 HUD 和 StageDirector 之上，用户即时交互必须最显眼）
+	_overlay_layer.layer = 50
+	get_tree().root.add_child(_overlay_layer)
+
+	## 复用技能三选一面板：属性词条的图标/名称/等级展示方式与特效技能一致
+	_panel = LEVEL_UP_PANEL_SCRIPT.new()
+	_overlay_layer.add_child(_panel)
+	## 连接选择信号：玩家选定属性词条后应用并关闭
+	_panel.upgrade_chosen.connect(_on_attribute_skill_chosen)
+	## 连接取消信号：玩家按B/ESC放弃本次三选一，直接关闭面板不应用词条
+	_panel.upgrade_cancelled.connect(_on_attribute_skill_cancelled)
+
+	## 复用 LEVEL_UP_CHOICE 上下文：所需放行输入与其余三选一完全一致
+	InputManager.push_context("LEVEL_UP_CHOICE")
+
+	## 初始化面板显示（传入候选属性词条）
+	_panel.setup(choices)
+
+## 玩家选定属性词条的回调（响应LevelUpPanel.upgrade_chosen）
+## 参数：upgrade - 选定的属性词条数据
+func _on_attribute_skill_chosen(upgrade: Resource) -> void:
+	## 复用统一应用入口（层数记录/上限替换/属性累加逻辑与技能一致）
+	apply_upgrade(upgrade)
+	## 关闭面板
+	_close_panel()
+	## 处理排队中的三选一
+	_process_pending()
+
+## 玩家取消属性技能三选一的回调（响应LevelUpPanel.upgrade_cancelled）
+## 语义：放弃本次拾取——不应用词条，四类排队计数一并清零后解锁
+func _on_attribute_skill_cancelled() -> void:
+	_pending_upgrades = 0
+	_pending_attribute_choices = 0
+	_pending_shield_choices = 0
+	_pending_shot_pattern_choices = 0
+	_close_panel()
+	is_choosing = false
+
+## ========== 弹道构型三选一抽取与选择流程 ==========
+
+## 打开弹道构型三选一选择面板（拾取弹道构型书的触发入口）
+## 流程：从构型池抽3个 → 显示紧凑底栏面板（不暂停游戏）→ 玩家选择 → 替换当前弹道 → 关闭
+## 语义：区别于技能/属性/护盾的"叠层"，构型选定即整体替换玩家当前弹道（不叠层、无等级）
+func open_shot_pattern_choice() -> void:
+	## 正在选择中：排队等待，不重复打开
+	if is_choosing:
+		_pending_shot_pattern_choices += 1
+		return
+	## 立即上锁（防止同帧多次触发），实际打开延迟到帧末
+	is_choosing = true
+	_do_open_shot_pattern_choice.call_deferred()
+
+## 实际创建弹道构型选择面板（延迟一帧后执行，避开物理回调的当前帧）
+func _do_open_shot_pattern_choice() -> void:
+	## 延迟期间状态可能已变化（重开局/游戏结束）：is_choosing被重置则取消本次打开
+	if not is_choosing:
+		return
+	## 延迟期间游戏可能已结束（玩家死亡）：取消本次弹道构型选择
+	if GameManager.current_state == GameManager.GameState.GAME_OVER:
+		is_choosing = false
+		_pending_shot_pattern_choices = 0
+		return
+
+	## 从构型池随机抽取候选构型
+	var choices: Array = _roll_shot_patterns()
+	## 池子为空（未配置 data/bullet/pattern/*.tres）时跳过选择，不做任何暂停
+	if choices.is_empty():
+		is_choosing = false
+		_process_pending()
+		return
+
+	## 不暂停游戏：玩家可边战斗边选择，紧凑底栏面板不影响游戏画面
+
+	## 创建专用 CanvasLayer 作为面板父节点（独立 transform，面板始终位于屏幕底部）
+	_overlay_layer = CanvasLayer.new()
+	_overlay_layer.name = "ShotPatternChoiceOverlay"
+	## layer=50 与其余三选一同级（在 HUD 和 StageDirector 之上，用户即时交互必须最显眼）
+	_overlay_layer.layer = 50
+	get_tree().root.add_child(_overlay_layer)
+
+	## 创建弹道构型三选一面板（挂到 CanvasLayer 下）
+	_panel = SHOT_PATTERN_CHOICE_PANEL_SCRIPT.new()
+	_overlay_layer.add_child(_panel)
+	## 连接选择信号：玩家选定构型后真正替换弹道并关闭
+	_panel.shot_pattern_chosen.connect(_on_shot_pattern_chosen)
+	## 连接取消信号：玩家按B/ESC放弃本次三选一，直接关闭面板不改变弹道
+	_panel.shot_pattern_cancelled.connect(_on_shot_pattern_cancelled)
+
+	## 复用 LEVEL_UP_CHOICE 上下文：所需放行输入与其余三选一完全一致
+	InputManager.push_context("LEVEL_UP_CHOICE")
+
+	## 初始化面板显示（传入候选构型）
+	_panel.setup(choices)
+
+## 从弹道构型池随机抽取候选构型（不重复，且排除当前已装备的构型）
+## 返回：最多 SHOT_PATTERN_CHOICE_COUNT 个BulletShotPattern数组（池子不足时返回实际数量）
+## 排除理由：构型单槽位、不叠层、无等级——选中已装备的那一种等于什么都没变（重复获得
+##          不会像词条那样升级），属于无效候选，故从池中剔除后再抽；剔除后为空则退回完整池兜底
+func _roll_shot_patterns() -> Array:
+	if _shot_pattern_pool.is_empty():
+		return []
+	## 复制一份池子用于抽取，抽中即移除，保证候选互不重复
+	var pool: Array = _shot_pattern_pool.duplicate()
+	var owned_id: String = _get_owned_pattern_id()
+	if not owned_id.is_empty():
+		var filtered: Array = []
+		for pattern in pool:
+			if pattern != null and str(pattern.pattern_id) == owned_id:
+				continue
+			filtered.append(pattern)
+		## 兜底：池中仅此一种时不能返回空候选，否则拾取构型书将无法弹出面板
+		if not filtered.is_empty():
+			pool = filtered
+	var picks: Array = []
+	var count: int = mini(SHOT_PATTERN_CHOICE_COUNT, pool.size())
+	for i in range(count):
+		var idx: int = RandomManager.randi_range(0, pool.size() - 1)
+		picks.append(pool[idx])
+		pool.remove_at(idx)
+	return picks
+
+## 读取玩家当前已装备构型的 pattern_id（未装备/无玩家时返回空串）
+## 说明：按 pattern_id 比对而非资源引用——玩家处持有的是私有子弹副本里的引用，
+##       用 ID 比对可避免深拷贝导致引用不同而漏排除
+func _get_owned_pattern_id() -> String:
+	var player: Node2D = _get_player()
+	if player == null or not player.has_method("get_shot_pattern"):
+		return ""
+	var owned: Resource = player.get_shot_pattern()
+	if owned == null:
+		return ""
+	return str(owned.pattern_id)
+
+## 玩家选定弹道构型的回调（响应ShotPatternChoicePanel.shot_pattern_chosen）
+## 参数：pattern - 选定的弹道构型资源
+func _on_shot_pattern_chosen(pattern: Resource) -> void:
+	## 交给玩家替换当前弹道（构型不叠层，选定即生效）
+	var player: Node2D = _get_player()
+	if player != null and player.has_method("equip_shot_pattern"):
+		player.equip_shot_pattern(pattern)
+	## 关闭面板
+	_close_panel()
+	## 处理排队中的三选一
+	_process_pending()
+
+## 玩家取消弹道构型三选一的回调（响应ShotPatternChoicePanel.shot_pattern_cancelled）
+## 语义：放弃本次拾取——不改变弹道，四类排队计数一并清零后解锁
+func _on_shot_pattern_cancelled() -> void:
+	_pending_upgrades = 0
+	_pending_attribute_choices = 0
+	_pending_shield_choices = 0
+	_pending_shot_pattern_choices = 0
+	_close_panel()
+	is_choosing = false
+
+## 从词条池按稀有度加权抽取3个不重复的可用词条（按类别过滤）
+## 参数：want_effect - true 只抽特效技能词条（bullet_effect非空）；false 只抽属性词条
 ## 过滤规则：
 ##   1. 叠加层数未达上限（全局统一5级，满级词条不再出现）
+##   2. 类别匹配：is_effect_upgrade() == want_effect（特效技能与属性技能完全分离）
 ## 说明：特效词条重复获得时按effect_id去重（不重复挂载），改为调用已拥有特效实例的
 ##       add_stack() 叠层成长——每级放大该特效的关键参数（成长策略见各特效子类
 ##       _on_stack_grown），与属性词条一样遵循5级上限规则
 ## 返回：最多3个UpgradeData数组（池子不足时返回实际数量）
-func _roll_three_upgrades() -> Array:
-	## 第一步：过滤出当前可用词条
+func _roll_three_upgrades(want_effect: bool) -> Array:
+	## 第一步：过滤出当前可用词条（层数未满 + 类别匹配）
 	var available: Array = []
 	for upgrade in _upgrade_pool:
+		## 类别过滤：特效技能书只给特效词条、属性技能书只给属性词条，二者互不混入
+		if upgrade.is_effect_upgrade() != want_effect:
+			continue
 		## 检查叠加层数上限
 		var stacks: int = _upgrade_stacks.get(upgrade.upgrade_id, 0)
 		if stacks >= upgrade.max_stacks:
@@ -269,26 +677,47 @@ func _on_upgrade_chosen(upgrade: Resource) -> void:
 
 ## 玩家取消三选一的回调（响应LevelUpPanel.upgrade_cancelled）
 ## 语义：放弃本次拾取——不应用词条、不处理排队升级，直接关闭面板并解锁选择状态。
-##       排队计数一并清零，避免残留计数导致后续升级被"跳过"或"多跳"。
+##       四类排队计数（特效技能/属性技能/护盾/构型）一并清零，
+##       避免残留计数导致后续升级被"跳过"或"多跳"。
 func _on_upgrade_cancelled() -> void:
 	_pending_upgrades = 0
+	_pending_attribute_choices = 0
+	_pending_shield_choices = 0
+	_pending_shot_pattern_choices = 0
 	_close_panel()
 	is_choosing = false
 
-## 处理排队升级：有排队则展示下一组选项，无排队则解锁并检查碎片是否够再升
+## 处理排队三选一：依次消化 特效技能 → 属性技能 → 护盾 → 弹道构型；均无排队则解锁
+## 链路：任一三选一面板关闭（选定/取消）后调用，实现"当前面板关闭后再展示下一组选项"
 func _process_pending() -> void:
 	if _pending_upgrades > 0:
-		## 还有排队的升级，展示下一组选项（is_choosing保持true）
+		## 还有排队的特效技能，展示下一组词条选项（is_choosing保持true）
 		_pending_upgrades -= 1
 		_do_open_level_up_choice.call_deferred()
-	else:
-		## 无排队，解锁选择状态
-		is_choosing = false
+		return
+	if _pending_attribute_choices > 0:
+		## 特效技能已清空，还有排队的属性技能选择，展示下一组属性选项
+		_pending_attribute_choices -= 1
+		_do_open_attribute_skill_choice.call_deferred()
+		return
+	if _pending_shield_choices > 0:
+		## 词条类已清空，还有排队的护盾选择，展示下一组护盾选项
+		_pending_shield_choices -= 1
+		_do_open_shield_choice.call_deferred()
+		return
+	if _pending_shot_pattern_choices > 0:
+		## 护盾已清空，还有排队的弹道构型选择，展示下一组构型选项
+		_pending_shot_pattern_choices -= 1
+		_do_open_shot_pattern_choice.call_deferred()
+		return
+	## 无排队，解锁选择状态
+	is_choosing = false
 
-## 关闭并销毁选择面板（连同 CanvasLayer 一起清理）
+## 关闭并销毁选择面板（连同 CanvasLayer 一起清理；特效技能/属性技能/护盾/构型三选一共用）
 func _close_panel() -> void:
 	## 条件注销选择上下文：仅当栈顶确实是本面板上下文时才pop。
-	## 跨场景重开（Main.reset_context）后栈已被重置，无条件pop会破坏新栈
+	## 跨场景重开（Main.reset_context）后栈已被重置，无条件pop会破坏新栈。
+	## 四类三选一均复用 LEVEL_UP_CHOICE 上下文，故此处判断对四类面板同时生效
 	if InputManager and InputManager.get_current_context() == "LEVEL_UP_CHOICE":
 		InputManager.pop_context()
 	if _panel != null and is_instance_valid(_panel):
@@ -437,7 +866,7 @@ func _boost_upgrade(upgrade: Resource, amount: int) -> void:
 
 ## ========== 神庙强化碎片消耗（累加计价） ==========
 
-## 获取当前神庙强化的消耗碎片数（累加：第1次2000、第2次2500、第3次3000……）
+## 获取当前神庙强化的消耗碎片数（累加：第1次400、第2次500、第3次600……）
 ## 返回：本次强化需消耗的碎片数
 func get_temple_boost_cost() -> int:
 	return TEMPLE_BOOST_BASE_COST + _temple_boost_count * TEMPLE_BOOST_COST_STEP

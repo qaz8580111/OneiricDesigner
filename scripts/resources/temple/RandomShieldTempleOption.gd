@@ -22,6 +22,6 @@ func apply(player: Node) -> bool:
 	## 固定 +1 层（可突破3层上限，不封顶）
 	return player.boost_shield_stack(1)
 
-## 重写：本次消耗的碎片数 = 神庙强化累加计价（第1次2000、第2次2500……）
+## 重写：本次消耗的碎片数 = 神庙强化累加计价（起步价/增量见 UpgradeManager.TEMPLE_BOOST_* 常量）
 func get_cost(_player: Node) -> int:
 	return UpgradeManager.get_temple_boost_cost()

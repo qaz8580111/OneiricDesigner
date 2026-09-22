@@ -13,6 +13,12 @@
 ##         → 玩家按返回键 option_cancelled 信号 → Temple 关闭面板且神庙保留
 extends Control
 
+## ========== 预加载资源 ==========
+
+## 卡片样式共享工具（与三选一/商店同款：粗边框+外发光+底色提亮的选中态）
+## 单一来源维护卡片视觉，改一处三个面板同时生效
+const ChoiceCardStyleLib = preload("res://scripts/ui/ChoiceCardStyle.gd")
+
 ## ========== 信号定义 ==========
 
 ## 选项选定信号
@@ -26,6 +32,9 @@ signal option_cancelled()
 
 var _options: Array = []          ## 全部选项（TempleOption资源）
 var _buttons: Array[Button] = []  ## 选项按钮列表（动画/置灰用）
+
+## 每个选项的样式集（与 _buttons 下标一一对应，来自 ChoiceCardStyleLib.build_card_styles()）
+var _button_styles: Array[Dictionary] = []
 var _vbox: VBoxContainer = null   ## 内部垂直容器（标题在上，选项行在下）
 var _hbox: HBoxContainer = null   ## 选项水平容器（4个选项一行排开）
 var _locked: bool = false         ## 防重复选择锁
@@ -36,15 +45,9 @@ var _selected_index: int = -1
 
 ## ========== 选中态视觉常量 ==========
 
-## 选中选项的紫金提亮（呼应神庙紫金边框主题）
-const SELECTED_MODULATE: Color = Color(1.2, 1.1, 1.6, 1.0)
-## 未选中选项的正常颜色
-const NORMAL_MODULATE: Color = Color.WHITE
-## 选中选项放大倍数
-const SELECTED_SCALE: Vector2 = Vector2(1.05, 1.05)
-## 选中态切换动画时长（秒）
+## 选中态切换动画时长（秒）；选中的具体样式由 ChoiceCardStyle 统一提供（粗边框+外发光+底色提亮）
 const SELECT_TWEEN_TIME: float = 0.06
-## 置灰（不可选）选项的固定灰态调制
+## 置灰（不可选）选项的固定灰态调制（样式框另由 ChoiceCardStyleLib.build_disabled_style() 提供）
 const DISABLED_MODULATE: Color = Color(0.55, 0.55, 0.55, 0.65)
 ## 融合技能的金色边框/文字颜色
 const FUSE_GOLD: Color = Color(1.0, 0.85, 0.2, 1.0)
@@ -152,6 +155,7 @@ func setup(options: Array, player: Node = null) -> void:
 	_options = options
 	_player = player
 	_buttons.clear()
+	_button_styles.clear()
 	## 选中索引置-1：构建完成后_select_first_selectable才会真正刷新高亮（同索引会被去重跳过）
 	_selected_index = -1
 	for i in range(options.size()):
@@ -187,36 +191,15 @@ func _create_option_button(option: Resource, index: int) -> Button:
 	btn.custom_minimum_size = Vector2(150, 32)
 	btn.focus_mode = Control.FOCUS_NONE
 
-	## 按钮样式：深色底 + 选项主题色边框（融合技能=金色粗边框）
-	var sb: StyleBoxFlat = StyleBoxFlat.new()
-	sb.bg_color = Color(0.1, 0.1, 0.16, 0.9)
-	var border_w: int = 2 if is_fuse else 1
-	sb.border_width_top = border_w
-	sb.border_width_bottom = border_w
-	sb.border_width_left = border_w
-	sb.border_width_right = border_w
-	sb.border_color = FUSE_GOLD if is_fuse else option.option_color
-	sb.corner_radius_top_left = 4
-	sb.corner_radius_top_right = 4
-	sb.corner_radius_bottom_left = 4
-	sb.corner_radius_bottom_right = 4
-	btn.add_theme_stylebox_override("normal", sb)
-
-	## 悬停样式：底色提亮（保留原边框色）
-	var sb_hover: StyleBoxFlat = sb.duplicate()
-	sb_hover.bg_color = Color(0.18, 0.18, 0.28, 0.95)
-	btn.add_theme_stylebox_override("hover", sb_hover)
-
-	## 按下样式：更亮
-	var sb_pressed: StyleBoxFlat = sb.duplicate()
-	sb_pressed.bg_color = Color(0.24, 0.24, 0.36, 1.0)
-	btn.add_theme_stylebox_override("pressed", sb_pressed)
+	## 按钮样式：由共享工具统一生成（强调色=选项主题色；融合技能用金色强调）
+	## 先套"未选中"组（1px 细边框）；选中态由 _refresh_selection_visual 切换为粗边框+外发光
+	var accent: Color = FUSE_GOLD if is_fuse else option.option_color
+	var styles: Dictionary = ChoiceCardStyleLib.build_card_styles(accent)
+	ChoiceCardStyleLib.apply_card_styles(btn, styles, false)
+	_button_styles.append(styles)
 
 	## 置灰样式：碎片不足/前置条件不满足时灰底+灰边框，配合 disabled=true 使用
-	var sb_disabled: StyleBoxFlat = sb.duplicate()
-	sb_disabled.bg_color = Color(0.12, 0.12, 0.14, 0.6)
-	sb_disabled.border_color = Color(0.4, 0.4, 0.4, 0.5)
-	btn.add_theme_stylebox_override("disabled", sb_disabled)
+	btn.add_theme_stylebox_override("disabled", ChoiceCardStyleLib.build_disabled_style())
 
 	## 字体颜色跟随选项主题色（融合技能=金色）
 	btn.add_theme_color_override("font_color", FUSE_GOLD if is_fuse else option.option_color)
@@ -278,7 +261,8 @@ func _select_first_selectable() -> void:
 			_set_selection_absolute(i)
 			return
 
-## 刷新全部选项的选中态视觉（选中=紫金提亮+放大，其余=正常；置灰项固定灰态）
+## 刷新全部选项的选中态视觉（选中=粗边框+外发光+底色提亮+放大，其余=1px 细边框常态；置灰项固定灰态）
+## 具体样式由 ChoiceCardStyle 统一提供，三选一/商店/神庙三处表现完全一致
 func _refresh_selection_visual() -> void:
 	for i in range(_buttons.size()):
 		var btn: Button = _buttons[i]
@@ -287,14 +271,9 @@ func _refresh_selection_visual() -> void:
 			btn.modulate = DISABLED_MODULATE
 			btn.scale = Vector2.ONE
 			continue
-		var is_selected: bool = i == _selected_index
-		var target_modulate: Color = SELECTED_MODULATE if is_selected else NORMAL_MODULATE
-		var target_scale: Vector2 = SELECTED_SCALE if is_selected else Vector2.ONE
-		## 短tween过渡，选中反馈干脆利落
-		var t: Tween = btn.create_tween()
-		t.set_parallel(true)
-		t.tween_property(btn, "modulate", target_modulate, SELECT_TWEEN_TIME)
-		t.tween_property(btn, "scale", target_scale, SELECT_TWEEN_TIME).set_ease(Tween.EASE_OUT)
+		if i >= _button_styles.size():
+			continue
+		ChoiceCardStyleLib.refresh_card(btn, _button_styles[i], i == _selected_index, SELECT_TWEEN_TIME)
 
 ## 选定选项（统一入口：鼠标点击/数字键/导航后A键确认）
 func _choose(index: int) -> void:

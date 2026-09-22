@@ -17,7 +17,7 @@ extends Area2D
 ## 掉落道具数据资源类，用于配置道具属性和效果
 const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
 
-## 图标加载库（护盾装备按"icon_<shield_id>.png"路径契约加载图标贴图）
+## 图标加载库（掉落物统一按 item_id 经 DROP_ICON_MAP 加载图标贴图，含护盾掉落）
 const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
 ## ========== 静态纹理缓存（性能优化） ==========
@@ -218,21 +218,11 @@ func set_drop_item(item: DropItemClass) -> void:
 		color.a = 0.8
 
 	## ========== 外观解析：优先真实图标，缺失才用占位色块 ==========
-	## 图标来源按类型分两条，统一交给 _get_scaled_icon_texture 缩放缓存：
-	##   EQUIPMENT → 护盾图标（灰色护盾目录，id取自shield_equipment）
-	##   其他类型  → 掉落物图标（敌人掉落目录，item_id经DROP_ICON_MAP映射）
-	var icon_src: Texture2D = null
-	var icon_cache_key: String = ""
-	if item.item_type == DropItemClass.ItemType.EQUIPMENT and item.shield_equipment != null:
-		## 读取护盾id（用in检查属性存在，防御未挂脚本的资源）
-		if "shield_id" in item.shield_equipment:
-			var shield_id: String = str(item.shield_equipment.shield_id)
-			icon_src = IconLibraryLib.get_shield_icon(shield_id)
-			icon_cache_key = "shield:%s" % shield_id
-	else:
-		## 消耗品：按 item_id 英文语义自动适配图标（碎片/血包/技能书）
-		icon_src = IconLibraryLib.get_drop_icon(item.item_id)
-		icon_cache_key = "drop:%s" % item.item_id
+	## 统一走掉落物图标路径（敌人掉落目录，item_id 经 DROP_ICON_MAP 映射），
+	## 不再按类型拆分支：护盾装备也在 DROP_ICON_MAP 登记为 icon_shield_basic，
+	## 地面掉落阶段只告知"这是护盾"，具体护盾种类留给拾取后的三选一决定
+	var icon_src: Texture2D = IconLibraryLib.get_drop_icon(item.item_id)
+	var icon_cache_key: String = "drop:%s" % item.item_id
 
 	## 按世界统一显示尺寸生成图标纹理（不用类型色块尺寸——那会把24px源图再下采样到16~22）。
 	## 放大像素小图用NEAREST、缩小大图用LANCZOS，插值方式在缩放方法内部按方向自动选择

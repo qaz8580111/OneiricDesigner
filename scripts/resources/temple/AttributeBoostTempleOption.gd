@@ -5,7 +5,7 @@
 ## 数据流：apply() → 预检查/扣累加碎片 → UpgradeManager.boost_random_attribute(1)
 ## 变更说明（2026-09-18）：由旧"强化伤害/生命上限"两个稳妥式选项合并而来，
 ##         新效果不再是固定数值加成，而是"随机强化已拥有属性类技能 +1 级并可突破上限"
-## 变更说明（2026-09-19）：接入神庙碎片累加消耗（第1次2000、第2次2500……）
+## 变更说明（2026-09-19）：接入神庙碎片累加消耗（具体数值见 UpgradeManager 的 TEMPLE_BOOST_* 常量）
 class_name AttributeBoostTempleOption
 extends "res://scripts/resources/temple/TempleOption.gd"
 
@@ -23,6 +23,6 @@ func apply(player: Node) -> bool:
 	## 固定 +1 级（可突破5级上限）
 	return UpgradeManager.boost_random_attribute(1)
 
-## 重写：本次消耗的碎片数 = 神庙强化累加计价（第1次2000、第2次2500……）
+## 重写：本次消耗的碎片数 = 神庙强化累加计价（起步价/增量见 UpgradeManager.TEMPLE_BOOST_* 常量）
 func get_cost(_player: Node) -> int:
 	return UpgradeManager.get_temple_boost_cost()

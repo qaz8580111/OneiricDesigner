@@ -1,0 +1,19 @@
+; ==============================================================================
+; burst_volley_pattern.tres - 连发点射弹道构型
+; 职责：同一方向连续发射 3 发，用 delay 制造时间序列弹幕（间隔 0.08s）
+; 所属脚本：res://scripts/resources/bullet/pattern/BurstVolleyPattern.gd
+; 参数说明：单发伤害 ×0.8 做分摊（3 发全中约 2.4 倍），延时弹由发射器协程逐个生成
+; ==============================================================================
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/pattern/BurstVolleyPattern.gd" id="1"]
+
+[resource type="BurstVolleyPattern" script_class="BurstVolleyPattern"]
+script = ExtResource("1")
+pattern_id = "burst_volley"
+display_name = "连发点射"
+description = "同一方向连续射出3发，间隔0.08秒依次飞出（单发伤害×0.8，全中约2.4倍）。弹幕密集、持续压制。"
+burst_count = 3
+burst_interval = 0.08
+damage_mult = 0.8
+speed_mult = 1.0

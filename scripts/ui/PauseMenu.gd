@@ -6,7 +6,7 @@
 ##      （升级三选一期间禁止再叠加暂停菜单）；暂停菜单打开时按ESC走导航器取消 = 继续游戏
 extends Control
 
-## 图标加载库（状态面板显示属性/技能/护盾图标用）
+## 图标加载库（状态面板显示属性/技能/护盾/构型图标用）
 const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
 ## 暂停菜单必须在暂停状态下仍能处理输入，需要 ALWAYS 模式
@@ -235,7 +235,7 @@ func _close_status_panel() -> void:
 	if _navigator != null and _navigator.has_method("refresh_controls"):
 		_navigator.refresh_controls()
 
-## 刷新状态列表：清空后按"属性/技能/护盾"三组逐行填充
+## 刷新状态列表：清空后按"属性/技能/护盾/构型"四组逐行填充
 func _refresh_status_list() -> void:
 	if _status_rows == null:
 		return
@@ -274,7 +274,11 @@ func _refresh_status_list() -> void:
 	_add_status_header(TranslationManager.t("STATUS_SHIELD"))
 	_add_shield_row()
 
-## 添加分组标题（属性/技能/护盾）
+	## 弹道构型组（当前装备构型，单槽位、不叠层、无等级）
+	_add_status_header(TranslationManager.t("STATUS_PATTERN"))
+	_add_pattern_row()
+
+## 添加分组标题（属性/技能/护盾/构型）
 func _add_status_header(text: String) -> void:
 	var label := Label.new()
 	label.text = text
@@ -329,6 +333,28 @@ func _add_shield_row() -> void:
 	if is_special:
 		desc += " · 特效护盾"
 	_add_status_row(icon_tex, shield_color, shield_name, "×%d" % stack, desc)
+
+## 添加弹道构型行（未装备时显示空提示）
+## 说明：构型为单槽位（同时只能拥有一种、不可升级强化），故等级位直接显示"当前"
+##       而非 Lv.x/y；数据来源为 Player.get_shot_pattern()（未装备返回 null）
+func _add_pattern_row() -> void:
+	var pattern: Resource = null
+	var players: Array = get_tree().get_nodes_in_group("player")
+	if players.size() > 0 and players[0].has_method("get_shot_pattern"):
+		pattern = players[0].get_shot_pattern()
+
+	if pattern == null:
+		_add_status_empty()
+		return
+
+	var display_name: String = str(pattern.display_name) if "display_name" in pattern else ""
+	var pattern_id: String = str(pattern.pattern_id) if "pattern_id" in pattern else ""
+	## 显示名留空时回退 pattern_id（与弹道构型三选一面板同一回退规则）
+	var item_name: String = display_name if not display_name.is_empty() else pattern_id
+	var desc: String = str(pattern.description) if "description" in pattern else ""
+	## 图标与底色同 HUD 底部"构型"组、弹道构型三选一面板：橙黄主题色
+	var icon_tex: Texture2D = IconLibraryLib.get_drop_icon("shot_pattern")
+	_add_status_row(icon_tex, Color(1.0, 0.6, 0.2), item_name, TranslationManager.t("STATUS_PATTERN_CURRENT"), desc)
 
 ## 添加一行（图标 + 名称[等级] 描述），用PanelContainer做底框增强可读性
 func _add_status_row(icon_tex: Texture2D, color: Color, item_name: String, level_text: String, desc: String) -> void:

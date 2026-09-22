@@ -1,0 +1,19 @@
+; ==============================================================================
+; parallel_columns_pattern.tres - 平行三列弹道构型
+; 职责：沿瞄准方向的垂直方向等距错位，三列保持平行同向飞出（覆盖横向 48px）
+; 所属脚本：res://scripts/resources/bullet/pattern/ParallelColumnPattern.gd
+; 参数说明：单发伤害 ×0.7 做分摊（3 列全中约 2.1 倍）
+; ==============================================================================
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/pattern/ParallelColumnPattern.gd" id="1"]
+
+[resource type="ParallelColumnPattern" script_class="ParallelColumnPattern"]
+script = ExtResource("1")
+pattern_id = "parallel_columns"
+display_name = "平行三列"
+description = "沿垂直方向等距错位，三列保持平行同向飞出（列间距24px、单发伤害×0.7，全中约2.1倍）。横向覆盖面更宽。"
+column_count = 3
+column_spacing = 24.0
+damage_mult = 0.7
+speed_mult = 1.0

@@ -20,11 +20,8 @@ const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
 ## 敌人数据资源类，用于加载配置数据
 const EnemyDataClass = preload("res://scripts/resources/enemy/EnemyData.gd")
 
-## 子弹数据资源类，用于配置子弹属性
+## 子弹数据资源类，用于配置子弹属性（伤害、速度、形态、弹道构型、特效等）
 const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
-
-## 子弹形态资源类，用于配置子弹外观
-const BulletFormClass = preload("res://scripts/resources/bullet/BulletForm.gd")
 
 ## 子弹场景预加载，避免运行时重复加载导致性能问题
 const BULLET_SCENE: PackedScene = preload("res://scenes/gameplay/Bullet.tscn")
@@ -119,6 +116,21 @@ var _original_color: Color = Color.WHITE
 ## new一个0.1秒SceneTreeTimer——高频小对象分配churn + 多个恢复回调竞态错乱；
 ## 改为"窗口期内复用同一次闪烁"，计时器频率被钳制到最多10次/秒/敌人
 var _flash_active: bool = false
+
+## ========== 控制类状态（外部效果施加：减速/击退） ==========
+
+## 减速速度乘数（1.0=未减速；多次减速取最严格值，避免叠层/连击互相覆盖）
+var _slowdown_multiplier: float = 1.0
+
+## 减速剩余时间（秒；多次减速取最久值，归零时统一还原乘数与染色）
+var _slowdown_timer: float = 0.0
+
+## 击退速度（像素/秒）：物理帧内叠加到移动速度上，并按 KNOCKBACK_DAMPING 指数衰减
+var _knockback_velocity: Vector2 = Vector2.ZERO
+
+## 击退衰减系数（每秒的指数衰减率）：滑行总位移≈初速/本系数，
+## 8.0 表示 300 初速滑行约 37px、900 初速（3层反击护盾）约 112px——肉眼可辨且不夸张
+const KNOCKBACK_DAMPING: float = 8.0
 
 ## 攻击冷却计时器，递减到0时可再次攻击
 var _attack_timer: float = 0.0
@@ -570,6 +582,9 @@ func _physics_process(delta: float) -> void:
 	## 死亡后不再执行AI逻辑（_die()到queue_free执行间的一帧间隙内防跑尸体）
 	if _is_dying:
 		return
+	## 控制类状态推进（减速倒计时/击退衰减）：置于AI分派之前且不受_skill_active门禁影响，
+	## 保证技能释放期间（冲锋Tween移动等）这些效果同样正常到期，不会残留
+	_tick_control_effects(delta)
 	## 如果玩家引用为空，尝试查找玩家
 	if _player == null:
 		_find_player()
@@ -699,8 +714,8 @@ func _handle_wander(delta: float) -> void:
 		_wander_direction = _get_random_direction()
 		_wander_timer = wander_interval
 
-	## 设置漫游速度
-	velocity = _wander_direction * wander_speed
+	## 设置漫游速度（叠加减速乘数与击退速度：被冻住会变慢，被反击护盾推开时会滑行）
+	velocity = _wander_direction * wander_speed * _slowdown_multiplier + _knockback_velocity
 	## 执行移动并处理碰撞
 	move_and_slide()
 
@@ -720,8 +735,8 @@ func _handle_chase(delta: float) -> void:
 
 	## 计算从敌人位置指向玩家位置的方向向量并归一化
 	var direction: Vector2 = (_player.global_position - global_position).normalized()
-	## 设置追踪速度
-	velocity = direction * speed
+	## 设置追踪速度（叠加减速乘数与击退速度：减速期间追击变慢，击退期间被推开）
+	velocity = direction * speed * _slowdown_multiplier + _knockback_velocity
 	## 执行移动并处理碰撞
 	move_and_slide()
 
@@ -798,51 +813,14 @@ func _perform_attack() -> void:
 		## 攻击瞬间面朝玩家
 		animator.set_facing(direction.x)
 	
-	## 如果子弹场景未加载，直接返回
-	if BULLET_SCENE == null:
-		return
-	
-	## 实例化子弹节点
-	var bullet: Area2D = BULLET_SCENE.instantiate()
-	
-	## 设置子弹数据（伤害、速度等）
-	bullet.set_bullet_data(bullet_data)
-	## 设置子弹所属阵营为"enemy"（防止误伤友军）
-	bullet.set_owner_group("enemy")
-	
-	## 先禁用碰撞检测（避免刚加入场景树时与发射者自身碰撞）
-	bullet.monitoring = false
-	
-	## 设置子弹碰撞层为8（敌人子弹层）
-	bullet.collision_layer = 8
-	## 设置子弹碰撞掩码为1（只检测玩家层）
-	bullet.collision_mask = 1
-	
-	## 设置子弹飞行方向
-	bullet.set_direction(direction)
-	## 设置子弹生成位置（敌人前方30像素偏移，避免立即碰撞）
-	bullet.global_position = global_position + direction * 30.0
-	
-	## 将子弹添加到父节点（GameWorld）的场景树中
-	get_parent().add_child(bullet)
-	
-	## 添加到场景树后再启用碰撞检测
-	bullet.monitoring = true
-	
-	## 设置子弹外观（如果有Sprite2D节点）
-	var bullet_sprite: Sprite2D = bullet.get_node_or_null("Sprite2D")
-	if bullet_sprite:
-		## 获取子弹最终形态配置
-		var form: BulletFormClass = bullet_data.get_final_form()
-		if form != null:
-			## 应用形态配置到子弹外观
-			form.apply_visual(bullet_sprite)
-		else:
-			## 无形态配置时按敌人"逻辑色"染色子弹：
-			## 让近战敌人（史莱姆/蝙蝠/骷髅等）的攻击弹与其体色一致，视觉上一眼可辨攻击来源
-			## （逻辑色跟随主题皮肤主色，换肤后子弹颜色自动同步）
-			bullet_sprite.modulate = _body_color
-	
+	## ---------- 发射子弹（交给 GameWorld 的统一弹道构型发射器） ----------
+	## 说明：一次开火出几发、以何角度/时序/偏移飞出，由 bullet_data 上的弹道构型决定；
+	##      发射原点沿瞄准方向前移30像素，避免子弹一出生就压在发射者体内。
+	##      子弹外观由 Bullet._ready() 依据注入的数据自动应用，此处不再重复绘制。
+	var world = get_parent()
+	if world != null:
+		world.spawn_shot_pattern(global_position + direction * 30.0, direction, bullet_data, "enemy")
+
 	## 发出攻击信号（用于播放攻击动画等）
 	attacked.emit(direction)
 
@@ -1578,38 +1556,54 @@ func _flash_hit() -> void:
 	if is_instance_valid(sprite):
 		sprite.modulate = pre_color
 
-## 应用减速效果（用于冰冻等控制技能）
+## 应用减速效果（用于冰冻/冰霜护盾等控制效果）
 ## 参数：duration - 减速持续时间（秒）
 ##       speed_multiplier - 速度系数（0.3表示速度变为30%）
 ##       effect_color - 效果颜色（用于改变敌人外观）
+## 设计说明：旧实现直接修改 speed/wander_speed 字段并用独立 await 协程还原——多次减速
+##          （如3层冰霜护盾连续触发）会产生多个并发协程互相抢夺并提前还原，叠层数值
+##          完全不可控；现改为"取最严格乘数 + 取最久时长"的纯状态记录，由
+##          _tick_control_effects 统一倒计时还原，速度乘数在移动时实时参与计算。
 func apply_slowdown(duration: float, speed_multiplier: float, effect_color: Color) -> void:
-	## 保存原始速度
-	var original_speed: float = speed
-	var original_wander_speed: float = wander_speed
-	
-	## 应用减速
-	speed *= speed_multiplier
-	wander_speed *= speed_multiplier
-	
-	## 改变敌人颜色显示效果
+	## 死亡中不再施加控制效果（避免死亡流程期间染色残留）
+	if _is_dying:
+		return
+	## 取最严格减速（更慢者胜，可支持完全冻结的0.0）与最久时长（更晚到期者胜）
+	_slowdown_multiplier = minf(_slowdown_multiplier, speed_multiplier)
+	_slowdown_timer = maxf(_slowdown_timer, duration)
+	## 染色提示（受击白闪会还原到"白闪前颜色"，不会吞掉本状态染色）
 	if sprite != null:
 		sprite.modulate = effect_color
-	
-	## 等待持续时间结束
-	## 第二参数process_always=false：减速时长走"游戏时间"——暂停时计时冻结，
-	## 否则三选一面板停留期间减速照样倒计时，恢复游戏时效果已凭空过期
-	await get_tree().create_timer(duration, false).timeout
-	
-	## 敌人可能在此await期间死亡，守卫退出避免协程引用已销毁节点
-	if not is_instance_valid(self) or _is_dying:
-		return
-	## 恢复原始速度
-	speed = original_speed
-	wander_speed = original_wander_speed
-	
-	## 恢复原始颜色
+
+## 减速结束：还原速度乘数与精灵颜色（由 _tick_control_effects 在倒计时归零时调用）
+func _finish_slowdown() -> void:
+	_slowdown_timer = 0.0
+	_slowdown_multiplier = 1.0
 	if sprite != null:
 		sprite.modulate = _original_color
+
+## 施加击退冲量（反击护盾等效果调用）
+## 参数：direction - 击退方向（内部会归一化）
+##       force - 击退初速度（像素/秒）；实际滑行距离≈force / KNOCKBACK_DAMPING
+func apply_knockback(direction: Vector2, force: float) -> void:
+	## 死亡中、力度非正、方向为零向量时不做处理
+	if _is_dying or force <= 0.0 or direction == Vector2.ZERO:
+		return
+	## 速度叠加（多次击退按矢量和累加，避免先施加的冲量被后施加的覆盖吞掉）
+	_knockback_velocity += direction.normalized() * force
+
+## 每物理帧推进控制类状态：减速倒计时、击退速度衰减
+func _tick_control_effects(delta: float) -> void:
+	## 减速倒计时归零 → 统一还原乘数与染色
+	if _slowdown_timer > 0.0:
+		_slowdown_timer -= delta
+		if _slowdown_timer <= 0.0:
+			_finish_slowdown()
+	## 击退速度按指数衰减（与帧率无关）；速度足够小后归零，避免无意义的高频计算
+	if _knockback_velocity != Vector2.ZERO:
+		_knockback_velocity *= exp(-KNOCKBACK_DAMPING * delta)
+		if _knockback_velocity.length_squared() < 1.0:
+			_knockback_velocity = Vector2.ZERO
 
 ## 敌人死亡逻辑
 func _die() -> void:
@@ -1825,6 +1819,54 @@ func _generate_default_drops() -> Array:
 		}
 		sd2.shield_equipment = load(path_map[chosen])
 		drops.append(sd2)
+
+	## ---------- 属性技能书掉落（图标 icon_AS） ----------
+	## 掉落概率与护盾同档：5%概率所有怪，精英怪 15%
+	## 拾取后打开"属性技能三选一"（候选只含属性词条）——与特效技能书完全分离
+	var chance_attr_skill: float = 0.05 if not is_elite else 0.15
+	if randf() < chance_attr_skill:
+		var da: DropItemClass = DropItemClass.new()
+		## item_id 需与 IconLibrary.DROP_ICON_MAP 登记一致（buff_attribute → icon_AS）
+		da.item_id = "buff_attribute"
+		da.item_name = "属性技能书"
+		da.item_type = DropItemClass.ItemType.ATTRIBUTE_SKILL
+		da.value = 0
+		da.drop_chance = 1.0
+		da.is_rare = false
+		da.auto_adsorb = false
+		drops.append(da)
+
+	## ---------- 特效技能书掉落（图标 icon_skill） ----------
+	## 掉落概率与护盾同档：5%概率所有怪，精英怪 15%
+	## 拾取后打开"特效技能三选一"（候选只含特效技能，不再混入属性技能）
+	## item_id 复用 buff_attack：与精英怪/Boss 的技能奖励共用 icon_skill 图标
+	var chance_effect_skill: float = 0.05 if not is_elite else 0.15
+	if randf() < chance_effect_skill:
+		var de: DropItemClass = DropItemClass.new()
+		de.item_id = "buff_attack"
+		de.item_name = "特效技能书"
+		de.item_type = DropItemClass.ItemType.BUFF
+		de.value = 0
+		de.drop_chance = 1.0
+		de.is_rare = false
+		de.auto_adsorb = false
+		drops.append(de)
+
+	## ---------- 弹道构型书掉落（图标 icon_BC） ----------
+	## 掉落概率与特效护盾同档：2%概率所有怪，精英怪 8%
+	## 拾取后打开"弹道构型三选一"（候选只含构型），选定即替换当前弹道（不叠层）
+	var chance_shot_pattern: float = 0.02 if not is_elite else 0.08
+	if randf() < chance_shot_pattern:
+		var dp: DropItemClass = DropItemClass.new()
+		## item_id 需与 IconLibrary.DROP_ICON_MAP 登记一致（shot_pattern → icon_BC）
+		dp.item_id = "shot_pattern"
+		dp.item_name = "弹道构型书"
+		dp.item_type = DropItemClass.ItemType.SHOT_PATTERN
+		dp.value = 0
+		dp.drop_chance = 1.0
+		dp.is_rare = true
+		dp.auto_adsorb = false
+		drops.append(dp)
 
 	return drops
 

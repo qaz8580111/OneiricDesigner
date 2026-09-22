@@ -52,6 +52,20 @@ var _shield_stack: int = 1
 ## 护盾叠层上限（常规拾取叠加的上限；神庙强化可突破此值）
 const MAX_SHIELD_STACK: int = 3
 
+## 回盾延迟基准（秒）：脱战多久后开始回盾
+## 旧值 ShieldEquipmentData.regen_delay=10秒太慢，改为固定5秒（用户需求）
+const BASE_REGEN_DELAY: float = 5.0
+
+## 回盾回满时长基准（秒）：无论护盾多大都按比例在此时长内回满
+## 旧逻辑用固定 regen_rate，大护盾回盾慢；改为按比例回满
+const BASE_REGEN_DURATION: float = 5.0
+
+## 装备护盾耐久上限倍率（属性词条 shield_max_mult 写入；1.0=原始上限）
+var _max_hp_mult: float = 1.0
+
+## 装备护盾回盾速度倍率（属性词条 shield_regen_mult 写入；1.0=原始速度）
+var _regen_speed_mult: float = 1.0
+
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 初始状态：无护盾，隐藏
@@ -73,20 +87,19 @@ func _process(delta: float) -> void:
 	## 回盾计时
 	_time_since_hit += delta
 
-	## 回盾延迟改为5秒（用户需求：不被伤害5秒内回盾满值）
-	## 旧值 ShieldEquipmentData.regen_delay=10秒太慢，改为固定5秒
-	var regen_delay: float = 5.0
+	## 回盾延迟与回满时长按 shield_regen_mult 缩短（属性词条"回盾速度 +N%"）
+	var regen_mult: float = maxf(_regen_speed_mult, 0.1)
+	var regen_delay: float = BASE_REGEN_DELAY / regen_mult
 
 	## 检查是否开始回盾（脱战 regen_delay 秒后）
 	if not _regenerating and _time_since_hit >= regen_delay:
 		if _current_hp < _get_effective_max_hp():
 			_regenerating = true
 
-	## 回盾中：每秒恢复 effective_max_hp / 5 （即5秒回满，无论护盾多大）
-	## 旧逻辑用固定 regen_rate，大护盾回盾慢；改为按比例5秒回满
+	## 回盾中：每秒恢复 effective_max_hp / 回满时长（倍率同时缩短此时长，回盾整体变快）
 	if _regenerating:
 		var effective_max: float = _get_effective_max_hp()
-		var regen_per_sec: float = effective_max / 5.0
+		var regen_per_sec: float = effective_max / (BASE_REGEN_DURATION / regen_mult)
 		_current_hp = minf(_current_hp + regen_per_sec * delta, effective_max)
 		queue_redraw()
 		## 回满通知
@@ -147,7 +160,8 @@ func equip(data: Resource) -> void:
 		## 不同类型：替换为新护盾，重置为1层
 		_shield_data = data
 		_shield_stack = 1
-		_current_hp = data.max_hp
+		## 耐久按有效上限补满（含 shield_max_mult 耐久倍率）
+		_current_hp = _get_effective_max_hp()
 
 	_time_since_hit = 999.0
 	_regenerating = false
@@ -204,12 +218,31 @@ func get_shield_data() -> Resource:
 func get_shield_stack() -> int:
 	return _shield_stack
 
-## 获取有效最大耐久值（基础值 × 叠层倍数）
+## 应用属性词条加成（Player._sync_upgrade_stats 下发）
+## 参数：max_mult - 护盾耐久上限乘算倍率（1.0=原始）
+##       regen_mult - 护盾回盾速度乘算倍率（1.0=原始，越大回盾越快）
+## 规则：耐久上限变化时按当前耐久比例同步缩放，保持护盾"满/残"状态不突变
+func apply_stat_modifiers(max_mult: float, regen_mult: float) -> void:
+	## 改动前的有效上限（用于计算耐久比例）
+	var old_max: float = _get_effective_max_hp()
+
+	## 倍率下限保护：避免0或负数导致护盾失效/回盾时间为无穷
+	_max_hp_mult = maxf(max_mult, 0.1)
+	_regen_speed_mult = maxf(regen_mult, 0.1)
+
+	## 已装备护盾时：按原耐久比例缩放当前耐久（拾取属性立即生效且不突变）
+	if _shield_data != null and old_max > 0.0:
+		_current_hp = _get_effective_max_hp() * (_current_hp / old_max)
+
+	queue_redraw()
+
+## 获取有效最大耐久值（基础值 × 叠层倍数 × 耐久倍率）
 ## 叠层2层=2倍max_hp，3层=3倍——同类型护盾越叠越厚
+## _max_hp_mult 为属性词条"护盾耐久+N%"的乘算结果
 func _get_effective_max_hp() -> float:
 	if _shield_data == null:
 		return 0.0
-	return _shield_data.max_hp * float(_shield_stack)
+	return _shield_data.max_hp * float(_shield_stack) * _max_hp_mult
 
 ## 获取有效单次吸收值（基础值 × 叠层倍数）
 func _get_effective_absorb() -> float:

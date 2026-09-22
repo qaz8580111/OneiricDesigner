@@ -89,9 +89,11 @@ func _knockback_enemy(enemy: Node, player: Node, stack: int = 1) -> void:
 	if knockback_dir == Vector2.ZERO:
 		knockback_dir = Vector2.RIGHT
 
-	## 叠层放大击退力度（3层=3倍击退距离）
+	## 叠层放大击退力度（3层=3倍击退初速，实际滑行距离≈力度/衰减系数）
 	var effective_force: float = knockback_force * float(stack)
 
-	## 施加击退（直接修改位置，简单但有效）
-	## 使用 call_deferred 避免物理回调中修改位置的问题
-	enemy.call_deferred("set", "position", enemy.position + knockback_dir * effective_force * 0.016)
+	## 施加击退：委托敌人的 apply_knockback（Enemy 在物理帧把击退速度叠加到 velocity 上并指数衰减）
+	## 旧实现直接改 position 且乘了硬编码的伪单帧系数 0.016（300力度仅约5px位移），
+	## 单帧位置修改还会被下一帧 move_and_slide 覆盖，实际等于没有击退
+	if enemy.has_method("apply_knockback"):
+		enemy.apply_knockback(knockback_dir, effective_force)

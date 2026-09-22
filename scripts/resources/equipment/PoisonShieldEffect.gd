@@ -33,9 +33,12 @@ func apply(attacker: Node, player: Node, _amount: float, _context: Dictionary, s
 
 ## 确定中毒目标：优先直接攻击者，子弹攻击时找最近敌人
 func _resolve_target(attacker: Node, player: Node) -> Node:
-	## 直接攻击者（敌人碰撞）：检查是否为有效敌人节点
+	## 直接攻击者（敌人碰撞）：用 "enemy" 组作为"是否为敌人"的唯一判据
+	## 注意：不能用 has_method("take_damage") 判定——Bullet.gd 同样定义了 take_damage()，
+	##       会把命中护盾的子弹误判为敌人，中毒施加在即将 queue_free 的子弹上（首个await后即失效），
+	##       导致中后期敌人以子弹输出为主时毒雾护盾完全无效果
 	if attacker != null and is_instance_valid(attacker):
-		if attacker.has_method("take_damage"):
+		if attacker.is_in_group("enemy"):
 			return attacker
 
 	## 子弹攻击：在 effect_radius 内找最近的敌人

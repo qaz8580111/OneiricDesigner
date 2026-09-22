@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/upgrade/UpgradeData.gd" id="1"]
+
+[resource type="UpgradeData" script_class="UpgradeData"]
+script = ExtResource("1")
+upgrade_id = "upg_hp_regen"
+display_name = "生命泉涌"
+description = "每秒恢复核心血 1 点"
+rarity = 1
+max_stacks = 5
+stat_modifiers = {
+"hp_regen": 1
+}

@@ -146,6 +146,13 @@ var _ultimate_boss_time: float = 0.0
 
 ## ========== UI 组件引用（切面自建 CanvasLayer，不改 GameHUD） ==========
 
+## 左上角进度标签坐标契约（与 GameHUD.gd 的 TOP_LEFT_* 常量保持一致，改动务必双向同步）
+## 常规行 = 左列第 1 行（x=20, y=14），与右列"难度"同行，显示"阶段 3/10"等短文案
+const STAGE_LABEL_POS: Vector2 = Vector2(20.0, 14.0)
+## 终局行 = 第 4 行（x=20, y=92）：前 3 行两列已被 6 项常驻信息占满，
+## 终局文案"终极关卡 · 用时 123.4 秒"较长，独占本行可避免越过 x=220 与右列文字重叠
+const STAGE_LABEL_FINAL_POS: Vector2 = Vector2(20.0, 92.0)
+
 ## 切面专属 UI 层（阶段字幕 / Boss 血条 / 进度标签都挂这里）
 var _hud_layer: CanvasLayer = null
 
@@ -645,6 +652,8 @@ func _enter_ultimate_stage() -> void:
 	_boss_enraged = false
 
 	## ---- 5. 切面展示层：终极关卡宣告 ----
+	## 标签下移到第 4 行（另起一行）：终局文案最长约 260px，留在第 1 行会越过 x=220 与右列"难度"重叠
+	_stage_label.position = STAGE_LABEL_FINAL_POS
 	_update_stage_label("终极关卡")
 	if AudioManager:
 		AudioManager.play("difficulty_up", 1.0)
@@ -913,13 +922,19 @@ func _build_hud_layer() -> void:
 	add_child(_hud_layer)
 
 	## ---- 左上角进度标签 ----
+	## 位置契约（与 GameHUD 的左上角信息列组成"两列三行"网格，共 6 项）：
+	##   本标签 = 左列第 1 行（x=20, y=14）；GameHUD 侧左列第 2/3 行为 存活时间/击杀数，
+	##   右列第 1/2/3 行为 难度/最高连击/FPS
+	##   坐标常量定义在 GameHUD.gd 的 TOP_LEFT_*，字号统一 16
+	##   第 4 行（y=92）两列均空置，预留给终局文案（见 STAGE_LABEL_FINAL_POS）
+	## 注意：本标签属于独立 CanvasLayer，与 GameHUD 不共享容器，改动此处务必同步 GameHUD.gd 的 TOP_LEFT_* 常量
 	_stage_label = Label.new()
 	_stage_label.name = "StageLabel"
-	_stage_label.position = Vector2(24, 18)
-	_stage_label.add_theme_font_size_override("font_size", 26)
+	_stage_label.position = STAGE_LABEL_POS
+	_stage_label.add_theme_font_size_override("font_size", 16)
 	_stage_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
 	_stage_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
-	_stage_label.add_theme_constant_override("outline_size", 6)
+	_stage_label.add_theme_constant_override("outline_size", 4)
 	_stage_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_stage_label.text = ""
 	_hud_layer.add_child(_stage_label)
@@ -1040,6 +1055,7 @@ func _on_game_started() -> void:
 	_world_cache = null  ## 场景可能已重建，强制重查 GameWorld
 	## 切面 UI 复位
 	_hide_boss_hud()
+	_stage_label.position = STAGE_LABEL_POS  ## 终局下移过的标签复位回第 1 行
 	_stage_label.text = ""
 	## 字幕立即隐藏（kill 动画 + 透明）
 	if _banner_tween != null and _banner_tween.is_valid():

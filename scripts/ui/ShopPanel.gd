@@ -11,6 +11,15 @@
 ##        → 玩家按ESC/点关闭按钮 → close_requested → Shop 恢复游戏并关闭面板
 extends Control
 
+## ========== 预加载资源 ==========
+
+## 商品数据类（读取 ProductType 枚举做"属性/技能/护盾/回血"类型标注；
+## 本项目禁止用全局类名引用，一律 preload）
+const ShopProductLib = preload("res://scripts/resources/shop/ShopProduct.gd")
+
+## 卡片样式共享工具（与三选一/神庙同款：粗边框+外发光+底色提亮的选中态）
+const ChoiceCardStyleLib = preload("res://scripts/ui/ChoiceCardStyle.gd")
+
 ## ========== 信号定义 ==========
 
 ## 玩家选定某商品购买（未扣款，由 Shop 校验余额并扣款）
@@ -24,6 +33,9 @@ signal close_requested()
 
 var _products: Array = []          ## 全部商品（ShopProduct 资源）
 var _buttons: Array[Button] = []   ## 商品按钮列表（动画用）
+
+## 每件商品的样式集（与 _buttons 下标一一对应，来自 ChoiceCardStyleLib.build_card_styles()）
+var _button_styles: Array[Dictionary] = []
 var _vbox: VBoxContainer = null    ## 内部垂直容器（标题 + 商品行 + 关闭按钮）
 var _hbox: HBoxContainer = null    ## 商品水平容器（3 件一行排开）
 var _title: Label = null           ## 标题（含碎片余额，购买后刷新）
@@ -37,13 +49,7 @@ var _last_fragments: int = -1
 
 ## ========== 选中态视觉常量 ==========
 
-## 选中商品的金色提亮（呼应商店金色顶棚）
-const SELECTED_MODULATE: Color = Color(1.25, 1.0, 0.55, 1.0)
-## 未选中商品的正常颜色
-const NORMAL_MODULATE: Color = Color.WHITE
-## 选中商品放大倍数
-const SELECTED_SCALE: Vector2 = Vector2(1.05, 1.05)
-## 选中态切换动画时长（秒）
+## 选中态切换动画时长（秒）；选中的具体样式由 ChoiceCardStyle 统一提供
 const SELECT_TWEEN_TIME: float = 0.06
 
 ## ========== 生命周期方法 ==========
@@ -156,6 +162,7 @@ func setup(products: Array, player: Node) -> void:
 	_products = products
 	_player = player
 	_buttons.clear()
+	_button_styles.clear()
 	_selected_index = -1
 	for i in range(products.size()):
 		var btn: Button = _create_product_button(products[i], i)
@@ -187,37 +194,23 @@ func notify_insufficient() -> void:
 func _create_product_button(product: Resource, index: int) -> Button:
 	var btn: Button = Button.new()
 	var price: int = int(product.price)
-	btn.text = "%d. %s  [%d碎片]" % [index + 1, product.display_name, price]
+	## 类型标注：明确告诉玩家这是"属性/技能/护盾/回血"（判定来源 ShopProduct.product_type，
+	## 与商品 apply() 的生效分支同源，杜绝"显示技能实际是属性"的错标）
+	var type_text: String = _product_type_text(product)
+	var type_tag: String = "[%s]" % type_text if type_text != "" else ""
+	btn.text = "%d.%s %s  [%d碎片]" % [index + 1, type_tag, product.display_name, price]
 	## 描述 + 价格走 tooltip（减小面板占用）
-	btn.tooltip_text = "%s\n价格：%d 梦境碎片" % [product.description, price]
+	btn.tooltip_text = "%s（%s）\n价格：%d 梦境碎片" % [product.description, type_text, price]
 	btn.custom_minimum_size = Vector2(160, 32)
 	btn.focus_mode = Control.FOCUS_NONE
 
-	## 按钮样式：深色底 + 商品主题色边框
-	var sb: StyleBoxFlat = StyleBoxFlat.new()
-	sb.bg_color = Color(0.1, 0.1, 0.14, 0.9)
-	sb.border_width_top = 1
-	sb.border_width_bottom = 1
-	sb.border_width_left = 1
-	sb.border_width_right = 1
-	sb.border_color = product.product_color
-	sb.corner_radius_top_left = 4
-	sb.corner_radius_top_right = 4
-	sb.corner_radius_bottom_left = 4
-	sb.corner_radius_bottom_right = 4
-	btn.add_theme_stylebox_override("normal", sb)
+	## 按钮样式：由共享工具统一生成（强调色=商品主题色，即稀有度/品类色）
+	## 这里先套"未选中"组（1px 细边框）；选中态由 _refresh_selection_visual 切换为粗边框+外发光
+	var styles: Dictionary = ChoiceCardStyleLib.build_card_styles(product.product_color)
+	ChoiceCardStyleLib.apply_card_styles(btn, styles, false)
+	_button_styles.append(styles)
 
-	## 悬停样式：底色提亮
-	var sb_hover: StyleBoxFlat = sb.duplicate()
-	sb_hover.bg_color = Color(0.18, 0.18, 0.26, 0.95)
-	btn.add_theme_stylebox_override("hover", sb_hover)
-
-	## 按下样式：更亮
-	var sb_pressed: StyleBoxFlat = sb.duplicate()
-	sb_pressed.bg_color = Color(0.24, 0.24, 0.34, 1.0)
-	btn.add_theme_stylebox_override("pressed", sb_pressed)
-
-	## 字体颜色跟随商品主题色
+	## 字体颜色跟随商品主题色（稀有度/品类色区分）
 	btn.add_theme_color_override("font_color", product.product_color)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)
 	btn.add_theme_font_size_override("font_size", 13)
@@ -240,17 +233,31 @@ func _set_selection(index: int) -> void:
 	_selected_index = new_index
 	_refresh_selection_visual()
 
-## 刷新全部商品的选中态视觉（选中=金色提亮+放大，其余=正常）
+## 刷新全部商品的选中态视觉（选中=粗边框+外发光+底色提亮+放大，其余=1px 细边框常态）
+## 具体样式由 ChoiceCardStyle 统一提供，三选一/商店/神庙三处表现完全一致
 func _refresh_selection_visual() -> void:
 	for i in range(_buttons.size()):
 		var btn: Button = _buttons[i]
-		var is_selected: bool = i == _selected_index
-		var target_modulate: Color = SELECTED_MODULATE if is_selected else NORMAL_MODULATE
-		var target_scale: Vector2 = SELECTED_SCALE if is_selected else Vector2.ONE
-		var t: Tween = btn.create_tween()
-		t.set_parallel(true)
-		t.tween_property(btn, "modulate", target_modulate, SELECT_TWEEN_TIME)
-		t.tween_property(btn, "scale", target_scale, SELECT_TWEEN_TIME).set_ease(Tween.EASE_OUT)
+		if i >= _button_styles.size():
+			continue
+		ChoiceCardStyleLib.refresh_card(btn, _button_styles[i], i == _selected_index, SELECT_TWEEN_TIME)
+
+## 商品类型文案（用于卡片上的类型标注与 tooltip）
+## 参数：product - 商品资源（ShopProduct）
+## 返回："属性"/"技能"/"护盾"/"回血"；类型字段缺失时返回空串（容错，不显示标签）
+func _product_type_text(product: Resource) -> String:
+	if product == null or not ("product_type" in product):
+		return ""
+	match int(product.product_type):
+		ShopProductLib.ProductType.ATTRIBUTE:
+			return "属性"
+		ShopProductLib.ProductType.SKILL:
+			return "技能"
+		ShopProductLib.ProductType.SHIELD:
+			return "护盾"
+		ShopProductLib.ProductType.HEALTH:
+			return "回血"
+	return ""
 
 ## 确认购买当前选中商品（鼠标点击 / 数字键 / 导航后A键都走这里）
 func _confirm(index: int) -> void:

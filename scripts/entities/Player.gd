@@ -17,6 +17,9 @@ extends CharacterBody2D
 ## 子弹数据资源类，用于配置子弹属性（伤害、速度、形态、特效等）
 const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
+## 弹道构型资源类（弹道构型三选一选定后装备到私有子弹副本时做类型校验）
+const BulletShotPatternClass = preload("res://scripts/resources/bullet/BulletShotPattern.gd")
+
 ## 角色皮肤资源类（主题系统：皮肤决定外观+动画参数）
 const CharacterSkinClass = preload("res://scripts/resources/skin/CharacterSkin.gd")
 
@@ -321,6 +324,18 @@ func _sync_upgrade_stats() -> void:
 	## 子弹速度乘算
 	_private_bullet_data.speed = _base_bullet_speed * float(stats.get("bullet_speed_mult", 1.0))
 
+	## ========== 下发装备护盾属性词条（耐久上限/回盾速度） ==========
+	if equipment_shield != null and equipment_shield.has_method("apply_stat_modifiers"):
+		equipment_shield.apply_stat_modifiers(
+			float(stats.get("shield_max_mult", 1.0)),
+			float(stats.get("shield_regen_mult", 1.0)))
+
+	## ========== 下发核心血生存属性词条（受击无敌时长/每秒回血） ==========
+	if health_controller != null and health_controller.has_method("apply_core_stat_modifiers"):
+		health_controller.apply_core_stat_modifiers(
+			float(stats.get("invincible_mult", 1.0)),
+			float(stats.get("hp_regen", 0.0)))
+
 ## 词条应用信号回调（响应UpgradeManager.upgrade_applied）
 ## 参数：upgrade - 被应用的词条（特效词条已由UpgradeManager直接调用apply_bullet_effect，
 ##        此处只需同步属性词条带来的数值变化）
@@ -434,16 +449,27 @@ func remove_max_hp_bonus(amount: int) -> void:
 	if core_comp != null and core_comp.has_method("shrink_max_hp"):
 		core_comp.shrink_max_hp(float(amount))
 
-## 拾取技能书（青绿宝珠BUFF道具，手动按E拾取后由DropItem.apply调用）
-## 数据流：敌人掉落技能书 → 玩家手动按E拾取 → DropItem.apply → 此方法
+## 拾取"特效技能书"（青绿宝珠BUFF道具，手动按E拾取后由DropItem.apply调用）
+## 数据流：敌人掉落特效技能书 → 玩家手动按E拾取 → DropItem.apply(BUFF) → 此方法
 ## 设计意图：技能书=立即获得一次"三选一"升级机会（打开与经验升级完全相同的选择面板，
 ##           由玩家自选词条），而非随机直接塞一个——玩家对Build有控制权，体验与捡碎片升级一致，
 ##           不会再出现"捡了书却莫名获得技能"的困惑。open_level_up_choice自带is_choosing锁与
 ##           _pending_upgrades排队：连捡多本或与经验升级同时触发时会依次排队弹出，不会叠加/丢帧
+## 语义收敛：本入口只给"特效技能"（bullet_effect 非空）——属性技能已拆分为独立掉落
+##           （见 request_attribute_skill_choice），二者不再混在同一面板里
 ## 参数：item_id - 道具id（预留：未来可区分不同品质技能书），value - 数值（预留扩展）
 func add_buff(item_id: String, value: int) -> void:
 	if UpgradeManager:
 		UpgradeManager.open_level_up_choice()
+
+## 请求打开"属性技能"三选一（拾取 ATTRIBUTE_SKILL 类型掉落物时由 DropItem.apply 调用）
+## 数据流：敌人掉落属性技能书(icon_AS) → 玩家手动按E拾取 → DropItem.apply(ATTRIBUTE_SKILL) → 此方法
+##        → UpgradeManager.open_attribute_skill_choice() → 面板随机3选1（候选只含属性词条）
+## 设计意图：与特效技能书完全分离——属性技能书只提供属性词条、特效技能书只提供特效技能，
+##           玩家可凭掉落图标（icon_AS / icon_skill）一眼区分获得的成长方向
+func request_attribute_skill_choice() -> void:
+	if UpgradeManager:
+		UpgradeManager.open_attribute_skill_choice()
 
 ## ========== 物理帧更新方法 ==========
 
@@ -737,7 +763,18 @@ func set_last_attacker(attacker: Node, context: Dictionary = {}) -> void:
 	_last_attacker = attacker
 	_last_attack_context = context
 
-## 装备护盾（拾取 EQUIPMENT 类型掉落物时由 DropItem.apply 调用）
+## 请求打开护盾三选一（拾取 EQUIPMENT 类型掉落物时由 DropItem.apply 调用）
+## 数据流：敌人掉落护盾 → 玩家手动按E拾取 → DropItem.apply(EQUIPMENT) → 此方法
+##        → UpgradeManager.open_shield_choice() → 面板随机3选1 → 选定后回调 Player.equip_shield()
+## 设计意图：护盾掉落物=一次"护盾三选一"机会（与技能书 add_buff 同款体验），
+##           地面掉落阶段只显示统一的基础护盾图标，具体装备哪面盾由玩家自选；
+##           open_shield_choice 自带 is_choosing 锁与 _pending_shield_choices 排队，
+##           连捡多个护盾或与技能三选一同时触发时会依次排队弹出，不会叠加
+func request_shield_choice() -> void:
+	if UpgradeManager:
+		UpgradeManager.open_shield_choice()
+
+## 装备护盾（真正落地装备，由护盾三选一选定后 UpgradeManager 回调 / 商店购买调用）
 ## 参数：shield_data - 护盾装备数据资源
 func equip_shield(shield_data: Resource) -> void:
 	if equipment_shield != null and equipment_shield.has_method("equip"):
@@ -761,6 +798,42 @@ func has_equipped_shield() -> bool:
 	return equipment_shield != null \
 			and equipment_shield.has_method("get_shield_data") \
 			and equipment_shield.get_shield_data() != null
+
+## ========== 弹道构型系统（第四维度成长：换弹道，不叠层） ==========
+
+## 请求打开弹道构型三选一（拾取 SHOT_PATTERN 类型掉落物时由 DropItem.apply 调用）
+## 数据流：敌人掉落构型书(icon_BC) → 玩家手动按E拾取 → DropItem.apply(SHOT_PATTERN) → 此方法
+##        → UpgradeManager.open_shot_pattern_choice() → 面板随机3选1 → 选定后回调 equip_shot_pattern()
+## 设计意图：与技能/属性/护盾三选一同款体验（共用 is_choosing 锁与队列，不暂停游戏），
+##           区别在于构型不叠层——选定即整体替换当前弹道
+func request_shot_pattern_choice() -> void:
+	if UpgradeManager:
+		UpgradeManager.open_shot_pattern_choice()
+
+## 装备弹道构型（真正落地，由构型三选一选定后 UpgradeManager 回调）
+## 参数：pattern - 弹道构型资源（BulletShotPattern）
+## 实现：直接替换私有子弹副本的 shot_pattern —— 发射时 GameWorld.spawn_shot_pattern 会读取
+##       _private_bullet_data.get_final_shot_pattern() 并按新构型生成弹道，无需额外接线
+## 说明：构型不叠层、无等级，重复拾取即替换（旧构型直接丢弃）；与子弹外观形态 BulletForm 正交
+func equip_shot_pattern(pattern: Resource) -> void:
+	## 防御：私有副本未初始化时拒绝
+	if _private_bullet_data == null:
+		return
+	## 类型校验：只接受 BulletShotPattern（防止误传其他 Resource 导致发射期崩溃）
+	if not (pattern is BulletShotPatternClass):
+		return
+	_private_bullet_data.shot_pattern = pattern
+	## 装备音效（与装备护盾同一手感）
+	if AudioManager:
+		AudioManager.play_2d("buff_pickup", global_position, 0.8)
+
+## 获取当前装备的弹道构型（供 HUD / 暂停菜单状态面板读取）
+## 返回：当前构型资源；未装备时返回 null（刻意返回原始 shot_pattern 而非
+##       get_final_shot_pattern()——后者在未配置时返回兜底单发构型，无法区分"未装备"）
+func get_shot_pattern() -> Resource:
+	if _private_bullet_data == null:
+		return null
+	return _private_bullet_data.shot_pattern
 
 ## ========== 梦境碎片系统 ==========
 

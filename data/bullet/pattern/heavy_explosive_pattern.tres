@@ -1,0 +1,21 @@
+; ==============================================================================
+; heavy_explosive_pattern.tres - 重型爆破弹弹道构型
+; 职责：单发大体积、降速、高伤，命中后由爆炸特效做范围伤害
+; 所属脚本：res://scripts/resources/bullet/pattern/HeavyExplosivePattern.gd
+; 参数说明：体型 ×2（视觉+碰撞体同步放大）、速度 ×0.6、伤害 ×2；
+;           explosion_effect 复用现成爆炸特效（trigger_type=0 即 ON_HIT），零新增爆炸代码
+; ==============================================================================
+[gd_resource type="Resource" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/pattern/HeavyExplosivePattern.gd" id="1"]
+[ext_resource type="Resource" path="res://data/bullet/effect/explosion_effect.tres" id="2"]
+
+[resource type="HeavyExplosivePattern" script_class="HeavyExplosivePattern"]
+script = ExtResource("1")
+pattern_id = "heavy_explosive"
+display_name = "重型爆破弹"
+description = "单发大体积弹（体型×2、速度×0.6、伤害×2），命中后爆炸造成范围伤害。适合打密集敌群与厚血目标。"
+bullet_scale = 2.0
+damage_mult = 2.0
+speed_mult = 0.6
+explosion_effect = ExtResource("2")

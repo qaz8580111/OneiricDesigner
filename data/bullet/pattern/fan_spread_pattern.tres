@@ -1,0 +1,20 @@
+; ==============================================================================
+; fan_spread_pattern.tres - 扇形散射弹道构型
+; 职责：以瞄准方向为中心，在 30° 总张角内均匀发射 3 发（玩家/敌人普通射击通用）
+; 所属脚本：res://scripts/resources/bullet/pattern/FanSpreadPattern.gd
+; 参数说明：单发伤害 ×0.6 做分摊（3 发全中约 1.8 倍），防止构型变成纯伤害倍率放大器
+; ==============================================================================
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/pattern/FanSpreadPattern.gd" id="1"]
+
+[resource type="FanSpreadPattern" script_class="FanSpreadPattern"]
+script = ExtResource("1")
+pattern_id = "fan_spread"
+display_name = "扇形散射"
+description = "以瞄准方向为中心，在30°总张角内均匀射出3发（单发伤害×0.6，全中约1.8倍）。适合应对成群的正面敌人。"
+shot_count = 3
+spread_angle = 30.0
+random_jitter = 0.0
+damage_mult = 0.6
+speed_mult = 1.0
