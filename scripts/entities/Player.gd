@@ -436,6 +436,9 @@ func apply_max_hp_bonus(amount: int) -> void:
 	var core_comp: Node = health_controller.get_node_or_null("CoreHealthComponent")
 	if core_comp != null and core_comp.has_method("expand_max_hp"):
 		core_comp.expand_max_hp(float(amount))
+		## 飘金色"+N"提示：扩上限会同时等量治疗，若不提示，玩家只会看到血条瞬间回满，
+		## 察觉不到"上限变大"这件事（这正是血量成长此前无感的根因之一）
+		DamageNumberClass.pop(global_position + Vector2(0, -44), amount, false, Color(1.0, 0.85, 0.2), "+")
 
 ## 移除核心血量上限加值（技能种类上限随机替换移除"梦境之心"词条时调用）
 ## 数据流：UpgradeManager._remove_upgrade(max_hp_bonus词条) → 此方法 → 血量组件缩减上限

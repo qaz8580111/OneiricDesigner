@@ -217,6 +217,37 @@ func _apply_bullet_data() -> void:
 	## 如果有形态配置且有精灵节点，应用形态到外观
 	if form != null and sprite != null:
 		form.apply_visual(sprite)
+		## 敌人弹配色守卫：形态基色若落入蓝色系，就地偏转为非蓝（与玩家蓝弹区分）
+		## 只改写本子弹的精灵纹理，不动共享的 form 资源（避免污染玩家弹数据）
+		if _owner_group == "enemy" and BulletFormClass.is_blue_family(form.placeholder_color):
+			_set_sprite_solid_color(
+				sprite.texture.get_size(),
+				BulletFormClass.enemy_safe_color(form.placeholder_color)
+			)
+
+## 以纯色渲染子弹外观（对外接口，供敌人技能弹按技能效果色渲染）
+## 参数：color - 目标颜色；敌人弹会自动施加非蓝守卫
+## 设计意图：技能弹的 BulletData 不带 form，默认占位纹理为青蓝色，
+##           若沿用 modulate 相乘会与技能色混出偏色/偏蓝，故直接以技能色重建纹理
+func apply_solid_color(color: Color) -> void:
+	if sprite == null:
+		return
+	var final_color: Color = color
+	if _owner_group == "enemy":
+		final_color = BulletFormClass.enemy_safe_color(color)
+	var size: Vector2 = sprite.texture.get_size() if sprite.texture != null else Vector2(16, 16)
+	_set_sprite_solid_color(size, final_color)
+
+## 用纯色填充精灵纹理（内部辅助：创建纯色纹理覆盖，调制色复位为白）
+## 参数：size - 纹理尺寸；color - 填充颜色
+func _set_sprite_solid_color(size: Vector2, color: Color) -> void:
+	if sprite == null:
+		return
+	var image: Image = Image.create(maxi(int(size.x), 1), maxi(int(size.y), 1), false, Image.FORMAT_RGBA8)
+	image.fill(color)
+	sprite.texture = ImageTexture.create_from_image(image)
+	## 复位调制色，避免与外部设置的 modulate 叠乘导致偏色
+	sprite.modulate = Color(1, 1, 1, 1)
 
 ## ========== 子弹方向设置 ==========
 

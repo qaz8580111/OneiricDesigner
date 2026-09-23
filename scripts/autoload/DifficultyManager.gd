@@ -1,13 +1,15 @@
 ## DifficultyManager.gd - 难度曲线管理单例
-## 职责：随游戏时间动态提升难度，控制敌人属性缩放、生成节奏、精英怪频率、波次事件
+## 职责：按"阶段 Boss 门槛"提升难度，控制敌人属性缩放、生成节奏、精英怪频率、波次事件
 ## 继承：Node（作为全局单例运行）
 ## 设计意图：
-##   1. roguelike的压力曲线：难度随时间线性爬升，迫使玩家在成长与生存间保持节奏
+##   1. 难度与阶段强绑定（用户定制规则）：每次难度提升都必须先击败当前阶段的守门 Boss，
+##      难度不再随时间自动爬升——"打倒 Boss"是唯一的升级途径，Boss 不倒下就永远卡在当前难度
 ##   2. 数据驱动调参：所有缩放系数均为常量，集中在文件顶部，调平衡无需改动逻辑
 ##   3. 缩放只作用于"实例副本"：绝不修改共享的.tres资源，避免跨局/跨实例串扰
 ##   4. 波次事件（趣味性/随机性）：每N级触发一次敌潮，制造高压时刻与爽点
-## 数据流：本类每帧推进等级并广播difficulty_changed/wave_started →
-##         GameWorld/Enemy在生成敌人时调用get_*_mult()/apply_to_enemy_data()完成属性缩放
+## 数据流：StageDirector 在击败阶段 Boss 时调用 advance_by_boss() → 等级+1 并广播
+##         difficulty_changed/wave_started → GameWorld/Enemy 生成敌人时调用
+##         get_*_mult()/apply_to_enemy_data() 完成属性缩放
 extends Node
 
 ## ========== 信号定义（用于与其他节点通信） ==========
@@ -22,13 +24,9 @@ signal wave_started(wave_number: int, spawn_count: int)
 
 ## ========== 调参常量（难度曲线的核心配置，集中管理便于平衡调整） ==========
 
-## 每提升1级难度所需时间（秒）：110秒一级（落在用户要求的100~120秒区间内）
-## 旧值70s→110s：配合"难度上限压缩到10级"的改造，让整局节奏落在15~20分钟
-## 满级总耗时 ≈ 110 * 9 = 990秒 ≈ 16.5分钟（不含终极BOSS战）
-const LEVEL_INTERVAL: float = 110.0
-
 ## 难度等级硬上限：10级封顶（用户要求：把原来的30级曲线压缩进10级）
 ## 达到上限后难度曲线停止爬升，游戏交给 StageDirector 的终极关卡收尾
+## 与 StageDirector.MAX_STAGE 语义对齐：难度等级 == 阶段号（严格一一对应）
 const MAX_LEVEL: int = 10
 
 ## 敌人血量成长系数：每级+18%（乘算叠加）
@@ -75,7 +73,9 @@ const DROP_VALUE_MULT_MAX: float = 2.0
 
 ## ========== 成员变量（运行时数据） ==========
 
-## 当前难度等级（从1开始，游戏开始后随时间提升；开局档可通过 set_start_level() 调整）
+## 当前难度等级（从1开始，与"当前阶段"严格一一对应）
+## 唯一提升途径：StageDirector 在击败阶段守门 Boss 后调用 advance_by_boss()
+## 开局档可通过 set_start_level() 指定起始等级（等价于"起始阶段"，即前几关Boss视为已通过）
 var level: int = 1
 
 ## 登塔增幅系数（无尽模式专用）：由 TowerManager 每层递增写入，1.0=未登塔
@@ -86,12 +86,6 @@ var tower_multiplier: float = 1.0
 ## 已配置的开局起始等级（Settings 界面设置后生效，下次新游戏从这里起步）
 ## 默认=1（新手标准）；值范围 1~10（过大开局会直接秒杀玩家）
 var _configured_start_level: int = 1
-
-## 本局已进行的游戏时间（秒），仅游戏进行中累计
-var _elapsed: float = 0.0
-
-## 下一次难度提升的时间点（秒）
-var _next_level_time: float = LEVEL_INTERVAL
 
 ## 已触发的波次计数（用于wave_started信号的序号参数）
 var _wave_count: int = 0
@@ -108,64 +102,43 @@ func _ready() -> void:
 	## 监听游戏开始信号：每局开始时重置难度状态
 	GameManager.game_started.connect(_on_game_started)
 
-## _process() - 每帧检查难度提升条件（仅游戏进行中计时）
-func _process(delta: float) -> void:
-	## 只在游戏进行时累计时间（暂停/菜单/结算时冻结难度曲线）
-	if not GameManager.is_playing():
-		return
-	## 已达难度上限：曲线停止爬升，直接跳过（不再累计时间，省去无意义运算）
-	if level >= MAX_LEVEL:
-		return
-	## 累计游戏时间
-	_elapsed += delta
-	## 检查是否到达难度提升时间点（while处理极端情况下的连升）
-	## 循环内必须二次判断上限：_advance_level() 封顶后会直接return、不再推进
-	## _next_level_time，若此处不break将导致死循环卡死整个游戏
-	while _elapsed >= _next_level_time:
-		if level >= MAX_LEVEL:
-			break
-		_advance_level()
-
 ## 重置本局难度状态（响应GameManager.game_started）
-## 算法：先重置状态 → 再基于 _configured_start_level 快速跳跃到目标开局等级
-##   - 目标等级=1：正常开局，无需跳级
-##   - 目标等级=4：先 time 前进(4-1)*LEVEL_INTERVAL → 连续 _advance_level() 三次 → 从4继续
-## 这样做的好处：
-##   * 跳跃过程会正确触发 difficulty_changed 信号、波次判定、难度缩放同步
-##   * _elapsed、_next_level_time、_wave_count 全部状态连续、符合预期
+## 算法：直接跳到配置的起始等级（起始阶段），不再模拟时间流逝
+##   - 目标等级=1：正常开局
+##   - 目标等级=4（困难档）：直接被认定为阶段4，前3个守门 Boss 视为已通过
+## 注意事项：
+##   * 本函数由 autoload 顺序保证先于 StageDirector._on_game_started 执行，
+##     因此 StageDirector 可以在自己的开局回调里直接读 DifficultyManager.level 作为起始阶段，
+##     从而保证"难度 == 阶段"从第一帧起就严格挂钩
+##   * 跳级只广播 difficulty_changed（让 HUD 立刻显示正确难度），
+##     不播音效、不触发波次事件（开局瞬间堆一波怪会给玩家莫名其妙的压力）
 func _on_game_started() -> void:
 	## ---- 基础重置 ----
-	level = 1
-	_elapsed = 0.0
-	_next_level_time = LEVEL_INTERVAL
 	_wave_count = 0
 	## 登塔增幅复位：每局从无增幅开始（TowerManager 会在无尽模式登塔时重新赋值）
 	tower_multiplier = 1.0
 
-	## ---- 跳跃到配置的开局难度 ----
-	var target: int = clampi(_configured_start_level, 1, MAX_LEVEL)
-	if target > 1:
-		## 先把累计时间 "拨快"，等于已经经历了(target-1)个难度周期
-		_elapsed = float(target - 1) * LEVEL_INTERVAL
-		## 用 while 连续 _advance_level()，每次都正确走完整信号/波次流程
-		while level < target:
-			_advance_level()
-		## 到达目标后，下一难度时间点 = 当前累计时间 + 一个周期（从目标点继续正常计时）
-		_next_level_time = _elapsed + LEVEL_INTERVAL
+	## ---- 直接落到配置的起始阶段 ----
+	level = clampi(_configured_start_level, 1, MAX_LEVEL)
+	## 广播难度变化信号（HUD更新难度显示；StageDirector 亦以此作为起始阶段）
+	difficulty_changed.emit(level)
+	## 上报统计（结算面板展示本局达到的最高难度）
+	RunStats.report_difficulty(level)
 
 ## ========== 外部 API（Settings.gd / Main.gd 使用） ==========
 
 ## 设置开局起始等级（Settings 界面点击应用后调用）
+## 语义：等同于"起始阶段"——设为4则开局即是阶段4/难度4，前3个守门 Boss 视为已通过
 ## 参数：start_level - 下次新游戏的起始难度等级（1~MAX_LEVEL，越大约猛）
 func set_start_level(start_level: int) -> void:
 	_configured_start_level = clampi(start_level, 1, MAX_LEVEL)
 	## 同时保存到 settings.cfg（确保关闭游戏再打开仍然记得）
 	_save_start_level_to_config()
-	print("[DifficultyManager] 配置开局难度等级 = ", _configured_start_level)
+	print("[DifficultyManager] 配置开局起始阶段 = ", _configured_start_level)
 
 ## ========== 配置文件读写（与 Settings 共享 user://settings.cfg 的 difficulty 字段） ==========
 
-## 难度档→起始等级映射表（必须与 Settings.gd DIFFICULTY_START_LEVELS 保持完全一致）
+## 难度档→起始阶段映射表（必须与 Settings.gd DIFFICULTY_START_LEVELS 保持完全一致）
 ## 设计：两文件分开定义同一组映射，避免循环依赖；任一修改时必须同步另一处
 const _DIFFICULTY_START_LEVELS: Array[int] = [1, 2, 4, 7]
 
@@ -177,7 +150,7 @@ func _load_start_level_from_config() -> void:
 	if err == OK:
 		## 读取难度档（0=简单/1=普通/2=困难/3=专家），默认普通档
 		var difficulty_idx: int = int(config.get_value("Settings", "difficulty", 1))
-		## 映射到起始等级，越界兜底为普通档(level=2)
+		## 映射到起始阶段，越界兜底为普通档(level=2)
 		if difficulty_idx >= 0 and difficulty_idx < _DIFFICULTY_START_LEVELS.size():
 			_configured_start_level = _DIFFICULTY_START_LEVELS[difficulty_idx]
 		else:
@@ -185,7 +158,7 @@ func _load_start_level_from_config() -> void:
 	else:
 		## 首次启动无配置 → 使用普通档开局（业界通用默认）
 		_configured_start_level = 2
-	print("[DifficultyManager] 读取到起始等级配置 = ", _configured_start_level)
+	print("[DifficultyManager] 读取到起始阶段配置 = ", _configured_start_level)
 
 ## 把当前 _configured_start_level 反查回难度档索引，写回 settings.cfg
 ## 调用时机：set_start_level() 被外部设置之后，持久化到磁盘
@@ -206,15 +179,17 @@ func _save_start_level_to_config() -> void:
 
 ## ========== 难度提升核心逻辑 ==========
 
-## 提升一级难度：更新等级、广播信号、按条件触发波次事件
-## 已达 MAX_LEVEL 时直接返回（封顶，不再提升也不推进计时，防止等级无限膨胀）
-func _advance_level() -> void:
-	## 难度封顶判断（双保险：调用方 _process 也会先判断）
+## 提升一级难度（唯一入口，由 StageDirector 在击败阶段守门 Boss 后调用）
+## 调用时机：StageDirector._on_boss_killed() → 击败守门 Boss 的那一帧
+## 已达 MAX_LEVEL 时直接返回（难度10封顶，之后交给终极关卡/登塔机制）
+## 说明：难度与阶段一一对应——本函数被调用的同时，StageDirector 会推进到下一阶段，
+##       因此"难度+1"与"进入下一阶段"永远是同一件事
+func advance_by_boss() -> void:
+	## 难度封顶判断（终极关卡阶段：难度停在上限，改由 StageDirector/TowerManager 提供压力）
 	if level >= MAX_LEVEL:
 		return
-	## 等级+1，并推后下一次提升时间点（基于当前时间累加，避免时间漂移）
+	## 等级+1（== 阶段号+1）
 	level += 1
-	_next_level_time += LEVEL_INTERVAL
 	## 广播难度变化信号（HUD更新难度显示）
 	difficulty_changed.emit(level)
 	## 上报统计（结算面板展示本局达到的最高难度）
@@ -224,6 +199,8 @@ func _advance_level() -> void:
 		AudioManager.play("difficulty_up", 0.6)
 	## 波次事件判定：每到 WAVE_EVERY_N_LEVELS 的整数倍等级触发敌潮
 	## 设计意图：固定节拍+递增规模，制造规律性的高压时刻，玩家可以预期并准备
+	## 注意：升级只发生在击败 Boss 之后，所以"进入阶段5/10的瞬间"会立刻追加一波敌潮，
+	##       形成"打完Boss立刻被新怪潮包围"的压迫感（符合用户要求的强绑定节奏）
 	if level % WAVE_EVERY_N_LEVELS == 0:
 		_wave_count += 1
 		## 波次规模：基础8只 + 每难度等级+1只（难度越高潮越猛）

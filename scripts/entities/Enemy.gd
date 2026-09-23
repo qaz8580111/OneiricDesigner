@@ -1357,10 +1357,10 @@ func _spawn_skill_bullet_at(direction: Vector2, dmg: int, speed: float,
 	bullet.global_position = spawn_pos
 	get_parent().add_child(bullet)
 	bullet.monitoring = true
-	## 技能子弹染色
-	var bullet_sprite: Sprite2D = bullet.get_node_or_null("Sprite2D")
-	if bullet_sprite:
-		bullet_sprite.modulate = color
+	## 技能子弹以技能效果色作为底色渲染（内部会自动施加敌人非蓝守卫），
+	## 避免默认青蓝占位纹理与技能色相乘导致的偏色/偏蓝
+	if bullet.has_method("apply_solid_color"):
+		bullet.call("apply_solid_color", color)
 	return bullet
 
 ## ---------- 技能通用：AOE视觉 ----------

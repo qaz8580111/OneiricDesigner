@@ -86,6 +86,7 @@ var translations: Dictionary = {
 		## 暂停菜单 - 查看状态子面板
 		"BUTTON_VIEW_STATUS": "查看状态",
 		"STATUS_TITLE": "当前状态",
+		"STATUS_HEALTH": "核心血",
 		"STATUS_ATTR": "属性",
 		"STATUS_SKILL": "技能",
 		"STATUS_SHIELD": "护盾",
@@ -193,6 +194,7 @@ var translations: Dictionary = {
 		## 暂停菜单 - 查看状态子面板（英文）
 		"BUTTON_VIEW_STATUS": "View Status",
 		"STATUS_TITLE": "Current Status",
+		"STATUS_HEALTH": "Core HP",
 		"STATUS_ATTR": "Attributes",
 		"STATUS_SKILL": "Skills",
 		"STATUS_SHIELD": "Shield",

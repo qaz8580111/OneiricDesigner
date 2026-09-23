@@ -47,7 +47,8 @@ var _is_crit_instance: bool = false
 ## 弹出伤害数字（对外接口，由Enemy/Player调用）
 ## 参数：position - 弹出位置（世界坐标），amount - 伤害数值，is_crit - 是否暴击/大伤害
 ##       color - 可选自定义颜色（不传则按is_crit自动选红/白）
-static func pop(position: Vector2, amount: int, is_crit: bool = false, color: Color = Color(-1, -1, -1)) -> void:
+##       prefix - 可选文字前缀（如吃到上限加成时传 "+"，显示"+25"；默认空=纯数字）
+static func pop(position: Vector2, amount: int, is_crit: bool = false, color: Color = Color(-1, -1, -1), prefix: String = "") -> void:
 	## 获取当前场景树
 	var tree: SceneTree = Engine.get_main_loop() as SceneTree
 	if tree == null or tree.current_scene == null:
@@ -85,15 +86,16 @@ static func pop(position: Vector2, amount: int, is_crit: bool = false, color: Co
 	else:
 		final_color = Color(1.0, 1.0, 0.9)
 
-	num.activate(tree.current_scene, position, amount, is_crit, final_color)
+	num.activate(tree.current_scene, position, amount, is_crit, final_color, prefix)
 	_active_count += 1
 
 ## ========== 实例方法 ==========
 
 ## 激活/重置一个数字实例（新弹出或从池中复用时调用）
 ## 参数：parent - 挂载场景；world_pos - 世界坐标；amount - 伤害值；is_crit - 暴击；font_color - 颜色
-func activate(parent: Node, world_pos: Vector2, amount: int, is_crit: bool, font_color: Color) -> void:
-	text = str(amount)
+##       prefix - 文字前缀（默认空；传 "+" 时显示 "+25"）
+func activate(parent: Node, world_pos: Vector2, amount: int, is_crit: bool, font_color: Color, prefix: String = "") -> void:
+	text = prefix + str(amount)
 	position = world_pos + Vector2(randf_range(-8, 8), -10)
 	_start_y = position.y
 	z_index = 100

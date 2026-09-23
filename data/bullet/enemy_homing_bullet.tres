@@ -1,7 +1,6 @@
-[gd_resource type="Resource" load_steps=4 format=3]
+[gd_resource type="Resource" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/resources/bullet/BulletData.gd" id="1"]
-[ext_resource type="HomingEffect" path="res://data/bullet/effect/homing_effect.tres" id="2"]
 [ext_resource type="BulletForm" path="res://data/bullet/form/homing_bullet_form.tres" id="3"]
 
 [resource type="BulletData" script_class="BulletData"]
@@ -9,4 +8,3 @@ script = ExtResource("1")
 damage = 4
 speed = 240.0
 form = ExtResource("3")
-effects = [ExtResource("2")]

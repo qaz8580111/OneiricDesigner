@@ -12,12 +12,22 @@ const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
-## 屏幕正下方状态行容器（血条 | 护盾条 | 碎片数，水平排成一行）
-## 护盾面板由 _build_shield_display() 在运行时插入其中（move_child 到索引 1）
+## 屏幕正下方状态行容器（血量组 | 护盾条 | 碎片数，水平排成一行）
+## 护盾面板由 _build_shield_display() 在运行时插入其中（move_child 到索引 1，即血量组之后）
 @onready var _bottom_status_row: HBoxContainer = $BottomStatusRow
 
-## 血量条节点，用于显示玩家核心血量（位于底部状态行内）
-@onready var health_bar: ProgressBar = $BottomStatusRow/HealthBar
+## 血量条节点，用于显示玩家核心血量（位于底部状态行内的 HealthGroup 组中）
+## 血量条不再显示引擎自带百分比文字（场景中 show_percentage=false），
+## 数值改由同组的 _health_value_label 以"当前/上限"形式展示
+@onready var health_bar: ProgressBar = $BottomStatusRow/HealthGroup/HealthBar
+
+## 红血阈值刻度线（血条子节点）：锚点由 _sync_critical_marker() 对齐到阈值百分比，
+## 血量跌破此线即进入红血，刻度线与数值一起呼吸闪烁
+@onready var _critical_marker: ColorRect = $BottomStatusRow/HealthGroup/HealthBar/CriticalMarker
+
+## 血量数值标签：显示核心血"当前/上限"（如 175/225）
+## 与血条同属 HealthGroup，护盾面板插入时不会把二者拆散
+@onready var _health_value_label: Label = $BottomStatusRow/HealthGroup/HealthValueLabel
 
 ## 梦境碎片标签节点，用于显示玩家当前拥有的梦境碎片数量（位于底部状态行内）
 @onready var fragment_label: Label = $BottomStatusRow/FragmentLabel
@@ -28,7 +38,7 @@ const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 ## ========== 左上角信息列布局契约（跨脚本：需与 StageDirector 的 _stage_label 保持一致） ==========
 ## 左上角为"两列三行"排版，共 6 项（跨 GameHUD 与 StageDirector 两个 CanvasLayer，共用同一套坐标常量）：
 ##   左列 x=20 ：阶段(由 StageDirector 创建) / 存活时间 / 击杀数
-##   右列 x=220：难度 / 最高连击 / FPS
+##   右列 x=220：难度 / 场上怪物数 / FPS
 ## 行 y 坐标：14 / 40 / 66（行高 26）
 ## 统一字号：16（左上角 6 项全部使用同一号字，避免大小混杂）
 ## 第 4 行（y=92）两列均空置：预留给 StageDirector 的终局文案（"终极关卡 · 用时 123.4 秒"），
@@ -101,6 +111,38 @@ var _dream_fragment: int = 0
 ## 健康控制器引用，用于监听玩家健康状态变化
 var _health_controller: Node = null
 
+## ---------- 血量显示（真实值 + 动画值分离） ----------
+## 真实核心血 / 真实上限（由 health_changed 信号写入；数字文字直接显示这两个"事实值"）
+var _target_core: float = 0.0
+var _target_max_core: float = 0.0
+## 动画核心血（每帧缓动逼近 _target_core，驱动血条填充分量）
+## 上限不参与缓动：上限变化即刻生效，条"先退一格再回填"才是成长观感的来源
+var _display_core: float = 0.0
+## 是否已收到过血量状态：首次收到时动画值直接对齐，避免开局看到血条从 0 涨上来
+var _health_ready: bool = false
+## 是否处于红血状态（HUD 侧副本，供每帧呼吸与配色使用）
+var _is_critical_ui: bool = false
+## 红血阈值（0~1，来自 CoreHealthData.critical_threshold，用于摆放危险刻度线）
+var _critical_threshold: float = 0.3
+## 危险刻度线上次写入的锚点值（缓存：锚点写入会触发重排，避免重复写）
+var _marker_threshold: float = 0.3
+## 上限增长高亮剩余时长（>0 时数值文字转金并放大，让"上限变大"被看见）
+var _max_grow_flash: float = 0.0
+## 红血呼吸相位累加器（仅在红血时累加）
+var _pulse_time: float = 0.0
+## 数值文字上次写入的颜色（血量刷新高频，避免每帧重复写 theme override）
+var _last_value_color: Color = Color(-1, -1, -1)
+
+## ---------- 血量表现参数 ----------
+## 血条动画收敛速率（指数缓动，帧率无关）：回血与上限增长用，越大越快（6≈0.3秒基本到位）
+const HP_ANIM_RATE: float = 6.0
+## 红血呼吸频率（弧度/秒）与呼吸时最低透明度
+const CRITICAL_PULSE_SPEED: float = 6.0
+const CRITICAL_PULSE_MIN_ALPHA: float = 0.45
+## 上限增长时数值文字的金色放大高亮：持续时长（秒）与最大放大倍数
+const MAX_GROW_FLASH_TIME: float = 0.8
+const MAX_GROW_SCALE: float = 0.18
+
 ## ---------- FPS 计数器（可选显示模块） ----------
 ## 是否启用FPS显示（从 settings.cfg 读取 show_fps）
 var _show_fps: bool = false
@@ -118,8 +160,8 @@ const FPS_REFRESH_INTERVAL: float = 0.25  # 每秒4次刷新：流畅 + 低CPU
 var _time_label: Label = null
 ## 击杀数标签（左列第 3 行，y=66）
 var _kills_label: Label = null
-## 最高连击标签（右列第 2 行，y=40）
-var _max_combo_label: Label = null
+## 场上怪物数标签（右列第 2 行，y=40）
+var _enemy_count_label: Label = null
 ## 状态栏刷新节流计时器（0.5秒刷新一次，避免每帧读单例）
 var _stat_refresh_timer: float = 0.0
 const STAT_REFRESH_INTERVAL: float = 0.5
@@ -176,7 +218,7 @@ func _ready() -> void:
 	add_child(combo_hud)
 
 	## ========== 左上角信息列（直播增强：观众可读性） ==========
-	## 设计意图：非操作观众一眼看到"活了多久/杀了多少/最高连击"，
+	## 设计意图：非操作观众一眼看到"活了多久/杀了多少/场上还剩多少怪"，
 	## 位置统一收敛到屏幕左上角，与 StageDirector 的"阶段 N/10"标签纵向排列，互不重叠
 	_build_top_status_bar()
 
@@ -199,7 +241,7 @@ func _init_fps_display() -> void:
 		_show_fps = false  # 默认不显示（避免影响首次游戏体验）
 
 	if _show_fps:
-		## 动态创建 FPS 标签（左上角信息列右列第 3 行，紧随最高连击之后，不与其他信息重叠）
+		## 动态创建 FPS 标签（左上角信息列右列第 3 行，紧随场上怪物数之后，不与其他信息重叠）
 		_fps_label = Label.new()
 		_fps_label.name = "FPSLabel"
 		_fps_label.text = "FPS: --"
@@ -229,6 +271,10 @@ func _process(delta: float) -> void:
 			_refresh_shield_display()
 			## 构型装备不发信号（四类三选一只有词条发 upgrades_changed），同样靠节流轮询同步显隐
 			_refresh_pattern_display()
+
+	## ---------- 血量条表现（每帧：动画缓动 + 红血呼吸 + 上限增长高亮） ----------
+	## 必须放在 _show_fps 的提前 return 之前：血量表现与 FPS 显示开关无关
+	_process_health_visuals(delta)
 
 	## ---------- FPS 计数 ----------
 	if not _show_fps or _fps_label == null:
@@ -349,35 +395,144 @@ func _find_player() -> bool:
 
 ## ========== 血量更新方法 ==========
 
-## 更新血量显示（简单版本，备用方案）
+## 更新血量显示（简单版本，备用方案：无 HealthController 时由 damaged/killed 信号驱动）
 ## 参数：current - 当前血量，max - 最大血量
+## 说明：只登记目标值，实际绘制交给每帧的 _process_health_visuals()
 func update_health(current: int, max: int) -> void:
-	if health_bar:
-		health_bar.max_value = max
-		health_bar.value = current
+	_target_core = float(current)
+	_target_max_core = float(max)
+	## 备用路径拿不到红血状态与阈值，按正常态处理
+	_is_critical_ui = false
+	## 首次收到状态时动画值直接对齐（避免开局看到血条从 0 涨上来）
+	if not _health_ready:
+		_health_ready = true
+		_display_core = _target_core
 
 ## 更新梦境碎片显示
 func _update_fragment_display() -> void:
 	if fragment_label:
 		fragment_label.text = "梦境碎片: %d" % _dream_fragment
 
-## 更新健康显示（通过生存状态字典）
-## 参数：state - 包含护盾、核心血、红血状态等信息的字典
+## 更新健康显示（生存状态字典：核心血/上限/红血状态/红血阈值）
+## 数据流：CoreHealthComponent.core_health_changed → PlayerHealthController.health_changed → 此方法
+## 说明：本方法只登记"真实值 + 触发一次性的上限增长高亮"，条与数字的实际绘制
+##       交给 _process_health_visuals() 每帧完成（上限增长/红血呼吸都需要逐帧过渡）
 func _update_health_display(state: Dictionary) -> void:
-	if health_bar:
-		## 获取核心血量和最大核心血量
-		var core_hp: float = state.get("core", 0.0)
-		var max_core: float = state.get("max_core", 100.0)
-		## 设置血量条的最大值和当前值
-		health_bar.max_value = max_core
-		health_bar.value = core_hp
-		
-		## 如果处于红血状态，将血量条设为红色警示
-		if state.get("is_critical", false):
-			health_bar.modulate = Color(1, 0.3, 0.3, 1)
-		else:
-			## 正常状态下使用白色
-			health_bar.modulate = Color.WHITE
+	## 获取核心血量、上限、红血状态与阈值
+	var core_hp: float = state.get("core", 0.0)
+	var max_core: float = state.get("max_core", 100.0)
+
+	## 上限增长检测：非首次且上限确实变大 → 触发数值文字金色放大高亮
+	## （首次不触发：HUD 中途创建时 _target_max_core 还为 0，会被误判成"涨了一大截"）
+	if _health_ready and max_core > _target_max_core + 0.01:
+		_max_grow_flash = MAX_GROW_FLASH_TIME
+
+	_target_core = core_hp
+	_target_max_core = max_core
+	_is_critical_ui = bool(state.get("is_critical", false))
+	## 阈值来自 CoreHealthData.critical_threshold（可被词条改），钳制到可见区间避免刻度线贴边
+	_critical_threshold = clampf(float(state.get("critical_threshold", _critical_threshold)), 0.01, 0.99)
+
+	## 首次收到状态：动画值直接对齐，避免开局看到血条从 0 涨上来
+	if not _health_ready:
+		_health_ready = true
+		_display_core = core_hp
+
+	_sync_critical_marker()
+
+## 对齐红血阈值刻度线（锚点 = 阈值百分比，条宽变化时刻度线自动跟随）
+## 说明：写锚点会触发该 Control 重排，而血量变化是高频事件，故用 _marker_threshold
+##       缓存"上次写入值"，仅在阈值真变化时才写
+func _sync_critical_marker() -> void:
+	if _critical_marker == null:
+		return
+	if absf(_critical_threshold - _marker_threshold) <= 0.0005:
+		return
+	_marker_threshold = _critical_threshold
+	_critical_marker.anchor_left = _critical_threshold
+	_critical_marker.anchor_right = _critical_threshold
+
+## 血量条表现刷新（每帧）：填充分量缓动 + 绘制 + 红血呼吸 + 上限增长高亮
+## 参数：delta - 帧间隔
+## 设计意图（"上限增长动画"的实现口径）：
+##   上限即时生效、当前血缓动回填。扩容时（如 50/100 → 75/125）分母先变大，
+##   条先"退一格"到 40%，再缓缓灌回 60%，配合金色放大数字，把"上限撑开了"演出来；
+##   若让上限也缓动，分母与分子同步增长、条长几乎不动，反而看不出变化
+func _process_health_visuals(delta: float) -> void:
+	## 未收到过血量状态时不绘制（保持场景默认满条，避免开局先空一条再跳满）
+	if health_bar == null or not _health_ready:
+		return
+
+	## ---------- 血条长度 ----------
+	## 上限不缓动：分母立刻变化，条的"退格—回填"过程才是成长观感
+	health_bar.max_value = maxf(_target_max_core, 1.0)
+	## 掉血即时到位（受击反馈要干脆）；回血/扩容带来的治疗走缓动
+	if _target_core < _display_core:
+		_display_core = _target_core
+	else:
+		_display_core = _approach(_display_core, _target_core, HP_ANIM_RATE, delta)
+	health_bar.value = clampf(_display_core, 0.0, health_bar.max_value)
+
+	## ---------- 红血呼吸（只脉动"危险线 + 数字"，整条血条不做透明度闪烁） ----------
+	var pulse_alpha: float = 1.0
+	if _is_critical_ui:
+		_pulse_time += delta
+		pulse_alpha = CRITICAL_PULSE_MIN_ALPHA + (1.0 - CRITICAL_PULSE_MIN_ALPHA) \
+			* (0.5 + 0.5 * sin(_pulse_time * CRITICAL_PULSE_SPEED))
+	else:
+		_pulse_time = 0.0
+	## 血条整体：红血转警示底色（CriticalMarker 是其子节点，会一并被染色）
+	health_bar.modulate = Color(1.0, 0.3, 0.3, 1.0) if _is_critical_ui else Color.WHITE
+	if _critical_marker:
+		_critical_marker.modulate = Color(1, 1, 1, pulse_alpha)
+
+	## ---------- 上限增长高亮：数字短暂放大并转金 ----------
+	var grow_ratio: float = 0.0
+	if _max_grow_flash > 0.0:
+		_max_grow_flash = maxf(_max_grow_flash - delta, 0.0)
+		grow_ratio = _max_grow_flash / MAX_GROW_FLASH_TIME
+	if _health_value_label:
+		## 放大以中心为轴（否则从左上角"长出来"，观感别扭）；容器布局不受 scale 影响
+		if grow_ratio > 0.0 and _health_value_label.pivot_offset == Vector2.ZERO:
+			_health_value_label.pivot_offset = _health_value_label.size * 0.5
+		var label_scale: float = 1.0 + MAX_GROW_SCALE * grow_ratio
+		_health_value_label.scale = Vector2(label_scale, label_scale)
+
+	## ---------- 刷新数值文字 ----------
+	_update_health_value_text(_target_core, _target_max_core, _is_critical_ui, grow_ratio, pulse_alpha)
+
+## 指数缓动逼近（帧率无关）
+## 参数：from - 当前值；to - 目标值；rate - 收敛速率（越大越快）；delta - 帧间隔
+## 返回：本帧更新后的值
+## 说明：用 1-exp(-rate*delta) 作为插值系数，不同帧率下收敛速度一致（比 lerp(a,b,rate) 更稳）
+func _approach(from: float, to: float, rate: float, delta: float) -> float:
+	return lerpf(from, to, 1.0 - exp(-rate * delta))
+
+## 刷新血量数值文字（"当前/上限"）
+## 参数：current - 当前核心血；max_value - 核心血上限；is_critical - 是否红血
+##       grow_ratio - 上限增长高亮剩余比例（1→0，0 表示无高亮）；pulse_alpha - 红血呼吸透明度
+## 说明：数字始终显示真实值（不跟缓动走）——条是"感觉"，数字是"事实"，两者互补；
+##       取整口径与护盾耐久/伤害数字一致
+func _update_health_value_text(current: float, max_value: float, is_critical: bool, grow_ratio: float = 0.0, pulse_alpha: float = 1.0) -> void:
+	if _health_value_label == null:
+		return
+	_health_value_label.text = "%d/%d" % [int(round(current)), int(round(max_value))]
+
+	## 颜色优先级：红血 > 上限增长高亮 > 常态
+	var target_color: Color
+	if is_critical:
+		target_color = Color(1.0, 0.35, 0.35, 1)
+	elif grow_ratio > 0.0:
+		target_color = Color(1.0, 0.85, 0.2, 1)
+	else:
+		target_color = Color(1.0, 0.85, 0.85, 1)
+	## 仅在颜色真变化时写 theme override（血量刷新高频，避免每帧重复覆盖）
+	if target_color != _last_value_color:
+		_last_value_color = target_color
+		_health_value_label.add_theme_color_override("font_color", target_color)
+
+	## 红血呼吸：数字与危险线同步脉动
+	_health_value_label.modulate = Color(1, 1, 1, pulse_alpha)
 
 ## ========== 信号回调方法 ==========
 
@@ -938,13 +1093,13 @@ func _on_player_killed() -> void:
 ## ========== 左上角常驻信息列（直播增强：观众可读性） ==========
 
 ## 构建左上角信息列（两列三行排版，坐标契约见文件顶部 TOP_LEFT_* 常量）
-## 左列：存活时间 / 击杀数；右列：最高连击（右列第 1 行是 DiffLabel"难度"，由场景文件定义）
+## 左列：存活时间 / 击杀数；右列：场上怪物数（右列第 1 行是 DiffLabel"难度"，由场景文件定义）
 func _build_top_status_bar() -> void:
 	## 信息列配置：[标签前缀, 颜色, 列索引, 行索引]
 	var configs: Array = [
 		["⏱", Color(0.75, 0.9, 1.0), 0, 1],  ## 存活时间：淡蓝色，左列第 2 行
 		["💀", Color(1.0, 0.5, 0.4), 0, 2],   ## 击杀数：淡红色，左列第 3 行
-		["🔥", Color(1.0, 0.85, 0.3), 1, 1],  ## 最高连击：金色，右列第 2 行
+		["👾", Color(0.8, 0.6, 1.0), 1, 1],  ## 场上怪物数：淡紫色，右列第 2 行
 	]
 	var labels: Array = []
 
@@ -969,7 +1124,7 @@ func _build_top_status_bar() -> void:
 
 	_time_label = labels[0]
 	_kills_label = labels[1]
-	_max_combo_label = labels[2]
+	_enemy_count_label = labels[2]
 
 ## 刷新左上角信息列文字（节流0.5秒调用一次，避免每帧读单例）
 func _refresh_top_status() -> void:
@@ -984,10 +1139,8 @@ func _refresh_top_status() -> void:
 	if _kills_label and RunStats:
 		_kills_label.text = "💀 %d" % RunStats.kills
 
-	## 最高连击：从 ComboManager 读取
-	if _max_combo_label and ComboManager:
-		var max_combo: int = ComboManager.get_max_combo()
-		if max_combo > 0:
-			_max_combo_label.text = "🔥 %d" % max_combo
-		else:
-			_max_combo_label.text = "🔥 --"
+	## 场上怪物数：以 "enemy" 组为唯一真源
+	## 说明：GameWorld 常规刷怪与 StageDirector 的 BOSS 均加入该组，敌人死亡 queue_free
+	##       后自动出组，无需额外维护计数（读 GameWorld._enemy_count 会漏掉 BOSS）
+	if _enemy_count_label:
+		_enemy_count_label.text = "👾 %d" % get_tree().get_nodes_in_group("enemy").size()

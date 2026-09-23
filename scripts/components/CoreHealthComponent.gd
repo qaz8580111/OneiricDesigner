@@ -189,6 +189,15 @@ func get_current_hp() -> float:
 func get_max_hp() -> float:
 	return core_health_data.max_hp
 
+## 获取红血阈值百分比
+## 返回：红血阈值（0~1，如 0.3 表示 30%）
+## 用途：HUD 以此摆放血条上的"危险线"刻度，与 CoreHealthData.is_critical() 判定口径一致；
+##       数据缺失时回退 0.3（与 CoreHealthData 默认值保持一致）
+func get_critical_threshold() -> float:
+	if core_health_data == null:
+		return 0.3
+	return core_health_data.critical_threshold
+
 ## 判断是否处于红血状态
 ## 返回：true表示处于红血状态，false表示正常状态
 func is_critical() -> bool:

@@ -43,3 +43,27 @@ func apply_visual(bullet_sprite: Sprite2D) -> void:
 	image.fill(placeholder_color)
 	## 将图像转换为纹理并设置到Sprite2D
 	bullet_sprite.texture = ImageTexture.create_from_image(image)
+
+## ========== 阵营配色工具（静态） ==========
+
+## 判定颜色是否属于蓝色系（蓝/青蓝），用于保证敌人子弹不与玩家蓝色子弹混淆
+## 说明：按HSV色相判定，蓝/青蓝区间取 h∈[180°, 250°]；
+##       过暗（近黑）或过灰（近白/灰）的颜色不视为蓝色系；
+##       紫色系（h≈270°以上）刻意不判定为蓝色，保留现有紫色敌弹视觉
+## 参数：color - 待判定颜色
+## 返回：true 表示属于蓝/青蓝色系
+static func is_blue_family(color: Color) -> bool:
+	## 低明度（近黑）或低饱和（近灰）不算蓝色
+	if color.v < 0.1 or color.s < 0.12:
+		return false
+	var hue_deg: float = color.h * 360.0
+	return hue_deg >= 180.0 and hue_deg <= 250.0
+
+## 将蓝色系颜色偏转为非蓝（色相旋转 +120°，蓝/青蓝 → 品红/暖色），保留饱和度、明度与透明度
+## 非蓝色系原样返回，用于敌人子弹配色的运行时兜底
+## 参数：color - 原色
+## 返回：保证非蓝的等价颜色
+static func enemy_safe_color(color: Color) -> Color:
+	if not is_blue_family(color):
+		return color
+	return Color.from_hsv(fposmod(color.h + 1.0 / 3.0, 1.0), color.s, color.v, color.a)

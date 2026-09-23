@@ -6,5 +6,5 @@
 script = ExtResource("1")
 form_id = "lightning"
 collision_radius = 6.0
-placeholder_color = Color(0.75, 0.85, 1, 1)
+placeholder_color = Color(1, 0.85, 0.2, 1)
 placeholder_size = Vector2(12, 12)

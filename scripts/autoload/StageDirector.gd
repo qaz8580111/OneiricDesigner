@@ -5,24 +5,23 @@
 ##   1. 本类是一个独立的"切面"模块——不修改 GameWorld/DifficultyManager/Enemy 的任何一行，
 ##      仅通过观察（信号监听）与注入（外部调用公开接口/装饰节点）介入业务流程
 ##   2. 切点（Pointcut）一览：
-##      - GameManager.game_started    → 前置通知：每局重置进度时间轴
-##      - GameManager.is_playing()    → 环绕通知：自计时推进阶段事件（暂停自动冻结，与难度曲线同拍）
+##      - GameManager.game_started    → 前置通知：每局重置阶段状态机
+##      - GameManager.is_playing()    → 环绕通知：驱动阶段状态机（暂停自动冻结）
 ##      - GameWorld._spawn_enemy()    → 引入通知：怪潮期间临时抬升 DifficultyManager.level +1，
 ##                                      复用业务刷怪链路实现"等级+1 的怪物"，刷完立即还原
 ##                                      （全程同步无 await，无渲染间隙，HUD/信号零感知）
 ##      - Enemy.killed/damaged        → 后置通知：监听 Boss 死亡推进阶段、受击驱动外挂血条
 ##   3. 装饰模式：Boss 复用 Enemy.tscn 实例 + 数据深拷贝副本（绝不污染共享 .tres），
 ##      头顶血条/屏幕血条/阶段字幕均为切面外挂节点，随 Boss 销毁自动清理
-## 进度模型（总进度把控到阶段 10，之后进入终极关卡）：
-##   阶段 N 整点（N*105 秒）    → 怪潮事件：一波"等级+1"的怪物
-##   阶段 N.5（N*105+52.5 秒） → 阶段 N 守门 Boss（阶段 10.5 为关底 Boss"梦境之主"）
-##   事件严格串行：上一个事件完结（怪潮全灭或超时兜底 / Boss 被击杀）后，才触发下一个已到点的事件
-##   击杀「梦境之主」→ 终极关卡：清空全场敌人 + 停止常规刷怪 + 生成终极 BOSS「梦境根源」
-##   击杀终极 BOSS → 本局通关（emit run_completed）
-## 节奏目标：阶段 10.5「梦境之主」在 1102.5 秒（≈18.4 分钟）降临，
-##          整局（不含终极 BOSS 战）落在 15~20 分钟区间，与 DifficultyManager 每级 110 秒同档
-## 数据流：本类自计时 → 时间轴事件表逐个触发 → 怪潮走业务刷怪链路 / Boss 由切面自建
-##         → Boss 死亡信号回调 → 推进事件索引 → …… → 终极关卡 → 终局通关
+## 进度模型（用户定制规则：难度与阶段强绑定，Boss 是唯一的升级门槛）：
+##   阶段 N：怪潮（等级+1 的一波怪）→ 玩家清完 → 守门 Boss 降临 → 击败 → 难度+1 → 阶段 N+1
+##   * 纯表现驱动：无最短间隔、无超时放行，节奏完全由玩家的杀怪/击杀速度决定
+##   * Boss 不倒下 → 永远卡在当前难度，绝不会"时间到了自动升级"
+##   * 开局难度档 = 起始阶段：选困难即从阶段4开始，前 3 个守门 Boss 视为已通过
+##   * 阶段 10：通关模式 = 怪潮 → 关底 Boss「梦境之主」（击杀后进入终极关卡打「梦境根源」）
+##             无尽模式 = 怪潮 → 直接开启登塔（难度已封顶10，之后由 TowerManager 每分钟+1层）
+## 数据流：is_playing 门禁 → 阶段状态机推进 → 怪潮走业务刷怪链路 / Boss 由切面自建
+##         → Boss 死亡信号回调 → DifficultyManager.advance_by_boss() + 阶段+1 → …… → 终局
 extends Node
 
 ## ========== 预加载资源（避免运行时加载延迟） ==========
@@ -50,17 +49,9 @@ const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
 
 ## ========== 调参常量（阶段曲线的核心配置，集中管理便于平衡调整） ==========
 
-## 每个阶段的时长（秒）：阶段 N 事件在 N*105 秒，阶段 N.5 在 N*105+52.5 秒
-## 数值依据：DifficultyManager 每级 110 秒，本切面每阶段 105 秒，两者同档推进（等级≈阶段）
-## 节奏结果：阶段 10 怪潮 1050 秒 → 关底 Boss「梦境之主」1102.5 秒（≈18.4 分钟），
-##          整局（不含终极 BOSS 战）落在 15~20 分钟区间
-const STAGE_INTERVAL: float = 105.0
-
-## 总进度上限：把控到阶段 10（阶段 10.5 为关底 Boss）
+## 总进度上限：把控到阶段 10（阶段 10 的守门者即关底 Boss「梦境之主」）
+## 与 DifficultyManager.MAX_LEVEL 严格对齐：难度等级 == 阶段号
 const MAX_STAGE: int = 10
-
-## 怪潮完结超时（秒）：玩家长时间不清怪时自动放行下一事件，防止进度被"苟"卡死
-const WAVE_TIMEOUT: float = 45.0
 
 ## Boss 生成距离（与玩家的距离，像素）：屏幕外附近，Boss 直奔玩家而来
 const BOSS_SPAWN_DISTANCE: float = 700.0
@@ -79,9 +70,17 @@ const ULTIMATE_BOSS_HITBOX_RADIUS: float = 66.0
 
 enum StageEventType {
 	MOB_WAVE,    ## 怪潮事件：一波"等级+1"的怪物
-	BOSS,        ## 守门 Boss 事件：阶段 N.5 出现的阶段 Boss
-	FINAL_BOSS,  ## 关底 Boss 事件：阶段 10.5 出现的"梦境之主"（通关模式专属）
-	TOWER        ## 登塔事件：阶段 10.5 的替代事件（无尽模式专属，接管后续节奏）
+	BOSS,        ## 守门 Boss 事件：阶段 N 的守门者
+	FINAL_BOSS,  ## 关底 Boss 事件：阶段 10 的"梦境之主"（通关模式专属）
+	TOWER        ## 登塔事件：阶段 10 的替代事件（无尽模式专属，接管后续节奏）
+}
+
+## ========== 阶段状态机枚举（本切面的核心驱动模型） ==========
+
+enum StagePhase {
+	MOB_WAVE,  ## 怪潮阶段：刷出等级+1的一波怪 → 等玩家清光
+	BOSS,      ## Boss 阶段：生成当前阶段的守门者 → 等玩家击败（击败才升难度）
+	FINISHED   ## 已终结：阶段流程走完（终极关卡 / 登塔），不再触发任何阶段事件
 }
 
 ## ========== 信号定义（供未来扩展使用，当前切面内部消费） ==========
@@ -97,26 +96,20 @@ signal run_completed
 
 ## ========== 运行时状态（每局由 game_started 重置） ==========
 
-## 本局已进行的游戏时间（秒），仅游戏进行中累计（与 DifficultyManager 同拍冻结）
-var _elapsed: float = 0.0
+## 当前阶段号（1~MAX_STAGE），开局等于 DifficultyManager.level（难度 == 阶段，严格绑定）
+var _current_stage: int = 1
 
-## 本局事件时间轴（_build_timeline 生成的事件字典数组，按时间升序）
-var _timeline: Array = []
+## 当前阶段内的推进步骤（状态机核心：MOB_WAVE → BOSS → 击败后阶段+1）
+var _stage_phase: int = StagePhase.MOB_WAVE
 
-## 下一个待触发的事件索引（时间轴游标：触发成功才前进）
-var _event_index: int = 0
+## 本阶段怪潮是否已刷出（false=待刷出；true=已刷出，正在等玩家清光）
+var _wave_fired: bool = false
 
-## 是否已进入终局（终极关卡标志：true 后时间轴退役，不再触发任何阶段事件）
+## 是否已进入终局（终极关卡/登塔标志：true 后状态机退役，不再触发任何阶段事件）
 var _run_completed: bool = false
-
-## 当前活动事件的类型（-1 = 无活动事件，即上一个事件已完结、可触发下一个）
-var _active_type: int = -1
 
 ## 当前怪潮的敌人快照（刷怪前后的差集，用于追踪"这波怪是否全灭"）
 var _wave_enemies: Array = []
-
-## 当前怪潮的完结截止时间（超时自动放行）
-var _wave_deadline: float = 0.0
 
 ## 怪潮存活检查节流累计器
 var _wave_check_accum: float = 0.0
@@ -182,13 +175,13 @@ func _ready() -> void:
 	## 登塔层数变化（无尽模式）：更新进度标签并播报登层
 	TowerManager.floor_changed.connect(_on_tower_floor_changed)
 
-## _process() - 切面主循环：推进计时、管理活动事件、触发已到点事件
-## 数据流：is_playing 门禁 → 累计时间 → 活动事件完结检查 → 下一事件触发
+## _process() - 切面主循环：驱动阶段状态机（怪潮 → Boss → 升级 → 下一阶段）
+## 数据流：is_playing 门禁 → 终局检查 → 按当前阶段步骤分派推进
 func _process(delta: float) -> void:
-	## 门禁 1：只在游戏进行中推进（暂停/菜单/结算时时间轴冻结，与难度曲线同拍）
+	## 门禁 1：只在游戏进行中推进（暂停/菜单/结算时状态机冻结）
 	if not GameManager.is_playing():
 		return
-	## 门禁 2：已进入终极关卡 → 时间轴退役，本局进度由终极 BOSS 战独立接管
+	## 门禁 2：已进入终极关卡/登塔 → 状态机退役，本局进度由终极 BOSS 战/登塔独立接管
 	if _run_completed:
 		## 终极 BOSS 战计时：实时把用时刷到左上角进度标签，让玩家看得见自己的挑战进度
 		## （无尽模式登塔时 _ultimate_boss_active 保持 false，此标签由登塔播报独立维护）
@@ -197,98 +190,79 @@ func _process(delta: float) -> void:
 			_update_stage_label("终极关卡 · 用时 %.1f 秒" % _ultimate_boss_time)
 		return
 
-	## 累计游戏时间
-	_elapsed += delta
+	## 按阶段内步骤分派（纯表现驱动：推进与否只取决于玩家是否清怪/是否击杀 Boss）
+	match _stage_phase:
+		StagePhase.MOB_WAVE:
+			_process_mob_wave(delta)
+		StagePhase.BOSS:
+			_process_boss()
 
-	## 活动事件完结检查（怪潮全灭/超时；Boss 由 killed 信号驱动，此处兜底防悬挂引用）
-	_update_active_event(delta)
+## ========== 阶段状态机推进 ==========
 
-	## 尝试触发下一个已到点的事件（串行推进：有活动事件时挂起等待）
-	_try_fire_next_event()
-
-## ========== 事件时间轴构建 ==========
-
-## 构建本局事件时间轴（每局 game_started 时重建）
-## 时间轴模型：阶段 N 怪潮在 N*105 秒 → 阶段 N 守门 Boss 在 N*105+52.5 秒 → ……
-##             阶段 10 怪潮后，10.5 位置为关底 Boss"梦境之主"
-## 返回：按时间升序排列的事件字典数组 [{time, type, stage}, ...]
-func _build_timeline() -> Array:
-	var timeline: Array = []
-	for stage in range(1, MAX_STAGE + 1):
-		## 阶段 N 整点：怪潮事件
-		var base_time: float = stage * STAGE_INTERVAL
-		timeline.append({
-			"time": base_time,
-			"type": StageEventType.MOB_WAVE,
-			"stage": stage,
-		})
-		## 阶段 N.5：阶段 10 之前是守门 Boss；阶段 10.5 按模式分叉
-		## 通关模式 → 关底 Boss「梦境之主」（击杀后进入终极关卡打「梦境根源」）
-		## 无尽模式 → 登塔事件（难度已封顶10，之后由 TowerManager 每分钟+1层无限推进）
-		var boss_time: float = base_time + STAGE_INTERVAL * 0.5
-		var boss_type: int = StageEventType.BOSS
-		if stage == MAX_STAGE:
-			if GameManager.current_mode == GameManager.RunMode.ENDLESS:
-				boss_type = StageEventType.TOWER
-			else:
-				boss_type = StageEventType.FINAL_BOSS
-		timeline.append({
-			"time": boss_time,
-			"type": boss_type,
-			"stage": stage,
-		})
-	return timeline
-
-## ========== 事件触发与串行推进 ==========
-
-## 尝试触发下一个事件：时间已到 且 无活动事件（上一个已完结）才触发
-## 串行语义：保证"怪潮消灭后再到阶段 N.5 出 Boss"的用户预期节奏
-func _try_fire_next_event() -> void:
-	## 游标越界：时间轴已全部走完（理论上 _run_completed 已置位，双保险）
-	if _event_index >= _timeline.size():
-		return
-	## 串行门禁：上一个事件还没完结 → 挂起等待（时间已到的事件在完结后立即补触发）
-	if _active_type != -1:
+## 怪潮阶段推进：未刷出则刷怪；已刷出则节流检测是否被清光
+## 参数：delta - 帧间隔（用于节流累计）
+func _process_mob_wave(delta: float) -> void:
+	## 1) 尚未刷出：尝试触发（世界未就绪时下帧自动重试，游标语义由 _wave_fired 承担）
+	if not _wave_fired:
+		if _fire_mob_wave(_current_stage):
+			_wave_fired = true
 		return
 
-	var ev: Dictionary = _timeline[_event_index]
-	## 时间门禁：还没到点 → 等待
-	if _elapsed < float(ev.time):
+	## 2) 已刷出：节流检测存活数（0.5 秒一次，避免每帧遍历节点）
+	_wave_check_accum += delta
+	if _wave_check_accum < WAVE_CHECK_INTERVAL:
+		return
+	_wave_check_accum = 0.0
+	if _count_wave_alive() > 0:
 		return
 
-	## 按类型分发触发（world 缺失时直接 return，游标不前进，下帧自动重试）
-	match ev.type:
-		StageEventType.MOB_WAVE:
-			if _fire_mob_wave(ev):
-				_active_type = StageEventType.MOB_WAVE
-				_event_index += 1
-		StageEventType.BOSS, StageEventType.FINAL_BOSS:
-			if _fire_boss(ev):
-				_active_type = ev.type
-				_event_index += 1
-		StageEventType.TOWER:
-			## 登塔事件：触发即宣告阶段流程终结（_fire_tower 内部置位 _run_completed），
-			## 因此不设置 _active_type——时间轴已退役，无需再等待任何事件完结
-			if _fire_tower(ev):
-				_event_index += 1
+	## 怪潮全灭 → 立刻推进（无最短间隔、无超时放行，节奏完全由玩家杀怪速度决定）
+	_wave_enemies.clear()
+	_wave_fired = false
+	if _is_endless_final_stage():
+		## 无尽模式阶段10：没有守门 Boss，怪潮清完直接开启登塔
+		_finish_stage_flow()
+		return
+	_stage_phase = StagePhase.BOSS
+	print("[StageDirector] 阶段 %d 怪潮已被清空 → 守门者即将降临" % _current_stage)
 
-## 更新活动事件状态：怪潮完结检测 + Boss 引用兜底清理
-func _update_active_event(delta: float) -> void:
-	## Boss 引用兜底：Boss 节点已被销毁（如场景切换）但信号未触发 → 清理引用放行
+## Boss 阶段推进：未生成则生成；已生成则等待 killed 信号（收到即由回调推进阶段）
+func _process_boss() -> void:
+	## 兜底：Boss 节点被外部销毁（如场景切换）但 killed 未触发 → 清引用并在本帧重新生成
+	## 注意：此处不推进阶段——"Boss 没被打死就不算过关"是本切面的核心规则
 	if _current_boss != null and not is_instance_valid(_current_boss):
 		_current_boss = null
-		_active_type = -1
 		_hide_boss_hud()
+	## 尚未生成（或刚被清理）→ 尝试生成
+	if _current_boss == null:
+		_fire_boss(_current_stage)
 
-	## 怪潮完结检测：节流遍历快照，全灭或超时则放行
-	if _active_type == StageEventType.MOB_WAVE:
-		_wave_check_accum += delta
-		if _wave_check_accum >= WAVE_CHECK_INTERVAL:
-			_wave_check_accum = 0.0
-			if _count_wave_alive() == 0 or _elapsed >= _wave_deadline:
-				## 怪潮完结（全灭=玩家清场成功；超时=防止苟怪卡进度）
-				_wave_enemies.clear()
-				_active_type = -1
+## 阶段推进：由 Boss 死亡回调触发——难度+1 与阶段+1 是同一件事
+func _advance_stage() -> void:
+	if _current_stage >= MAX_STAGE:
+		## 阶段10 的守门者（通关模式为关底 Boss「梦境之主」）已倒 → 本局阶段流程终结
+		_finish_stage_flow()
+		return
+	## 难度+1（唯一升级入口，含信号广播/统计/音效/满5级敌潮）
+	DifficultyManager.advance_by_boss()
+	## 阶段+1，回到怪潮步骤，开始新一阶段循环
+	_current_stage += 1
+	_stage_phase = StagePhase.MOB_WAVE
+	_wave_fired = false
+	_wave_check_accum = 0.0
+	print("[StageDirector] 难度已提升至 %d → 进入阶段 %d" % [DifficultyManager.level, _current_stage])
+
+## 终结阶段流程：按模式分叉到终极关卡（通关）或登塔（无尽）
+func _finish_stage_flow() -> void:
+	_stage_phase = StagePhase.FINISHED
+	if GameManager.current_mode == GameManager.RunMode.ENDLESS:
+		_fire_tower()
+	else:
+		_enter_ultimate_stage()
+
+## 是否处于"无尽模式的最终阶段"（阶段10 无守门 Boss，怪潮清完直接登塔）
+func _is_endless_final_stage() -> bool:
+	return _current_stage >= MAX_STAGE and GameManager.current_mode == GameManager.RunMode.ENDLESS
 
 ## 统计怪潮快照中仍存活的敌人数
 ## 存活判定：节点有效 且 未在销毁队列（敌人死亡走 call_deferred("queue_free")，需排除排队中的）
@@ -308,13 +282,12 @@ func _count_wave_alive() -> int:
 ##            就是 +1 后的等级，缩放逻辑完全复用业务代码，零重复实现）
 ##   after  → DifficultyManager.level -= 1（还原，对 HUD/信号零影响）
 ## 全程同步执行（无 await），不存在渲染帧看到中间态的可能
-## 参数：ev - 事件字典 {time, type, stage}
-## 返回：true=触发成功（游标可前进）；false=世界未就绪（下帧重试）
-func _fire_mob_wave(ev: Dictionary) -> bool:
+## 参数：stage - 当前阶段号（决定波次规模）
+## 返回：true=触发成功；false=世界未就绪（下帧重试）
+func _fire_mob_wave(stage: int) -> bool:
 	var world: Node2D = _get_world()
 	if world == null:
 		return false
-	var stage: int = int(ev.stage)
 
 	## ---- before：临时抬升难度等级 ----
 	## 封顶守卫：难度已达上限时不再抬升（否则会在满级瞬间越界到 11 级，破坏 10 级封顶约定）
@@ -346,7 +319,7 @@ func _fire_mob_wave(ev: Dictionary) -> bool:
 	for e in get_tree().get_nodes_in_group("enemy"):
 		if not before.has(e):
 			_wave_enemies.append(e)
-	_wave_deadline = _elapsed + WAVE_TIMEOUT
+	## 完结检测节流器复位（由 _process_mob_wave 每 0.5 秒检查一次存活数）
 	_wave_check_accum = 0.0
 
 	## ---- 切面展示层：字幕 + 进度标签 + 音效（业务零感知） ----
@@ -360,15 +333,17 @@ func _fire_mob_wave(ev: Dictionary) -> bool:
 
 ## ========== Boss 事件（装饰模式：自建 Boss 实例 + 外挂血条） ==========
 
-## 触发 Boss 事件：守门 Boss（阶段 N.5）或关底 Boss（阶段 10.5"梦境之主"）
-## 参数：ev - 事件字典
+## 触发 Boss 事件：守门 Boss（阶段 N）或关底 Boss（阶段 10 的"梦境之主"）
+## 生成时机：本阶段怪潮被玩家清空后的一帧（纯表现驱动，无固定时刻）
+## 参数：stage - 当前阶段号
 ## 返回：true=触发成功；false=世界未就绪（下帧重试）
-func _fire_boss(ev: Dictionary) -> bool:
+func _fire_boss(stage: int) -> bool:
 	var world: Node2D = _get_world()
 	if world == null:
 		return false
-	var stage: int = int(ev.stage)
-	var is_final: bool = (ev.type == StageEventType.FINAL_BOSS)
+	## 阶段10 = 关底 Boss「梦境之主」（通关模式专属）；
+	## 无尽模式阶段10 不生成 Boss（怪潮清完直接登塔，见 _is_endless_final_stage）
+	var is_final: bool = (stage >= MAX_STAGE)
 
 	## ---- 构建 Boss 数据（深拷贝副本，绝不污染共享资源——项目硬性约定） ----
 	var boss_data: EnemyDataClass = _build_boss_data(world, stage, is_final)
@@ -425,15 +400,15 @@ func _fire_boss(ev: Dictionary) -> bool:
 	## ---- 切面展示层：警告字幕 + 音效 ----
 	if is_final:
 		_show_banner("★ 关底 Boss · 梦境之主 降临 ★", Color(1.0, 0.75, 0.2), 3.0)
-		_update_stage_label("阶段 %d.5/%d · 终局" % [stage, MAX_STAGE])
+		_update_stage_label("阶段 %d/%d · 终局" % [stage, MAX_STAGE])
 	else:
 		_show_banner("★ 阶段 %d · 守门者降临 ★" % stage, Color(0.85, 0.3, 0.95), 2.5)
-		_update_stage_label("阶段 %d.5/%d" % [stage, MAX_STAGE])
+		_update_stage_label("阶段 %d/%d · 守门者" % [stage, MAX_STAGE])
 	if AudioManager:
 		## 出场音效：difficulty_up 的下沉音（压迫感）+ wave_start 警报（双音叠加）
 		AudioManager.play("difficulty_up", 0.9)
 		AudioManager.play("wave_start", 0.7)
-	stage_event_fired.emit(ev.type, stage)
+	stage_event_fired.emit(StageEventType.FINAL_BOSS if is_final else StageEventType.BOSS, stage)
 	print("[StageDirector] %s 降临（阶段 %d）" % [boss_data.enemy_name, stage])
 	return true
 
@@ -560,29 +535,28 @@ func _on_boss_damaged(_amount: int, boss: Node) -> void:
 		_boss_enraged = true
 		_do_boss_enrage(boss)
 
-## Boss 死亡回调：阶段推进 / 通关结算
-## 参数：boss - 死亡的 Boss，is_final - 是否关底 Boss
+## Boss 死亡回调：Boss 是唯一的难度升级门槛，击败即推进阶段
+## 参数：boss - 死亡的 Boss，is_final - 是否关底 Boss（阶段 10 的「梦境之主」）
 func _on_boss_killed(boss: Node, is_final: bool) -> void:
 	## 补记击杀统计：Boss 不在 GameWorld._enemies 列表，业务的 add_kill 不会触发，切面补上
 	RunStats.add_kill()
 	## 爆炸音效强化（Enemy._die 已播 enemy_die，切面叠加爆炸声强调击杀反馈）
 	if AudioManager:
 		AudioManager.play("hit_explosion", 1.0)
-	## 活动事件完结：放行下一阶段事件
+	## 本场 Boss 战完结：清理引用与屏幕血条
 	_current_boss = null
-	_active_type = -1
 	_hide_boss_hud()
 
 	if is_final:
-		## ---- 关底 Boss 已倒：无缝进入终极关卡（清场 + 停刷怪 + 生成终极 BOSS） ----
+		## ---- 关底 Boss 已倒：下一阶段推进将由 _advance_stage() 内的封顶分支转入终极关卡 ----
 		_show_banner("★ 梦境之主已被击败 ★\n梦境深处传来更古老的回响……", Color(1.0, 0.85, 0.3), 3.0)
 		if AudioManager:
 			AudioManager.play("buff_pickup", 0.9)
 			AudioManager.play("upgrade_pick", 0.9)
-		_enter_ultimate_stage()
 	else:
 		_show_banner("守门者已被击败", Color(0.6, 1.0, 0.6), 1.5)
-		print("[StageDirector] 守门 Boss 已被击败，下一阶段事件解锁")
+	## ---- 统一推进入口：难度 +1、阶段 +1，重新回到怪潮阶段（阶段10 内部转终极关卡） ----
+	_advance_stage()
 
 ## ========== 无尽模式：登塔事件（阶段 10.5 的替代分支） ==========
 
@@ -591,16 +565,15 @@ func _on_boss_killed(boss: Node, is_final: bool) -> void:
 ##   1. 不停止常规刷怪——登塔阶段的压力来源是"逐层增幅的敌人"，停刷就没有内容
 ##   2. 不生成终极 BOSS——无尽模式没有终点，玩家死亡才是本局结束
 ##   3. 不触发 run_completed——通关信号是通关模式的专用收尾，无尽模式不适用
-## 参数：ev - 事件字典 {time, type, stage}（当前未使用，保留以匹配触发分发签名）
-## 返回：true=触发成功（游标可前进）；false=世界未就绪（下帧重试）
-func _fire_tower(_ev: Dictionary) -> bool:
+## 参数：无（阶段状态机由 _finish_stage_flow 直接调用）
+## 返回：true=触发成功（阶段流程终结）；false=世界未就绪（下帧重试）
+func _fire_tower() -> bool:
 	var world: Node2D = _get_world()
 	if world == null:
 		return false
 
-	## ---- 1. 时间轴退役：不再触发任何阶段事件（进度交由 TowerManager 接管） ----
+	## ---- 1. 阶段流程退役：不再推进任何阶段（进度交由 TowerManager 接管） ----
 	_run_completed = true
-	_active_type = -1
 	_wave_enemies.clear()
 	## 狂暴状态复位：Boss 阶段的状态不能带进登塔（虽无 Boss，但防御性保持一致）
 	_boss_enraged = false
@@ -635,9 +608,8 @@ func _on_tower_floor_changed(floor: int) -> void:
 func _enter_ultimate_stage() -> void:
 	var world: Node2D = _get_world()
 
-	## ---- 1. 时间轴退役：不再触发任何阶段事件（进度交由终极 BOSS 战接管） ----
+	## ---- 1. 阶段流程退役：不再推进任何阶段（进度交由终极 BOSS 战接管） ----
 	_run_completed = true
-	_active_type = -1
 	_wave_enemies.clear()
 
 	## ---- 2. 清空全场敌人（含不在业务管理列表内的实体，避免残留小怪干扰终局战） ----
@@ -841,14 +813,13 @@ func _override_circle_radius(host: Node, path: String, radius: float) -> void:
 	own_shape.radius = radius
 	shape_node.shape = own_shape
 
-## 终极 BOSS 死亡回调：本局通关（时间轴已退役，此处只做终局收尾）
+## 终极 BOSS 死亡回调：本局通关（阶段流程已退役，此处只做终局收尾）
 ## 参数：boss - 死亡的终极 BOSS（未直接使用，保留实例便于扩展）
 func _on_ultimate_boss_killed(_boss: Node) -> void:
 	RunStats.add_kill()
 	if AudioManager:
 		AudioManager.play("hit_explosion", 1.0)
 	_current_boss = null
-	_active_type = -1
 	_hide_boss_hud()
 	## ---- 通关榜：暂存终极 BOSS 战用时（不立即落盘） ----
 	## 停表：计时以本局最后一次 _process 累加值为准（击杀帧的 delta 已计入）
@@ -927,7 +898,7 @@ func _build_hud_layer() -> void:
 	## ---- 左上角进度标签 ----
 	## 位置契约（与 GameHUD 的左上角信息列组成"两列三行"网格，共 6 项）：
 	##   本标签 = 左列第 1 行（x=20, y=14）；GameHUD 侧左列第 2/3 行为 存活时间/击杀数，
-	##   右列第 1/2/3 行为 难度/最高连击/FPS
+	##   右列第 1/2/3 行为 难度/场上怪物数/FPS
 	##   坐标常量定义在 GameHUD.gd 的 TOP_LEFT_*，字号统一 16
 	##   第 4 行（y=92）两列均空置，预留给终局文案（见 STAGE_LABEL_FINAL_POS）
 	## 注意：本标签属于独立 CanvasLayer，与 GameHUD 不共享容器，改动此处务必同步 GameHUD.gd 的 TOP_LEFT_* 常量
@@ -1040,17 +1011,18 @@ func _hide_boss_hud() -> void:
 
 ## ========== 每局重置（前置通知） ==========
 
-## 响应 GameManager.game_started：清空切面状态，重建时间轴
+## 响应 GameManager.game_started：把阶段状态机复位到本局起始阶段
 ## 覆盖所有重开路径（R 键重开/菜单重开/死亡重开）——业务如何重开与本切面无关
+## 起始阶段取自 DifficultyManager.level（autoload 顺序保证其先于本节点完成重置）
 func _on_game_started() -> void:
-	_elapsed = 0.0
-	_timeline = _build_timeline()
-	_event_index = 0
-	_run_completed = false
-	_active_type = -1
-	_wave_enemies.clear()
-	_wave_deadline = 0.0
+	## ---- 阶段状态机复位：起始阶段 == 起始难度（Boss 是唯一的升级门槛） ----
+	_current_stage = clampi(DifficultyManager.level, 1, MAX_STAGE)
+	_stage_phase = StagePhase.MOB_WAVE
+	_wave_fired = false
 	_wave_check_accum = 0.0
+	_wave_enemies.clear()
+	## ---- 其余切面状态复位 ----
+	_run_completed = false
 	_current_boss = null
 	_boss_enraged = false  ## 重置濒死狂暴状态（新局从满血开始）
 	_ultimate_boss_active = false  ## 重置终极 BOSS 战计时（新局未开打）
@@ -1064,7 +1036,7 @@ func _on_game_started() -> void:
 	if _banner_tween != null and _banner_tween.is_valid():
 		_banner_tween.kill()
 	_banner_label.modulate.a = 0.0
-	print("[StageDirector] 进度时间轴已重置：%d 个阶段事件待触发" % _timeline.size())
+	print("[StageDirector] 阶段状态机已复位：起始阶段 %d（难度 %d），等待怪潮开启" % [_current_stage, DifficultyManager.level])
 
 ## ========== 工具方法 ==========
 

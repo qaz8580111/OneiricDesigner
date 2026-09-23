@@ -134,6 +134,7 @@ func heal_core(amount: float) -> void:
 ##     "core": 当前核心血量,
 ##     "max_core": 核心血量上限,
 ##     "is_critical": 是否处于红血状态,
+##     "critical_threshold": 红血阈值百分比（0~1，供 HUD 摆放危险线刻度）,
 ##     "is_invincible": 是否处于无敌状态,
 ##     "is_dead": 是否死亡
 ## }
@@ -145,6 +146,7 @@ func get_survival_state() -> Dictionary:
 		"core": 0.0,           ## 当前核心血量
 		"max_core": 0.0,       ## 核心血量上限
 		"is_critical": false,  ## 是否处于红血状态
+		"critical_threshold": 0.3, ## 红血阈值百分比（0~1）
 		"is_invincible": false,## 是否处于无敌状态
 		"is_dead": false       ## 是否死亡
 	}
@@ -164,6 +166,8 @@ func get_survival_state() -> Dictionary:
 			state["max_core"] = core_health_component.get_max_hp()
 		if core_health_component.has_method("is_critical"):
 			state["is_critical"] = core_health_component.is_critical()
+		if core_health_component.has_method("get_critical_threshold"):
+			state["critical_threshold"] = core_health_component.get_critical_threshold()
 		if core_health_component.has_method("is_invincible"):
 			state["is_invincible"] = core_health_component.is_invincible()
 		if core_health_component.has_method("is_dead"):

@@ -28,6 +28,10 @@ func _on_stack_grown() -> void:
 ## 参数：bullet - 命中的子弹实例（取其飞行方向作为击退方向）；target - 被击退的目标节点
 ## 返回值：无
 ## 设计意图：以子弹_direction为击退方向，对目标施加knockback_force初速并在协程内线性衰减
+## 性能取舍：**刻意不做任何命中视觉**——旧实现每次命中都在世界里 new 一个 Control(ColorRect)
+##           冲击波环 + 一个 Tween，后期子弹密集时每秒新增/销毁数十个节点与 Tween，
+##           节点churn（Control 布局通知 + CanvasItem 重绘）是掉帧主因；本特效的价值在
+##           "把敌人推开"这一实际游戏效果，视觉反馈交由命中音效与敌人受击闪白提供
 func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> void:
 	## 注意：Bullet的成员变量名是_direction（带下划线），属性存在性检查必须用"_direction"
 	if target == null or "_direction" not in bullet:
@@ -39,27 +43,7 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 	if AudioManager:
 		AudioManager.play_2d("fx_knockback", target.global_position, 0.7)
 	
-	## ---------- 视觉：冲击波环 ----------
-	var world: Node2D = target.get_parent() if target.get_parent() else null
-	if world != null:
-		_spawn_shockwave(world, target.global_position)
-	
 	_apply_knockback(target, dir * knockback_force, knockback_duration)
-
-## 冲击波视觉：白色快速扩散环
-## 参数：world - 特效挂载的世界节点；pos - 冲击波中心位置
-func _spawn_shockwave(world: Node2D, pos: Vector2) -> void:
-	var ring := ColorRect.new()
-	ring.size = Vector2(30, 30)
-	ring.position = -ring.size / 2.0
-	ring.color = Color(1, 1, 1, 0.8)
-	ring.global_position = pos
-	world.add_child(ring)
-	var tw: Tween = world.create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(ring, "scale", Vector2(2.4, 2.4), 0.2)
-	tw.tween_property(ring, "modulate:a", 0.0, 0.2)
-	tw.chain().tween_callback(ring.queue_free)
 
 ## 击退协程：驱动目标位移并线性衰减击退速度
 ## 参数：target - 被击退目标（须实现move_and_slide）；force - 初始击退速度向量；dur - 击退总时长（秒）

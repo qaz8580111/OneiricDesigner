@@ -5,7 +5,7 @@
 ##        ↔ user://settings.cfg（_save/_load持久化）↔ AudioServer/DisplayServer/DifficultyManager（_apply_settings生效）
 ## 功能完整性说明：
 ##   1. 所有 UI 文本（标签、标题、难度名称）均走 TranslationManager 翻译
-##   2. 游戏性：难度设置 → DifficultyManager.apply_start_offset(base_level)
+##   2. 游戏性：难度设置 → DifficultyManager.set_start_level(起始阶段)
 ##            FPS显示 → 存入配置，HUD启动时读取并动态创建FPS标签
 ##            自动射击 → Player.set_auto_shoot() 运行中实时生效
 ##   3. 音频：主/音乐/音效三路音量，实时同步 AudioServer 总线 + AudioManager 内部 sfx/music 音量
@@ -160,14 +160,14 @@ var DIFFICULTY_KEYS: Array = [
 	"DIFFICULTY_EXPERT"
 ]
 
-## 难度起始等级映射表：
-## 将 4 档难度选择 → 实际 DifficultyManager 起始等级偏移
-## 设计意图：简单/普通/困难/专家 四档，分别对应开局不同的敌人强度基准
+## 难度起始阶段映射表：
+## 将 4 档难度选择 → 实际 DifficultyManager 起始阶段（难度与阶段强绑定，同一件事）
+## 设计意图：选哪档就从对应阶段开局——该阶段之前的守门 Boss 全部视为已通过
 var DIFFICULTY_START_LEVELS: Array[int] = [
-	1,  # Easy  → 难度1起步（新手友好，敌人弱）
-	2,  # Normal→ 难度2起步（标准体验）
-	4,  # Hard  → 难度4起步（敌人强度显著提高）
-	7   # Expert→ 难度7起步（高难度挑战，开局怪就很猛）
+	1,  # Easy  → 起始阶段1（新手友好，从第1个守门者打起）
+	2,  # Normal→ 起始阶段2（标准体验，第1个守门者视为已通过）
+	4,  # Hard  → 起始阶段4（开局敌人强度显著提高，前3个守门者视为已通过）
+	7   # Expert→ 起始阶段7（高难度挑战，前6个守门者视为已通过）
 ]
 
 ## 语言选项列表（供玩家选择的游戏语言）
@@ -648,11 +648,11 @@ func _apply_window_size_safely(target_size: Vector2i) -> void:
 	## 居中到屏幕可用区域内，确保窗口四边（尤其是底部）都在可见范围内
 	win.position = usable.position + (usable.size - safe_size) / 2
 
-	## ---- 5) 难度：将选择的难度档映射为起始等级，通知 DifficultyManager ----
+	## ---- 5) 难度：将选择的难度档映射为起始阶段，通知 DifficultyManager ----
 	## 下次开始新游戏时，DifficultyManager._on_game_started() 会读取 user://settings.cfg
-	## 的 difficulty 值并应用为起始等级。这里也发一次信号给可能存在的 Main.gd
+	## 的 difficulty 值并应用为起始阶段。这里也发一次信号给可能存在的 Main.gd
 	if DifficultyManager:
-		## 把当前选择档 (0~3) → 起始等级
+		## 把当前选择档 (0~3) → 起始阶段
 		var start_level: int = DIFFICULTY_START_LEVELS[clamp(difficulty, 0, DIFFICULTY_START_LEVELS.size() - 1)]
 		DifficultyManager.set_start_level(start_level)
 

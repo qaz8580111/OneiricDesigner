@@ -6,7 +6,7 @@
 ##      （升级三选一期间禁止再叠加暂停菜单）；暂停菜单打开时按ESC走导航器取消 = 继续游戏
 extends Control
 
-## 图标加载库（状态面板显示属性/技能/护盾/构型图标用）
+## 图标加载库（状态面板显示核心血/属性/技能/护盾/构型图标用）
 const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
 ## 暂停菜单必须在暂停状态下仍能处理输入，需要 ALWAYS 模式
@@ -235,7 +235,7 @@ func _close_status_panel() -> void:
 	if _navigator != null and _navigator.has_method("refresh_controls"):
 		_navigator.refresh_controls()
 
-## 刷新状态列表：清空后按"属性/技能/护盾/构型"四组逐行填充
+## 刷新状态列表：清空后按"核心血/属性/技能/护盾/构型"五组逐行填充
 func _refresh_status_list() -> void:
 	if _status_rows == null:
 		return
@@ -247,6 +247,12 @@ func _refresh_status_list() -> void:
 	var acquired: Array = []
 	if UpgradeManager:
 		acquired = UpgradeManager.get_acquired_upgrades()
+
+	## 核心血组（玩家基础生存值：当前/上限）
+	## 设计意图：核心血上限会被"梦境之心"等词条提升，但此前面板只列词条、不列结果值，
+	##           玩家看不到"上限真的变大了"；补这一行让血量成长像伤害/护盾一样有具体数字
+	_add_status_header(TranslationManager.t("STATUS_HEALTH"))
+	_add_core_health_row()
 
 	## 属性组（is_effect=false 的纯数值词条）
 	_add_status_header(TranslationManager.t("STATUS_ATTR"))
@@ -278,7 +284,7 @@ func _refresh_status_list() -> void:
 	_add_status_header(TranslationManager.t("STATUS_PATTERN"))
 	_add_pattern_row()
 
-## 添加分组标题（属性/技能/护盾/构型）
+## 添加分组标题（核心血/属性/技能/护盾/构型）
 func _add_status_header(text: String) -> void:
 	var label := Label.new()
 	label.text = text
@@ -303,6 +309,27 @@ func _add_upgrade_row(info: Dictionary) -> void:
 	var level_text: String = "Lv.%d/%d" % [int(info.get("stacks", 1)), int(info.get("max_stacks", 5))]
 	var desc: String = String(info.get("description", ""))
 	_add_status_row(icon_tex, _rarity_color(rarity), String(info.get("name", "")), level_text, desc)
+
+## 添加核心血行（显示玩家核心血"当前/上限"，数据源 Player.get_survival_state()）
+## 说明：核心血是混合生命系统的最后一层（前两层为装备护盾、分段护盾），
+##       本行只反映结果值，不参与任何数值计算；描述位留空（血量红血警示已由 HUD 血条承担）
+func _add_core_health_row() -> void:
+	var state: Dictionary = {}
+	var players: Array = get_tree().get_nodes_in_group("player")
+	if players.size() > 0 and players[0].has_method("get_survival_state"):
+		state = players[0].get_survival_state()
+
+	## 玩家不存在或控制器缺失：与护盾/构型一致走空提示，不报错
+	if state.is_empty():
+		_add_status_empty()
+		return
+
+	var core_hp: int = int(round(float(state.get("core", 0.0))))
+	var max_core: int = int(round(float(state.get("max_core", 0.0))))
+	## 图标复用血量上限词条图（白色普通目录的 icon_upg_max_hp）；色块取血量条同款红
+	var icon_tex: Texture2D = IconLibraryLib.get_upgrade_icon("upg_max_hp", 0)
+	_add_status_row(icon_tex, Color(1.0, 0.4, 0.4), TranslationManager.t("STATUS_HEALTH"),
+		"%d/%d" % [core_hp, max_core], "")
 
 ## 添加护盾行（未装备时显示空提示）
 func _add_shield_row() -> void:

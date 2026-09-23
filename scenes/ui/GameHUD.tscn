@@ -7,21 +7,24 @@
 ;
 ; 场景结构：
 ;   GameHUD (Control) - 全屏覆盖
-;   ├── BottomStatusRow (HBoxContainer) - 屏幕正下方一行：血量条 | 护盾条 | 碎片数
-;   │   ├── HealthBar (ProgressBar) - 血量条
+;   ├── BottomStatusRow (HBoxContainer) - 屏幕正下方一行：血量组 | 护盾条 | 碎片数
+;   │   ├── HealthGroup (HBoxContainer) - 血条与血量数值成组（护盾条插入时不拆散）
+;   │   │   ├── HealthBar (ProgressBar) - 血量条（show_percentage=false，不显示百分比）
+;   │   │   │   └── CriticalMarker (ColorRect) - 红血阈值刻度线（危险线，锚点=阈值百分比）
+;   │   │   └── HealthValueLabel (Label) - 血量数值"当前/上限"（如 175/225）
 ;   │   └── FragmentLabel (Label) - 梦境碎片数量
 ;   └── DiffLabel (Label) - 难度等级（左上角右列第 1 行）
 ;
 ; 以下UI由 GameHUD.gd 代码动态创建（不在本场景文件中）：
-;   底部图标栏（属性/技能/护盾三组，屏幕底部、底部状态行上方）
+;   底部图标栏（属性/技能/护盾/构型四组，屏幕底部、底部状态行上方）
 ;   护盾显示（名称+耐久条，运行时插入 BottomStatusRow，排在血条与碎片数之间）
-;   左上角信息列（存活时间/击杀数/最高连击，见下方排版契约）
+;   左上角信息列（存活时间/击杀数/场上怪物数，见下方排版契约）
 ;   FPS标签（左上角右列第 3 行，settings.cfg 开启 show_fps 后显示）
 ;
 ; 左上角"两列三行"排版契约（跨脚本，需与 StageDirector 的 _stage_label 保持一致）：
 ;           左列 x=20            右列 x=220
 ;   y=14    阶段 N/10（StageDirector）  难度 1（DiffLabel）
-;   y=40    ⏱ 时间（脚本）             🔥 最高连击（脚本）
+;   y=40    ⏱ 时间（脚本）             👾 场上怪物数（脚本）
 ;   y=66    💀 击杀数（脚本）           FPS: 60（脚本，可选）
 ;   行高 26，全部项目统一字号 16
 ;   对应 GameHUD.gd 的 TOP_LEFT_X / TOP_LEFT_COL_W / TOP_LEFT_START_Y / TOP_LEFT_LINE_H / TOP_LEFT_FONT_SIZE
@@ -66,16 +69,55 @@ theme_override_constants/separation = 16
 mouse_filter = 2
 
 ; ------------------------------ 血量显示 ------------------------------
-; HealthBar (ProgressBar) - 玩家血量条（底部状态行内，容器负责排布，故用 custom_minimum_size）
-; size_flags_vertical=4（SIZE_SHRINK_CENTER）：保持 20px 高度并在行内垂直居中
+; HealthGroup (HBoxContainer) - 把"血条 + 血量数值"捆成一组
+; 设计意图：BottomStatusRow 内护盾面板运行时会 move_child 到索引 1，
+;           若数值 Label 直接与血条平级会被盾条挤开，故用子容器保证二者始终相邻
+; size_flags_vertical=4（SIZE_SHRINK_CENTER）：整组在状态行内垂直居中
+[node name="HealthGroup" type="HBoxContainer" parent="BottomStatusRow"]
+size_flags_vertical = 4
+theme_override_constants/separation = 8
+mouse_filter = 2
+
+; HealthBar (ProgressBar) - 玩家血量条（不含引擎自带的百分比文字）
+; show_percentage=false：改用右侧 HealthValueLabel 显示裸数值（175/225），
+;   与护盾/伤害/加成的数值口径一致，避免"血量是全长条唯一百分比"的抽象感
 ; tint_over=红色：血量部分颜色，tint_under=灰色半透明：背景颜色
-[node name="HealthBar" type="ProgressBar" parent="BottomStatusRow"]
+[node name="HealthBar" type="ProgressBar" parent="BottomStatusRow/HealthGroup"]
 custom_minimum_size = Vector2(200, 20)
 size_flags_vertical = 4
 max_value = 100.0
 value = 100.0
+show_percentage = false
 tint_over = Color(1, 0.2, 0.2, 1)
 tint_under = Color(0.3, 0.3, 0.3, 0.5)
+
+; CriticalMarker (ColorRect) - 红血阈值刻度线（"危险线"）
+; 设计意图：让玩家看见红线在哪——血量跌破此线即进入红血，条与数字同时转警示色并呼吸闪烁
+; anchor_left/right 由 GameHUD._sync_critical_marker() 写入（阈值来自 CoreHealthData.critical_threshold）
+; offset_left=-1 / offset_right=1：把 0 宽锚点撑成 2px 竖线；anchor_bottom=1.0：满高
+; color=金色半透明：常态下是"刻度"，进入红血后由脚本做透明度呼吸
+; mouse_filter=2：纯装饰，不参与鼠标事件
+[node name="CriticalMarker" type="ColorRect" parent="BottomStatusRow/HealthGroup/HealthBar"]
+anchor_left = 0.3
+anchor_right = 0.3
+anchor_bottom = 1.0
+offset_left = -1.0
+offset_right = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(1, 0.85, 0.25, 0.7)
+mouse_filter = 2
+
+; HealthValueLabel (Label) - 核心血数值 "当前/上限"
+; custom_minimum_size 固定宽度：位数变化（100→1000）时不引起整行左右抖动
+; 红血时由脚本转为警示色（与血条同步）
+[node name="HealthValueLabel" type="Label" parent="BottomStatusRow/HealthGroup"]
+custom_minimum_size = Vector2(80, 20)
+size_flags_vertical = 4
+text = "100/100"
+horizontal_alignment = 1
+vertical_alignment = 1
+theme_override_colors/font_color = Color(1, 0.85, 0.85, 1)
 
 ; ------------------------------ 梦境碎片显示 ------------------------------
 ; FragmentLabel (Label) - 梦境碎片数量（底部状态行最右侧）

@@ -35,9 +35,14 @@ LeaderboardManager="*res://scripts/autoload/LeaderboardManager.gd"
 
 [display]
 
-; 默认分辨率1920x1280
+; 默认分辨率1920x1280（设计基准，UI/竞技场均按此尺寸设计）
 window/size/viewport_width=1920
 window/size/viewport_height=1280
+; 内容等比缩放：canvas_items模式下2D内容按基准分辨率等比缩放，
+; 任何窗口尺寸下UI/世界都不再溢出或错位（消除"人物错位/HUD过大/UI不美观"）
+window/stretch/mode="canvas_items"
+; expand：保持等比不拉伸，并按窗口宽高比扩展可视区域（无黑边，边缘锚定UI自动贴合）
+window/stretch/aspect="expand"
 
 [physics]
 
