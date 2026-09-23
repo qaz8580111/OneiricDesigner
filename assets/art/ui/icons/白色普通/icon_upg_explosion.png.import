@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://icon0012x"
-path="res://.godot/imported/icon_upg_frozen.png-a342a1515d5082341c4585a7655c53f7.ctex"
+uid="uid://cwf6s735m3pq8"
+path="res://.godot/imported/icon_upg_explosion.png-d2def507b0e8987841e7be560ab81570.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/art/ui/icons/蓝色稀有/icon_upg_frozen.png"
-dest_files=["res://.godot/imported/icon_upg_frozen.png-a342a1515d5082341c4585a7655c53f7.ctex"]
+source_file="res://assets/art/ui/icons/白色普通/icon_upg_explosion.png"
+dest_files=["res://.godot/imported/icon_upg_explosion.png-d2def507b0e8987841e7be560ab81570.ctex"]
 
 [params]
 
@@ -36,5 +36,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=128
+process/size_limit=0
 detect_3d/compress_to=1

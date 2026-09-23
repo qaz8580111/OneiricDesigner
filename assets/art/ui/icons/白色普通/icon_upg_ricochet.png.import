@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://icon0011x"
-path="res://.godot/imported/icon_upg_curse.png-2dcd08becb761d40c937dd1648417007.ctex"
+uid="uid://d3d6n5ebgtrsv"
+path="res://.godot/imported/icon_upg_ricochet.png-2a2b1c7cc0b468e853589b0d1856189c.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/art/ui/icons/蓝色稀有/icon_upg_curse.png"
-dest_files=["res://.godot/imported/icon_upg_curse.png-2dcd08becb761d40c937dd1648417007.ctex"]
+source_file="res://assets/art/ui/icons/白色普通/icon_upg_ricochet.png"
+dest_files=["res://.godot/imported/icon_upg_ricochet.png-2a2b1c7cc0b468e853589b0d1856189c.ctex"]
 
 [params]
 
@@ -36,5 +36,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=128
+process/size_limit=0
 detect_3d/compress_to=1

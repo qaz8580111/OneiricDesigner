@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://icon002ax"
-path="res://.godot/imported/icon_upg_chainlightning.png-6776571123cc4cdf5ab7ffa001499d0e.ctex"
+uid="uid://dur8rp3lpxq7j"
+path="res://.godot/imported/icon_upg_lifesteal.png-a386d73dbcc37401e2f2984c97180f3e.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/art/ui/icons/紫色史诗/icon_upg_chainlightning.png"
-dest_files=["res://.godot/imported/icon_upg_chainlightning.png-6776571123cc4cdf5ab7ffa001499d0e.ctex"]
+source_file="res://assets/art/ui/icons/白色普通/icon_upg_lifesteal.png"
+dest_files=["res://.godot/imported/icon_upg_lifesteal.png-a386d73dbcc37401e2f2984c97180f3e.ctex"]
 
 [params]
 
@@ -36,5 +36,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=128
+process/size_limit=0
 detect_3d/compress_to=1

@@ -8,6 +8,7 @@ script = ExtResource("1")
 upgrade_id = "upg_curse"
 display_name = "噩梦印记"
 description = "命中诅咒敌人4秒，其间其攻击伤害降低50%；每级再降5%、持续+0.5秒"
-rarity = 1
+; 稀有度：暂统一为普通（0），后续再按技能强度重新分级
+rarity = 0
 max_stacks = 5
 bullet_effect = ExtResource("2")

@@ -8,6 +8,8 @@
 ##   3. 支持R键快捷重开，减少重开摩擦
 ##   4. 同一面板复用两种收尾：玩家死亡（victory=false）与击败终极BOSS通关（victory=true），
 ##      差异仅在标题文案与配色——两条收尾链路的统计数据、按钮行为完全一致
+##   5. 昵称输入框两种场景都可用：通关（计入通关榜）/ 无尽模式死亡（计入登塔榜），
+##      由 pending_classic_time / pending_tower_floor 是否存在决定是否构建
 ## 数据流：RunStats单例（各系统上报）→ _build_stats_text() → 结算展示；
 ##        restart_requested / back_to_menu_requested → Main.gd 监听后执行重开或切换主菜单
 extends Control
@@ -32,6 +34,12 @@ var victory: bool = false
 ## ≥ 0 = 有待提交成绩（通关结算路径），面板展示 LineEdit 让玩家输入昵称，
 ## 按钮回调时调 LeaderboardManager.commit_pending_classic_time 落盘
 var pending_classic_time: float = -1.0
+
+## 待落盘的登塔成绩（由 Main.gd 在 add_child 之前从 LeaderboardManager 取暂存值注入）
+## < 1 = 无待提交成绩（本局未登塔/非无尽模式），面板不展示昵称输入框；
+## ≥ 1 = 有待提交成绩（无尽模式死亡且已登塔），面板展示 LineEdit 让玩家输入昵称，
+## 按钮回调时调 LeaderboardManager.commit_pending_tower_floor 落盘
+var pending_tower_floor: int = -1
 
 ## 统计文本标签引用（R键重开时需要判断面板是否已显示）
 var _stats_label: Label = null
@@ -132,10 +140,10 @@ func _ready() -> void:
 	## 保存引用（供判断构建状态）
 	_stats_label = stats
 
-	## ---------- 昵称输入区（仅通关结算路径构建） ----------
-	## 设计意图：通关玩家可在结算面板留下姓名，写入排行榜；
-	##              死亡结算路径 pending_classic_time < 0 不构建，保持原布局不变
-	if pending_classic_time >= 0.0:
+	## ---------- 昵称输入区（通关 / 无尽模式死亡两种待提交成绩时构建） ----------
+	## 设计意图：玩家可在结算面板留下姓名，写入对应排行榜（通关榜 / 登塔榜）；
+	##          无待提交成绩（如通关模式死亡）时不构建，保持原布局不变
+	if _has_pending_entry():
 		_build_nickname_input(vbox)
 
 	## ---------- 按钮水平排列 ----------
@@ -247,6 +255,7 @@ func _activate_current() -> void:
 ## 从RunStats构建本局统计文本
 ## 返回：多行统计文本（存活时间/击杀/碎片/难度/词条数）
 ##       通关结算路径额外追加"终极BOSS战用时"行（数据来自 pending_classic_time）
+##       无尽模式死亡结算额外追加"最终登塔"行（数据来自 pending_tower_floor）
 func _build_stats_text() -> String:
 	## 数据流：RunStats单例（各系统上报）→ 此方法 → 展示
 	var lines: Array[String] = []
@@ -258,9 +267,17 @@ func _build_stats_text() -> String:
 	## 通关结算路径追加 BOSS 战用时（待落盘的成绩，由 StageDirector 暂存）
 	if pending_classic_time >= 0.0:
 		lines.append("终极BOSS战用时：%s" % LeaderboardManager.format_time(pending_classic_time))
+	## 无尽模式死亡结算追加最终登塔层数（待落盘的成绩，由 Main 暂存）
+	if pending_tower_floor >= 1:
+		lines.append("最终登塔：第 %d 层" % pending_tower_floor)
 	return "\n".join(lines)
 
-## 构建昵称输入区（仅通关结算路径调用）
+## 是否存在待提交的成绩（决定是否构建昵称输入框）
+## 返回：true=通关榜或登塔榜有待落盘成绩
+func _has_pending_entry() -> bool:
+	return pending_classic_time >= 0.0 or pending_tower_floor >= 1
+
+## 构建昵称输入区（通关 / 无尽模式死亡两种待提交成绩时调用）
 ## 参数：parent - 父容器（vbox）
 ## 设计意图：用一个垂直容器包"提示+输入框"，保持水平居中布局；
 ##              LineEdit 默认填"佚名"，玩家可清空后输入自己的昵称
@@ -273,8 +290,12 @@ func _build_nickname_input(parent: Container) -> void:
 	parent.add_child(nick_vbox)
 
 	## ---------- 昵称输入提示标签 ----------
+	## 提示文案随榜单来源变化，让玩家明确本次成绩进的是哪个榜
 	_nickname_hint = Label.new()
-	_nickname_hint.text = "留下你的昵称（计入通关榜）："
+	if pending_classic_time >= 0.0:
+		_nickname_hint.text = "留下你的昵称（计入通关榜）："
+	else:
+		_nickname_hint.text = "留下你的昵称（计入登塔榜）："
 	_nickname_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_nickname_hint.add_theme_color_override("font_color", Color(0.95, 0.85, 0.55))
 	nick_vbox.add_child(_nickname_hint)
@@ -329,19 +350,22 @@ func _on_nickname_text_submitted(_new_text: String) -> void:
 		## 副作用：按下回车后键盘事件重新走 _process 的导航逻辑
 		_nickname_edit.release_focus()
 
-## 内部辅助：如果面板有待提交的通关成绩，调 LeaderboardManager 落盘
+## 内部辅助：如果面板有待提交成绩，调 LeaderboardManager 落盘到对应榜单
 ## 防重入：用 _nickname_committed flag 保证一局成绩只 commit 一次
 ## 设计意图：玩家在面板上点"再来一局"和"返回主菜单"都可能触发（理论上只会点一个），
 ##              若两个按钮都点了（极端情况下信号重入），flag 防止重复写入
 func _commit_pending_nickname_if_any() -> void:
-	## 无 pending 或已提交：直接返回
-	if pending_classic_time < 0.0 or _nickname_committed:
+	## 已提交或本局无成绩：直接返回
+	if _nickname_committed or not _has_pending_entry():
 		return
 	## 读取玩家输入的昵称（LineEdit 一定已被构建，但兜底判空）
 	var nickname: String = ""
 	if _nickname_edit != null:
 		nickname = _nickname_edit.text
-	## 落盘：commit_pending_classic_time 内部会调用 _sanitize_nickname 处理空/超长
-	LeaderboardManager.commit_pending_classic_time(nickname)
+	## 落盘到对应榜单：commit_pending_* 内部会调 _sanitize_nickname 处理空/超长
+	if pending_classic_time >= 0.0:
+		LeaderboardManager.commit_pending_classic_time(nickname)
+	else:
+		LeaderboardManager.commit_pending_tower_floor(nickname)
 	## 标记已提交，防止重复写入
 	_nickname_committed = true

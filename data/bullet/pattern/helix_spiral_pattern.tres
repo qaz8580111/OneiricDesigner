@@ -1,0 +1,22 @@
+; ==============================================================================
+; helix_spiral_pattern.tres - 螺旋扫射弹道构型
+; 职责：沿瞄准方向起手，按 0.06s 间隔连射 5 发，每发角度递增 10°（总扫过 40°）
+; 所属脚本：res://scripts/resources/bullet/pattern/HelixSpiralPattern.gd
+; 参数说明：单发伤害 ×0.5 做分摊、速度 ×1.0；后续弹以 delay 延迟生成，
+;           发射原点取开火时刻位置（与连发构型一致），故弹道呈扇形扫过而非跟随
+; ==============================================================================
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/pattern/HelixSpiralPattern.gd" id="1"]
+
+[resource type="HelixSpiralPattern" script_class="HelixSpiralPattern"]
+script = ExtResource("1")
+pattern_id = "helix_spiral"
+display_name = "螺旋扫射"
+description = "沿瞄准方向起手，按0.06s间隔连射5发、每发递增10°（总扫过40°）。单发伤害×0.5、速度×1.0。适合驱散横向移动的敌群，对固定单体的命中数取决于走位。"
+shot_count = 5
+shot_interval = 0.06
+angle_step = 10.0
+start_angle_offset = 0.0
+damage_mult = 0.5
+speed_mult = 1.0

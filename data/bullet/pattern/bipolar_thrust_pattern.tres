@@ -1,0 +1,21 @@
+; ==============================================================================
+; bipolar_thrust_pattern.tres - 双向突刺弹道构型
+; 职责：正前方 2 发（12° 张角）+ 正后方 1 发（24° 张角）同时成弹，兼顾输出与背身自保
+; 所属脚本：res://scripts/resources/bullet/pattern/BipolarThrustPattern.gd
+; 参数说明：单发伤害 ×0.7 做分摊、速度 ×1.0；发射器逐个设置阵营，后向弹不会误伤
+; ==============================================================================
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/bullet/pattern/BipolarThrustPattern.gd" id="1"]
+
+[resource type="BipolarThrustPattern" script_class="BipolarThrustPattern"]
+script = ExtResource("1")
+pattern_id = "bipolar_thrust"
+display_name = "双向突刺"
+description = "正前方扇形射出2发（12°张角），同时向正后方射出1发（24°张角）。单发伤害×0.7、速度×1.0。被包夹时无需转身即有还手手段。"
+forward_count = 2
+forward_spread = 12.0
+backward_count = 1
+backward_spread = 24.0
+damage_mult = 0.7
+speed_mult = 1.0

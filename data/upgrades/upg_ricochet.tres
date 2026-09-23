@@ -8,6 +8,7 @@ script = ExtResource("1")
 upgrade_id = "upg_ricochet"
 display_name = "回旋弹射"
 description = "子弹可弹射2次飞向其他敌人（每次伤害-20%）；每级弹射+1次、范围+30"
-rarity = 1
+; 稀有度：暂统一为普通（0），后续再按技能强度重新分级
+rarity = 0
 max_stacks = 5
 bullet_effect = ExtResource("2")

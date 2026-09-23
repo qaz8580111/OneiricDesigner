@@ -262,9 +262,12 @@ func _show_game_over_panel(victory: bool = false) -> void:
 	active_ui.victory = victory
 	## 通关结算时把 LeaderboardManager 暂存的通关用时注入面板：
 	## 面板据此决定是否展示昵称输入框，以及按钮回调时调 commit_pending_classic_time 落盘
-	## 死亡结算路径无 pending（LeaderboardManager._pending_classic_time 为 -1.0），面板不展示输入框
+	## 无尽模式死亡结算同样注入暂存的登塔层数：面板改调 commit_pending_tower_floor 落盘
+	## 两条路径都无 pending 时（如通关模式死亡，无榜单记录）面板不展示输入框
 	if victory and LeaderboardManager.has_pending_classic_time():
 		active_ui.pending_classic_time = LeaderboardManager.get_pending_classic_time()
+	if LeaderboardManager.has_pending_tower_floor():
+		active_ui.pending_tower_floor = LeaderboardManager.get_pending_tower_floor()
 	## 面板必须ALWAYS处理模式（死亡瞬间场景树可能仍处于暂停）
 	active_ui.process_mode = Node.PROCESS_MODE_ALWAYS
 	## 连接结算面板信号：再来一局 / 返回主菜单
@@ -467,11 +470,12 @@ func _on_game_started() -> void:
 func _on_game_ended() -> void:
 	## 设置当前屏幕状态为GAME_OVER
 	current_screen = Screen.GAME_OVER
-	## ---------- 无尽榜：记录本局最终登塔层数 ----------
-	## 只在无尽模式写榜（通关模式没有登塔概念）；
-	## record_tower_floor 内部对 floor<1（难度10前就阵亡，本局未登塔）自保护，不会污染榜单
+	## ---------- 无尽榜：暂存本局最终登塔层数（等玩家在结算面板输入昵称后落盘） ----------
+	## 只在无尽模式暂存（通关模式没有登塔概念）；
+	## set_pending_tower_floor 内部对 floor<1（难度10前就阵亡，本局未登塔）自保护，
+	## 不产生成绩也不会污染榜单，同时结算面板据此判断是否展示昵称输入框
 	if GameManager.current_mode == GameManager.RunMode.ENDLESS:
-		LeaderboardManager.record_tower_floor(TowerManager.get_current_floor())
+		LeaderboardManager.set_pending_tower_floor(TowerManager.get_current_floor())
 	## 播放游戏结束音效（全局播放，宣告死亡）
 	if AudioManager:
 		AudioManager.play("game_over", 0.9)

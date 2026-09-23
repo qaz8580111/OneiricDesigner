@@ -5,13 +5,15 @@
 ##   1. 双榜独立：两个模式各有自己的榜与排序规则，互不影响（同一份存档文件分节存储）
 ##   2. 只留前 N 名：榜单长度恒定，避免存档无限膨胀；写入即排序，读取即成品
 ##   3. 数据与展示分离：本类只存数值与日期与昵称，格式化/分页/切换交给 LeaderboardPanel
-##   4. 通关昵称两段写入：BOSS 死亡 → 暂存成绩到 _pending_classic_time（不落盘）
-##      → 玩家在结算面板输入昵称后调用 commit_pending_classic_time 落盘
-##      （若玩家直接退出/关游戏，pending 数据丢失；登塔榜走老路径，死亡时无昵称输入环节）
+##   4. 昵称两段写入（两榜一致）：成绩产生 → 暂存到 _pending_*（不落盘）
+##      → 玩家在结算面板输入昵称后调用 commit_pending_* 落盘
+##      - 通关榜：终极BOSS死亡 → set_pending_classic_time
+##      - 登塔榜：无尽模式玩家死亡 → set_pending_tower_floor
+##      （若玩家直接退出/关游戏，pending 数据丢失——有意设计：避免"昵称未输入就残留半截记录"）
 ##   5. 历史数据兼容：旧存档没有 nickname 字段，_sanitize_* 一律补默认值 "佚名"
-## 数据流：终极BOSS被击败 → StageDirector 调 set_pending_classic_time（暂存） →
-##         GameOverPanel 玩家输入昵称 → commit_pending_classic_time（落盘）
-##         玩家死亡 → Main 调 record_tower_floor（立即落盘，昵称留 "佚名"）
+## 数据流：终极BOSS被击败 → StageDirector 调 set_pending_classic_time（暂存）
+##         无尽模式玩家死亡 → Main 调 set_pending_tower_floor（暂存）
+##         GameOverPanel 玩家输入昵称 → commit_pending_*（落盘）
 ##         两者均写盘（user://leaderboard.cfg）→ LeaderboardPanel 读取展示
 extends Node
 
@@ -52,6 +54,11 @@ var tower_floors: Array = []
 ## commit_pending_classic_time 正式落盘。<0 表示无待提交成绩（pending 数据只在内存中，
 ## 关游戏即丢失——这是有意设计：避免"昵称未输入就残留半截记录"污染榜单）
 var _pending_classic_time: float = -1.0
+
+## 登塔成绩待写入暂存：无尽模式玩家死亡时由 set_pending_tower_floor 写入，玩家输入昵称后由
+## commit_pending_tower_floor 正式落盘。<1 表示无待提交成绩（本局未登塔，没有成绩可写）
+## 设计意图：与通关榜保持完全一致的"先暂存、后落盘"两段式，让死亡结算也能输入昵称
+var _pending_tower_floor: int = -1
 
 ## ========== 生命周期方法 ==========
 
@@ -101,6 +108,45 @@ func commit_pending_classic_time(nickname: String) -> int:
 func cancel_pending_classic_time() -> void:
 	_pending_classic_time = -1.0
 
+## ---------- 登塔榜：同样的两段式（暂存 → 昵称落盘） ----------
+
+## 暂存登塔成绩（不落盘）—— Main 在无尽模式玩家死亡时调用
+## 设计意图：与通关榜一致，无尽模式死亡后也由玩家在结算面板输入昵称再落盘；
+##          本方法只把最终层数存到内存变量，等玩家输入昵称后由
+##          GameOverPanel 调 commit_pending_tower_floor(nickname) 正式落盘
+## 参数：floor - 本局最终登塔层数（<1 表示未登塔，不产生成绩，忽略本次暂存）
+## 副作用：清空旧 pending（覆盖式暂存；同帧多次调用以最后一次为准）
+func set_pending_tower_floor(floor: int) -> void:
+	## 未登塔（通关前阵亡）没有成绩可写：保持无 pending，结算面板不会展示昵称输入框
+	if floor < 1:
+		return
+	_pending_tower_floor = floor
+	print("[LeaderboardManager] 暂存待写入登塔成绩：第 %d 层（等待玩家输入昵称后落盘）" % floor)
+
+## 查询是否有待写入的登塔成绩（GameOverPanel 据此判断是否展示昵称输入框）
+## 返回：true=有待提交成绩（应展示输入框），false=无（按普通结算流程走）
+func has_pending_tower_floor() -> bool:
+	return _pending_tower_floor >= 1
+
+## 获取暂存的登塔成绩（GameOverPanel 用作 UI 展示："最终登塔 第 N 层"）
+## 返回：暂存层数；无暂存返回 -1
+func get_pending_tower_floor() -> int:
+	return _pending_tower_floor
+
+## 玩家输入昵称后正式落盘 —— GameOverPanel 在玩家点击"再来一局"/"返回主菜单"时调用
+## 参数：nickname - 玩家在结算面板输入的昵称（空/超长会被规整为默认值或截断）
+## 返回：本次成绩的排名（1~MAX_ENTRIES）；未进榜返回 0；无 pending 返回 0
+## 副作用：写入 tower_floors → 排序 → 截断 → 落盘 → 清空 pending → 发出 leaderboard_updated
+func commit_pending_tower_floor(nickname: String) -> int:
+	## 无暂存成绩时静默返回（兜底，避免空写入）
+	if _pending_tower_floor < 1:
+		return 0
+	## 复用 record_tower_floor 走完整的写入+排序+截断+落盘流程
+	var rank: int = record_tower_floor(_pending_tower_floor, nickname)
+	## 提交完成后立即清空 pending，防止玩家在结算面板上重复点击按钮重复写入
+	_pending_tower_floor = -1
+	return rank
+
 ## 上报一次通关成绩（终极BOSS战用时）
 ## 参数：seconds - 从终极BOSS登场到被击杀的用时（秒）
 ##       nickname - 玩家昵称（空字符串/超长会被规整）
@@ -126,8 +172,9 @@ func record_classic_time(seconds: float, nickname: String = DEFAULT_NICKNAME) ->
 
 ## 上报一次登塔成绩（玩家死亡时的最终层数）
 ## 参数：floor - 最终登塔层数（<1 视为未登塔，不记录）
-##       nickname - 玩家昵称（死亡结算路径目前不输入昵称，默认 "佚名"；保留接口对称性）
+##       nickname - 玩家昵称（空字符串/超长会被规整）
 ## 返回：本次成绩的排名（1~MAX_ENTRIES）；未进榜返回 0
+## 说明：正式调用路径为 commit_pending_tower_floor(nickname)（玩家在结算面板输入昵称后触发）
 func record_tower_floor(floor: int, nickname: String = DEFAULT_NICKNAME) -> int:
 	## 未登塔的局不计入登塔榜（通关模式死亡、难度10前死亡都走这里）
 	if floor < 1:

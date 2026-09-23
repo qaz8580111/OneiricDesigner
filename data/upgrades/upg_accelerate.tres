@@ -8,6 +8,7 @@ script = ExtResource("1")
 upgrade_id = "upg_accelerate"
 display_name = "超频引擎"
 description = "子弹随飞行距离不断加速（每秒+60，最高3倍原速）；每级加速度+20、上限+0.4倍"
-rarity = 1
+; 稀有度：暂统一为普通（0），后续再按技能强度重新分级
+rarity = 0
 max_stacks = 5
 bullet_effect = ExtResource("2")

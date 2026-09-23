@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://icon0013x"
-path="res://.godot/imported/icon_upg_homing.png-8058ca8995531449324fd3ce47b2f69b.ctex"
+uid="uid://ch0ohrkje5no5"
+path="res://.godot/imported/icon_upg_frozen.png-966166496937cca80ce4a80c6467c5b2.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/art/ui/icons/蓝色稀有/icon_upg_homing.png"
-dest_files=["res://.godot/imported/icon_upg_homing.png-8058ca8995531449324fd3ce47b2f69b.ctex"]
+source_file="res://assets/art/ui/icons/白色普通/icon_upg_frozen.png"
+dest_files=["res://.godot/imported/icon_upg_frozen.png-966166496937cca80ce4a80c6467c5b2.ctex"]
 
 [params]
 
@@ -36,5 +36,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=128
+process/size_limit=0
 detect_3d/compress_to=1

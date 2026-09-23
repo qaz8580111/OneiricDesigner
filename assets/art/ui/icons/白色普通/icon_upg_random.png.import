@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://icon0021x"
-path="res://.godot/imported/icon_upg_split.png-0cdb880fd2c153b709a9e943290a2e2e.ctex"
+uid="uid://darqmi3hwtkb7"
+path="res://.godot/imported/icon_upg_random.png-94b31e6d8c93d11f07fb3c1f4d3c134a.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/art/ui/icons/紫色史诗/icon_upg_split.png"
-dest_files=["res://.godot/imported/icon_upg_split.png-0cdb880fd2c153b709a9e943290a2e2e.ctex"]
+source_file="res://assets/art/ui/icons/白色普通/icon_upg_random.png"
+dest_files=["res://.godot/imported/icon_upg_random.png-94b31e6d8c93d11f07fb3c1f4d3c134a.ctex"]
 
 [params]
 
@@ -36,5 +36,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=128
+process/size_limit=0
 detect_3d/compress_to=1

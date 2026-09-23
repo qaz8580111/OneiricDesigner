@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://icon0014x"
-path="res://.godot/imported/icon_upg_lifesteal.png-0605470571ce151467a3ea1b385d9968.ctex"
+uid="uid://d3q7r3sxpc7ee"
+path="res://.godot/imported/icon_upg_burning.png-da982f8238ae21ef459803cfc1ad8593.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/art/ui/icons/蓝色稀有/icon_upg_lifesteal.png"
-dest_files=["res://.godot/imported/icon_upg_lifesteal.png-0605470571ce151467a3ea1b385d9968.ctex"]
+source_file="res://assets/art/ui/icons/白色普通/icon_upg_burning.png"
+dest_files=["res://.godot/imported/icon_upg_burning.png-da982f8238ae21ef459803cfc1ad8593.ctex"]
 
 [params]
 
@@ -36,5 +36,5 @@ process/premult_alpha=false
 process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
-process/size_limit=128
+process/size_limit=0
 detect_3d/compress_to=1

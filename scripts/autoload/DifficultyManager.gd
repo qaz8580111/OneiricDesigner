@@ -71,6 +71,10 @@ const DROP_VALUE_PER_LEVEL: float = 0.06
 ## 掉落价值成长上限：最高2倍
 const DROP_VALUE_MULT_MAX: float = 2.0
 
+## 敌人攻击冷却下限（秒）：登塔"攻速增幅"换算为冷却缩短后不得低于此值，
+## 防止极高层数下同帧内重复触发攻击导致弹幕瞬间饱和（可玩性与性能双保护）
+const MIN_ATTACK_COOLDOWN: float = 0.25
+
 ## ========== 成员变量（运行时数据） ==========
 
 ## 当前难度等级（从1开始，与"当前阶段"严格一一对应）
@@ -78,10 +82,20 @@ const DROP_VALUE_MULT_MAX: float = 2.0
 ## 开局档可通过 set_start_level() 指定起始等级（等价于"起始阶段"，即前几关Boss视为已通过）
 var level: int = 1
 
-## 登塔增幅系数（无尽模式专用）：由 TowerManager 每层递增写入，1.0=未登塔
-## 设计：难度曲线本身在10级封顶，登塔阶段的"继续变强"改由此系数承担——
-##       它只参与属性缩放（血量/伤害/移速），不改变任何上限（敌人数量上限保持恒定）
-var tower_multiplier: float = 1.0
+## 登塔增幅系数组（无尽模式专用）：由 TowerManager 每层递增写入，1.0=未登塔
+## 设计：难度曲线本身在10级封顶，登塔阶段的"继续变强"改由这组系数承担——
+##       它们只参与属性缩放，绝不改变任何上限（敌人数量上限保持恒定）
+## 键名约定（与 TowerManager 的 FLOOR_*_BONUS 常量一一对应）：
+##   "health" / "damage"                            - 血量 / 伤害（耐力轴，涨幅大）
+##   "attack_speed" / "move_speed" / "bullet_speed" - 攻速 / 移速 / 弹速（速度轴，涨幅小）
+## 注意 attack_speed 的语义是"攻速倍数"：值越大攻击越频繁，内部换算为冷却缩短
+var tower_mults: Dictionary = {
+	"health": 1.0,
+	"damage": 1.0,
+	"attack_speed": 1.0,
+	"move_speed": 1.0,
+	"bullet_speed": 1.0,
+}
 
 ## 已配置的开局起始等级（Settings 界面设置后生效，下次新游戏从这里起步）
 ## 默认=1（新手标准）；值范围 1~10（过大开局会直接秒杀玩家）
@@ -116,7 +130,7 @@ func _on_game_started() -> void:
 	## ---- 基础重置 ----
 	_wave_count = 0
 	## 登塔增幅复位：每局从无增幅开始（TowerManager 会在无尽模式登塔时重新赋值）
-	tower_multiplier = 1.0
+	reset_tower_mults()
 
 	## ---- 直接落到配置的起始阶段 ----
 	level = clampi(_configured_start_level, 1, MAX_LEVEL)
@@ -257,16 +271,24 @@ func get_difficulty_label() -> String:
 
 ## ========== 登塔增幅接口（无尽模式专用，由 TowerManager 驱动） ==========
 
-## 设置登塔增幅系数（TowerManager 每登一层调用一次）
-## 参数：mult - 累计增幅系数（1.0 = 未登塔，逐层按固定百分比累乘）
-func set_tower_multiplier(mult: float) -> void:
-	## 下限保护：增幅系数不允许低于1.0（登塔只会更难，不会变简单）
-	tower_multiplier = maxf(mult, 1.0)
+## 重置登塔增幅（开局 / 登塔起点调用）：所有轴系数回到 1.0（不额外增强）
+func reset_tower_mults() -> void:
+	for key in tower_mults:
+		tower_mults[key] = 1.0
 
-## 获取当前登塔增幅系数
-## 返回：1.0（未登塔）或更高
-func get_tower_multiplier() -> float:
-	return tower_multiplier
+## 设置登塔增幅系数组（TowerManager 每登一层调用一次）
+## 参数：mults - 部分字典，键名见 tower_mults 声明；未包含的键保持原值，
+##               单项低于 1.0 会被抬到 1.0（登塔只会更难，不会变简单）
+func set_tower_mults(mults: Dictionary) -> void:
+	for key in mults:
+		if tower_mults.has(key):
+			tower_mults[key] = maxf(float(mults[key]), 1.0)
+
+## 获取单轴登塔增幅系数
+## 参数：key - 轴键名（health / damage / attack_speed / move_speed / bullet_speed）
+## 返回：1.0（未登塔）或更高；未知键返回 1.0（防御性兜底）
+func get_tower_mult(key: String) -> float:
+	return float(tower_mults.get(key, 1.0))
 
 ## ========== 敌人数据缩放应用 ==========
 
@@ -282,12 +304,18 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 		return
 	## 精英怪使用0.6倍的缩放强度：自身基础高，避免与难度曲线叠加过猛
 	var intensity: float = 0.6 if is_elite else 1.0
-	## 计算实际应用的各级系数（1.0 + 增量*缩放强度）
-	## 登塔增幅在难度曲线之后再乘一次：无尽模式难度10封顶后，唯一继续变强的来源，
-	## 且对普通怪/精英怪一视同仁（"全面增幅"，不再享受精英的温和折扣）
-	var health_mult: float = (1.0 + (get_health_mult() - 1.0) * intensity) * tower_multiplier
-	var damage_mult: float = (1.0 + (get_damage_mult() - 1.0) * intensity) * tower_multiplier
-	var speed_mult: float = (1.0 + (get_speed_mult() - 1.0) * intensity) * tower_multiplier
+	## 登塔增幅（无尽模式）按轴独立取值，普通怪/精英怪一视同仁（不再享受精英的温和折扣）
+	## 设计意图：血量/伤害是"耐力轴"（可预期、可追赶），攻速/移速/弹速是"速度轴"
+	##          （直接压缩玩家容错，必须用远小于耐力轴的涨幅，防止指数放大后玩法崩坏）
+	var tower_health: float = get_tower_mult("health")
+	var tower_damage: float = get_tower_mult("damage")
+	var tower_attack_speed: float = get_tower_mult("attack_speed")
+	var tower_move_speed: float = get_tower_mult("move_speed")
+	var tower_bullet_speed: float = get_tower_mult("bullet_speed")
+	## 计算实际应用的各级系数：(1.0 + 难度增量*缩放强度) × 对应轴的登塔系数
+	var health_mult: float = (1.0 + (get_health_mult() - 1.0) * intensity) * tower_health
+	var damage_mult: float = (1.0 + (get_damage_mult() - 1.0) * intensity) * tower_damage
+	var speed_mult: float = (1.0 + (get_speed_mult() - 1.0) * intensity) * tower_move_speed
 
 	## 缩放基础属性（使用"in"检查保证对任意EnemyData子类安全）
 	if "max_health" in enemy_data:
@@ -299,6 +327,13 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 	if "wander_speed" in enemy_data:
 		enemy_data.wander_speed = enemy_data.wander_speed * speed_mult
 
+	## 缩放攻击冷却：登塔"攻速增幅"在此换算为冷却缩短（冷却 = 原冷却 / 攻速倍数）
+	## 下限保护 MIN_ATTACK_COOLDOWN：极高层数下冷却不得趋近 0，否则同帧可重复触发攻击，
+	## 弹幕会在瞬间饱和。当前所有敌人的基础冷却均 ≥1.0，未登塔时下限不产生任何影响
+	if "attack_cooldown" in enemy_data:
+		enemy_data.attack_cooldown = maxf(
+			enemy_data.attack_cooldown / tower_attack_speed, MIN_ATTACK_COOLDOWN)
+
 	## 缩放敌人子弹伤害：duplicate子弹数据后修改伤害
 	## 注意：EnemyData.duplicate()默认不深拷贝子资源，bullet_data与池内共享，
 	##       必须单独duplicate后替换，否则会污染共享子弹数据
@@ -307,6 +342,11 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 		## 子弹伤害与碰撞伤害同系数缩放
 		if "damage" in bullet_copy:
 			bullet_copy.damage = maxi(int(ceil(bullet_copy.damage * damage_mult)), 1)
+		## 子弹飞行速度：登塔"弹速增幅"独立生效
+		## 注意：此链路只覆盖普通攻击弹幕；高级怪的技能弹幕速度配置在 MonsterSkill 中，
+		##       不经过 bullet_data，故不受登塔增幅影响（既有行为，保持不变）
+		if "speed" in bullet_copy:
+			bullet_copy.speed = bullet_copy.speed * tower_bullet_speed
 		## 替换为独立副本（该副本只属于这个敌人实例的数据）
 		enemy_data.bullet_data = bullet_copy
 

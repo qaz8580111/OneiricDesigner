@@ -7,7 +7,8 @@ script = ExtResource("1")
 upgrade_id = "upg_invincible"
 display_name = "虚影残像"
 description = "受击无敌时间 +15%"
-rarity = 1
+; 稀有度：暂统一为普通（0），后续再按技能强度重新分级
+rarity = 0
 max_stacks = 5
 stat_modifiers = {
 "invincible_mult": 0.15

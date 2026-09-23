@@ -1,14 +1,14 @@
 ## TowerManager.gd - 无尽登塔单例
-## 职责：无尽模式下，难度10封顶后接管"继续变强"的节奏——每分钟登一层，每层敌人属性全面增幅
+## 职责：无尽模式下，难度10封顶后接管"继续变强"的节奏——每半分钟登一层，每层敌人分轴增幅
 ## 继承：Node（作为全局单例运行）
 ## 设计意图：
 ##   1. 与 DifficultyManager 解耦：难度曲线本身在10级封顶（不改其曲线语义），
-##      登塔阶段把"逐层增幅"作为独立系数写入 DifficultyManager.tower_multiplier，
+##      登塔阶段把"逐层分轴增幅"作为独立系数组写入 DifficultyManager.tower_mults，
 ##      由 apply_to_enemy_data 统一参与属性缩放——业务刷怪链路零修改（AOP 注入思想）
 ##   2. 敌人数量上限恒定：本类只改属性系数，绝不触碰 get_max_enemies 的任何参数
 ##   3. 层数即成绩：玩家死亡时的 current_floor 直接作为无尽榜记录（层数越多排名越高）
 ## 数据流：StageDirector 在无尽模式触发登塔 → begin_tower() →
-##         本类自计时（每 FLOOR_INTERVAL 秒 +1 层）→ set_tower_multiplier() →
+##         本类自计时（每 FLOOR_INTERVAL 秒 +1 层）→ set_tower_mults() →
 ##         GameWorld 后续刷怪自动继承增幅 → 玩家死亡 → Main 读取 current_floor 写入榜单
 extends Node
 
@@ -24,13 +24,35 @@ signal floor_changed(floor: int)
 
 ## ========== 调参常量（登塔节奏的核心配置，集中管理便于平衡调整） ==========
 
-## 每登一层的间隔（秒）：每分钟 +1 层（用户定制节奏）
-const FLOOR_INTERVAL: float = 60.0
+## 每登一层的间隔（秒）：每半分钟 +1 层
+## 说明：登塔数值增幅已大幅放缓（见下方分轴增幅常量），用节奏密度补偿数值密度，
+##       让"登塔在变强"这件事始终可被玩家感知，也让登塔榜有足够的区分度
+const FLOOR_INTERVAL: float = 30.0
 
-## 每层敌人属性全面增幅：12%（用户定制固定值）
-## 说明：增幅作用于血量/伤害/移速（含敌人子弹伤害），按层数乘算叠加；
-##       第 1 层为登塔起点、无增幅，第 2 层起每层 +12%
-const FLOOR_ATTRIBUTE_BONUS: float = 0.12
+## ========== 每层分轴增幅常量（用户定制） ==========
+## 为什么不再"全面提升"（全部属性同一系数）：
+##   1. 血量/伤害是"耐力轴"——玩家 DPS 总会跟上，血厚只是拉长战斗，可预期、可追赶；
+##      但换成统一系数后它会与速度轴一起指数膨胀，第10层就是2.77倍，压力失控
+##   2. 攻速/移速/弹速是"速度轴"——直接压缩玩家容错（躲不掉/反应不过来），
+##      一旦被指数放大就是"贴上即死"，必须用远小于耐力轴的涨幅
+## 计算方式：第 N 层系数 = (1 + 对应增幅) ^ (N - 1)，第 1 层为登塔起点、无增幅
+
+## 每层敌人血量增幅：+3%（耐力轴）
+const FLOOR_HEALTH_BONUS: float = 0.03
+
+## 每层敌人伤害增幅：+4%（耐力轴，碰撞伤害与子弹伤害同系数）
+## 说明：略高于血量，让"失误"有实际惩罚，避免玩家只是被慢慢磨死
+const FLOOR_DAMAGE_BONUS: float = 0.04
+
+## 每层敌人攻速增幅：+1%（速度轴，内部由 DifficultyManager 换算为攻击冷却缩短）
+## 说明：弹幕密度是无尽模式后期唯一真实的杀伤来源，故涨幅需高于移速/弹速
+const FLOOR_ATTACK_SPEED_BONUS: float = 0.01
+
+## 每层敌人移速增幅：+0.5%（速度轴，最危险的一轴，刻意压到最低）
+const FLOOR_MOVE_SPEED_BONUS: float = 0.005
+
+## 每层敌人子弹飞行速度增幅：+0.8%（速度轴，影响玩家的反应窗口）
+const FLOOR_BULLET_SPEED_BONUS: float = 0.008
 
 ## ========== 运行时状态（每局由 game_started 重置） ==========
 
@@ -80,8 +102,8 @@ func begin_tower() -> void:
 	current_floor = 1
 	_elapsed = 0.0
 	_next_floor_time = FLOOR_INTERVAL
-	## 第 1 层为登塔起点：属性增幅系数回到 1.0（不额外增强）
-	DifficultyManager.set_tower_multiplier(1.0)
+	## 第 1 层为登塔起点：所有轴增幅系数全部回到 1.0（不额外增强）
+	DifficultyManager.reset_tower_mults()
 	tower_started.emit(current_floor)
 	print("[TowerManager] 登塔开启：第 %d 层" % current_floor)
 
@@ -92,15 +114,25 @@ func get_current_floor() -> int:
 
 ## ========== 内部方法 ==========
 
-## 登上一层：层数+1 → 计算累计增幅 → 写入 DifficultyManager → 广播
-## 增幅公式：(1 + FLOOR_ATTRIBUTE_BONUS) ^ (层数 - 1)
-##   第1层=1.0（起点）→ 第2层=1.12 → 第3层=1.2544 → …… 逐层乘算叠加
+## 登上一层：层数+1 → 计算各轴累计增幅 → 写入 DifficultyManager → 广播
+## 增幅公式：各轴系数 = (1 + 对应 FLOOR_*_BONUS) ^ (层数 - 1)
+##   第1层=1.0（起点）→ 第2层=血1.03/伤1.04/攻速1.01/移速1.005/弹速1.008 → …… 逐层乘算
 func _advance_floor() -> void:
 	current_floor += 1
-	var mult: float = pow(1.0 + FLOOR_ATTRIBUTE_BONUS, float(current_floor - 1))
-	DifficultyManager.set_tower_multiplier(mult)
+	## 已过去的层数步数（第1层为起点，故减1）
+	var steps: int = current_floor - 1
+	var mults: Dictionary = {
+		"health": pow(1.0 + FLOOR_HEALTH_BONUS, float(steps)),
+		"damage": pow(1.0 + FLOOR_DAMAGE_BONUS, float(steps)),
+		"attack_speed": pow(1.0 + FLOOR_ATTACK_SPEED_BONUS, float(steps)),
+		"move_speed": pow(1.0 + FLOOR_MOVE_SPEED_BONUS, float(steps)),
+		"bullet_speed": pow(1.0 + FLOOR_BULLET_SPEED_BONUS, float(steps)),
+	}
+	DifficultyManager.set_tower_mults(mults)
 	floor_changed.emit(current_floor)
-	print("[TowerManager] 登上第 %d 层：敌人属性增幅 ×%.3f" % [current_floor, mult])
+	print("[TowerManager] 登上第 %d 层：血×%.3f 伤×%.3f 攻速×%.3f 移速×%.3f 弹速×%.3f"
+		% [current_floor, mults["health"], mults["damage"],
+			mults["attack_speed"], mults["move_speed"], mults["bullet_speed"]])
 
 ## 响应 GameManager.game_started：每局重置登塔状态
 ## 覆盖所有重开路径（R键重开/菜单重开/死亡重开），业务如何重开与本类无关
