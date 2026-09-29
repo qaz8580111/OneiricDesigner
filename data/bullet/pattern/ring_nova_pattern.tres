@@ -1,8 +1,8 @@
 ; ==============================================================================
 ; ring_nova_pattern.tres - 环形爆发弹道构型
-; 职责：以发射点为圆心 360° 均分发射 8 发，用于被围时的清场手段
+; 职责：以发射点为圆心 360° 均分发射 6 发，用于被围时的清场手段
 ; 所属脚本：res://scripts/resources/bullet/pattern/RingNovaPattern.gd
-; 参数说明：单发伤害 ×0.5 做分摊、速度 ×0.9；发射器逐个设置阵营，保证不误伤发射者
+; 参数说明：单发伤害 ×0.3（整数伤害下每发保底 1，实际强度主要由发数控制）、速度 ×0.9；发射器逐个设置阵营，保证不误伤发射者
 ; ==============================================================================
 [gd_resource type="Resource" load_steps=2 format=3]
 
@@ -12,8 +12,8 @@
 script = ExtResource("1")
 pattern_id = "ring_nova"
 display_name = "环形爆发"
-description = "以自身为圆心360°均分射出8发（单发伤害×0.5、速度×0.9）。被敌人包围时的清场手段。"
-ring_count = 8
+description = "以自身为圆心360°均分射出6发（单发伤害×0.3、速度×0.9）。被敌人包围时的清场手段。"
+ring_count = 6
 start_angle_offset = 0.0
-damage_mult = 0.5
+damage_mult = 0.3
 speed_mult = 0.9

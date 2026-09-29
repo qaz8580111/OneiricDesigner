@@ -126,11 +126,16 @@ func apply(target: Node2D) -> bool:
 ## 使用随机数判断是否触发掉落
 ## 返回：true表示应该掉落，false表示不掉落
 func should_drop() -> bool:
-	## 概率为1或更高：必定掉落
+	## 概率为1或更高：必定掉落（保底掉落不受难度模式影响，保证 Boss 奖励等核心收益）
 	if drop_chance >= 1.0:
 		return true
 	## 概率为0或更低：不会掉落
 	if drop_chance <= 0.0:
 		return false
+	## 难度模式掉率修正：困难/专家按 HARD_DROP_MULT 下调概率（用户规则"爆率适当下降"），
+	## 普通档系数恒为 1.0 → 完全沿用既有逻辑（需求：普通就按照当前逻辑和数值）
+	var effective_chance: float = drop_chance
+	if DifficultyManager != null:
+		effective_chance = clampf(drop_chance * DifficultyManager.get_mode_drop_mult(), 0.0, 1.0)
 	## 使用随机数判断（0-1之间的随机数小于掉落概率则掉落）
-	return RandomManager.randf() < drop_chance
+	return RandomManager.randf() < effective_chance

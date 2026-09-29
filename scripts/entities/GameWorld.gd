@@ -702,6 +702,9 @@ func spawn_shot_pattern(origin: Vector2, direction: Vector2,
 	## 构型只负责算弹道（不实例化子弹），从而被任意发射者无条件复用
 	var shots: Array = data_to_use.get_final_shot_pattern().build_shots(
 		origin, direction, data_to_use)
+	## 伤害守恒分配（1A 口径修正）：把"整轮总伤害"按各发系数拆成整数，
+	## 修复 int 截断导致多发构型分摊失效（2 × 0.x 全部塌成 1）的问题
+	_assign_conserved_damage(shots, data_to_use)
 	for spec in shots:
 		var delay: float = float(spec.get("delay", 0.0))
 		if delay <= 0.0:
@@ -709,6 +712,53 @@ func spawn_shot_pattern(origin: Vector2, direction: Vector2,
 		else:
 			## 延迟弹单独协程，不阻塞后续弹道；delay 语义为"距开火时刻"
 			_spawn_one_bullet_deferred(spec, data_to_use, owner_group, origin, delay)
+
+## 伤害守恒分配（弹道构型系统 · 1A）
+## 目的：旧口径下每发各自 maxi(int(基础伤害 × 系数), 1)，而基础伤害是整数（玩家默认 2），
+##       于是 "2 × 0.6 / 0.7 / 0.8" 一律被截断成 1，扇形/平行列/连发/双向等集中型构型的
+##       多发性完全失效（3 发也只等于 1 发的伤害），构型差异被抹平。
+## 算法：目标整轮总伤 = max(round(基础伤害 × Σ各发系数), 发数)；
+##       第一轮按系数权重取 floor 出每发基数（保底 1），
+##       第二轮用最大余数法把差额逐发 +1 补齐（余数大者优先）。
+## 输出：写入 spec["damage_override"]，供 _build_bullet_data 优先采用。
+## 边界：单发构型直接跳过（零行为变化）；系数和 ≤ 0 时退化为每发 1。
+func _assign_conserved_damage(shots: Array, base_data: BulletDataClass) -> void:
+	## 单发构型无需分配，保持 _build_bullet_data 的原有折算路径不变
+	if shots.size() <= 1:
+		return
+	## 汇总权重（Σ 各发 damage_mult）
+	var total_weight: float = 0.0
+	for spec in shots:
+		total_weight += maxf(float(spec.get("damage_mult", 1.0)), 0.0)
+	## 系数和异常（≤0）时退化为每发 1，保证子弹不空转
+	if total_weight <= 0.0:
+		for spec in shots:
+			spec["damage_override"] = 1
+		return
+	## 目标整轮总伤：按权重折算并四舍五入，且不低于发数（每发保底 1）
+	var target_total: int = maxi(roundi(float(base_data.damage) * total_weight), shots.size())
+	## 第一轮：按权重取 floor（保底 1），并记录小数余数供第二轮补足
+	var assigned: Array[int] = []
+	var remainders: Array = []
+	for i in range(shots.size()):
+		var weight: float = maxf(float(shots[i].get("damage_mult", 1.0)), 0.0)
+		var exact: float = float(target_total) * (weight / total_weight)
+		assigned.append(maxi(int(floor(exact)), 1))
+		remainders.append({"index": i, "frac": exact - floor(exact)})
+	## 已分配总额（保底 1 可能已让总和超过目标，此时不再补）
+	var used: int = 0
+	for value in assigned:
+		used += value
+	var deficit: int = target_total - used
+	## 第二轮：最大余数法——余数大者优先 +1，直到补足目标或补完所有发
+	if deficit > 0:
+		remainders.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return float(a["frac"]) > float(b["frac"]))
+		for k in range(mini(deficit, remainders.size())):
+			assigned[int(remainders[k]["index"])] += 1
+	## 写回每发的整数伤害预算（延迟弹共享同一 spec 字典，故同样生效）
+	for i in range(shots.size()):
+		shots[i]["damage_override"] = assigned[i]
 
 ## 延迟弹协程：等待 delay 后生成单发（世界已释放则静默退出）
 func _spawn_one_bullet_deferred(spec: Dictionary, base_data: BulletDataClass,
@@ -776,20 +826,27 @@ func _spawn_one_bullet(spec: Dictionary, base_data: BulletDataClass,
 	bullet.destroyed.connect(_on_bullet_destroyed.bind(bullet))
 
 ## 按弹道系数派生子弹数据（返回共享或副本）
-## 性能：无系数改动、无额外特效、原数据无特效时直接共享（只读），复刻原有优化
+## 性能：无伤害/速度改动、无额外特效、原数据无特效时直接共享（只读），复刻原有优化
 func _build_bullet_data(base: BulletDataClass, spec: Dictionary) -> BulletDataClass:
 	var dmg_mult: float = float(spec.get("damage_mult", 1.0))
 	var spd_mult: float = float(spec.get("speed_mult", 1.0))
 	var extra: Array = spec.get("extra_effects", [])
-	var plain: bool = is_equal_approx(dmg_mult, 1.0) and is_equal_approx(spd_mult, 1.0) \
+	## 单发最终伤害：优先采用发射器的守恒分配预算；无预算时回退按系数折算（保底 1）
+	var final_damage: int = base.damage
+	if spec.has("damage_override"):
+		final_damage = maxi(int(spec.get("damage_override")), 1)
+	elif not is_equal_approx(dmg_mult, 1.0):
+		## 伤害保底 1：低伤害弹经系数折算后 int 截断会变 0
+		final_damage = maxi(int(base.damage * dmg_mult), 1)
+	var damage_changed: bool = final_damage != base.damage
+	var plain: bool = not damage_changed and is_equal_approx(spd_mult, 1.0) \
 		and extra.is_empty() and base.effects.is_empty()
 	if plain:
 		return base
 	## 有系数改动/额外特效：拷贝一份，确保特效叠层状态独立（stack_count等运行时字段）
 	var data: BulletDataClass = base.duplicate()
-	if not is_equal_approx(dmg_mult, 1.0):
-		## 伤害保底 1：低伤害弹经系数折算后 int 截断会变 0
-		data.damage = maxi(int(base.damage * dmg_mult), 1)
+	if damage_changed:
+		data.damage = final_damage
 	if not is_equal_approx(spd_mult, 1.0):
 		data.speed = base.speed * spd_mult
 	for effect in extra:

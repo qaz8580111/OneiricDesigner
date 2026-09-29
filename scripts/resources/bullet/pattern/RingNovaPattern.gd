@@ -4,14 +4,14 @@
 ## 构型维度：全向覆盖
 extends "res://scripts/resources/bullet/BulletShotPattern.gd"
 
-## 环形弹数
-@export var ring_count: int = 8
+## 环形弹数（整数伤害下每发保底 1，发数才是环形强度的主要杠杆）
+@export var ring_count: int = 6
 
 ## 起始角偏移（度，可让环不总是对齐正右方向）
 @export var start_angle_offset: float = 0.0
 
-## 单发伤害系数（多发需分摊，防数值膨胀）
-@export var damage_mult: float = 0.5
+## 单发伤害系数（整数伤害下"基础伤害 × 系数"常被截断为 1，实际由发数决定强度）
+@export var damage_mult: float = 0.3
 
 ## 单发速度系数
 @export var speed_mult: float = 0.9

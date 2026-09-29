@@ -74,9 +74,6 @@ msgid "BUTTON_APPLY"
 msgstr "应用"
 
 # 难度选项
-msgid "DIFFICULTY_EASY"
-msgstr "简单"
-
 msgid "DIFFICULTY_NORMAL"
 msgstr "普通"
 

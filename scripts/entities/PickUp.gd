@@ -150,6 +150,10 @@ func _physics_process(delta: float) -> void:
 ## 回收路径说明：queue_free触发tree_exiting信号 → GameWorld._on_pickup_tree_exiting
 ## 同步清理_pickups管理列表（生成时已连接），无需额外通知逻辑
 func _update_lifetime(delta: float) -> void:
+	## 已进入拾取流程（含专家模式二次确认等待期）：冻结寿命累计，
+	## 保证玩家在确认面板上做决定时道具不会在脚下悄悄过期消失
+	if _is_picking:
+		return
 	## 累计已存活时间
 	_life_timer += delta
 	## 计算剩余寿命
@@ -368,7 +372,18 @@ func pickup(target: Node2D) -> void:
 	## 如果正在拾取或道具数据为空，直接返回
 	if _is_picking or drop_item == null:
 		return
-	
+
+	## 专家模式：类别型道具（BUFF/属性技能/护盾/弹道构型）不再立即生效，
+	## 改走"二次确认"——是→按类别随机升级并消耗；否→保留道具在原地。
+	## 具体升级发放与销毁由 UpgradeManager 负责，本节点只负责发起与状态切换。
+	if _is_expert_choice_item():
+		## 未受理（已有三选一/确认进行中）：保持原样，玩家稍后可重试
+		if UpgradeManager == null or not UpgradeManager.request_expert_pickup(self, drop_item.item_type):
+			return
+		## 锁定拾取：防止确认期间被重复触发；同时冻结寿命与脉冲闪烁
+		_is_picking = true
+		return
+
 	## 标记正在拾取（防止重复拾取）
 	_is_picking = true
 	
@@ -382,6 +397,38 @@ func pickup(target: Node2D) -> void:
 	
 	## 从场景树中移除并销毁拾取物节点
 	queue_free()
+
+## 判定当前道具是否为专家模式需要二次确认的"类别型"拾取物
+## （BUFF特效技能 / 属性技能 / 护盾装备 / 弹道构型；碎片、回血无类别，仍走自动吸附立即拾取）
+## 返回：true=专家模式下应走二次确认流程
+func _is_expert_choice_item() -> bool:
+	if drop_item == null:
+		return false
+	## 非专家模式：不启用二次确认
+	if DifficultyManager == null or not DifficultyManager.is_expert_mode():
+		return false
+	## 四类"书 / 宝石"共用手动拾取 + 类别随机升级；用数组包含代替多分支 match，便于日后扩展
+	return drop_item.item_type in [
+		DropItemClass.ItemType.BUFF,
+		DropItemClass.ItemType.ATTRIBUTE_SKILL,
+		DropItemClass.ItemType.EQUIPMENT,
+		DropItemClass.ItemType.SHOT_PATTERN,
+	]
+
+## 完成专家确认拾取（玩家选择"是"，由 UpgradeManager 调用）
+## 语义：播放拾取音效并销毁道具本体
+func finish_expert_pickup() -> void:
+	if AudioManager:
+		var sfx: String = "buff_pickup" if (drop_item != null and drop_item.is_rare) else "pickup_item"
+		AudioManager.play_2d(sfx, global_position, 0.8)
+	queue_free()
+
+## 取消专家确认拾取（玩家选择"否"，由 UpgradeManager 调用）
+## 语义：解除拾取锁定，道具保留在原地并恢复可拾取显示，玩家可稍后重试
+func cancel_expert_pickup() -> void:
+	_is_picking = false
+	if sprite != null:
+		sprite.modulate = _original_color
 
 ## ========== 范围检测方法 ==========
 

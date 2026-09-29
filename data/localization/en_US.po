@@ -74,9 +74,6 @@ msgid "BUTTON_APPLY"
 msgstr "Apply"
 
 # Difficulty Options
-msgid "DIFFICULTY_EASY"
-msgstr "Easy"
-
 msgid "DIFFICULTY_NORMAL"
 msgstr "Normal"
 

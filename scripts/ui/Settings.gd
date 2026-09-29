@@ -5,7 +5,7 @@
 ##        ↔ user://settings.cfg（_save/_load持久化）↔ AudioServer/DisplayServer/DifficultyManager（_apply_settings生效）
 ## 功能完整性说明：
 ##   1. 所有 UI 文本（标签、标题、难度名称）均走 TranslationManager 翻译
-##   2. 游戏性：难度设置 → DifficultyManager.set_start_level(起始阶段)
+##   2. 游戏性：难度设置 → DifficultyManager.set_difficulty_mode(难度模式)
 ##            FPS显示 → 存入配置，HUD启动时读取并动态创建FPS标签
 ##            自动射击 → Player.set_auto_shoot() 运行中实时生效
 ##   3. 音频：主/音乐/音效三路音量，实时同步 AudioServer 总线 + AudioManager 内部 sfx/music 音量
@@ -36,8 +36,9 @@ const DEFAULT_SFX_VOLUME: float = 45.0
 
 ## ========== 设置数据（运行时配置） ==========
 
-## 游戏性设置：难度等级（0=简单，1=普通，2=困难，3=专家）
-var difficulty: int = 1
+## 游戏性设置：难度模式（0=普通，1=困难，2=专家）
+## 默认 0（普通）：游戏开局恒为普通，只有玩家在设置中手动选择其它难度才生效
+var difficulty_mode: int = 0
 
 ## 游戏性设置：是否显示FPS计数器
 var show_fps: bool = false
@@ -151,23 +152,12 @@ var RESOLUTIONS: Array = [
 	"3840x2160"   # 4 - 4K
 ]
 
-## 难度翻译键列表（顺序对应 difficulty 索引：0简单/1普通/2困难/3专家）
+## 难度翻译键列表（顺序对应 difficulty_mode 索引：0普通/1困难/2专家）
 ## 实际显示文本通过 TranslationManager.t(键) 获取，支持中英切换
 var DIFFICULTY_KEYS: Array = [
-	"DIFFICULTY_EASY",
 	"DIFFICULTY_NORMAL",
 	"DIFFICULTY_HARD",
 	"DIFFICULTY_EXPERT"
-]
-
-## 难度起始阶段映射表：
-## 将 4 档难度选择 → 实际 DifficultyManager 起始阶段（难度与阶段强绑定，同一件事）
-## 设计意图：选哪档就从对应阶段开局——该阶段之前的守门 Boss 全部视为已通过
-var DIFFICULTY_START_LEVELS: Array[int] = [
-	1,  # Easy  → 起始阶段1（新手友好，从第1个守门者打起）
-	2,  # Normal→ 起始阶段2（标准体验，第1个守门者视为已通过）
-	4,  # Hard  → 起始阶段4（开局敌人强度显著提高，前3个守门者视为已通过）
-	7   # Expert→ 起始阶段7（高难度挑战，前6个守门者视为已通过）
 ]
 
 ## 语言选项列表（供玩家选择的游戏语言）
@@ -331,7 +321,7 @@ func _initialize_ui() -> void:
 	difficulty_option.clear()
 	for key in DIFFICULTY_KEYS:
 		difficulty_option.add_item(TranslationManager.t(key))
-	difficulty_option.selected = difficulty
+	difficulty_option.selected = difficulty_mode
 
 	## ---- 初始化主题下拉（选项 = ThemeManager 扫描到的主题包显示名） ----
 	if theme_option != null:
@@ -510,7 +500,7 @@ func _on_apply_button_pressed() -> void:
 ## 并立即把音量同步到引擎，让"重置"后立刻能听到默认音量效果
 func _reset_to_defaults() -> void:
 	## ---- 游戏性默认值 ----
-	difficulty = 1
+	difficulty_mode = 0
 	show_fps = false
 	auto_shoot = true
 	## ---- 主题默认值：回到默认主题并实时应用（全场角色换回默认外观） ----
@@ -535,7 +525,7 @@ func _reset_to_defaults() -> void:
 
 ## 根据当前设置值更新UI控件状态（重置/加载后调用）
 func _update_ui_from_settings() -> void:
-	difficulty_option.selected = difficulty
+	difficulty_option.selected = difficulty_mode
 	fps_check.set_pressed_no_signal(show_fps)
 	auto_shoot_check.set_pressed_no_signal(auto_shoot)
 
@@ -560,7 +550,7 @@ func _update_ui_from_settings() -> void:
 
 ## 从UI控件收集设置值（点击 Apply 时调用）
 func _collect_settings() -> void:
-	difficulty = difficulty_option.selected
+	difficulty_mode = difficulty_option.selected
 	show_fps = fps_check.is_pressed()
 	auto_shoot = auto_shoot_check.is_pressed()
 
@@ -584,7 +574,7 @@ func _collect_settings() -> void:
 ## 收集设置值并返回字典格式（广播和保存用）
 func _collect_settings_dict() -> Dictionary:
 	return {
-		"difficulty":        difficulty,
+		"difficulty_mode":   difficulty_mode,
 		"show_fps":          show_fps,
 		"auto_shoot":        auto_shoot,
 		"current_theme":     theme_id,
@@ -624,6 +614,25 @@ func _apply_settings() -> void:
 			if width > 0 and height > 0:
 				_apply_window_size_safely(Vector2i(width, height))
 
+	## ---- 5) 难度：将选择的难度模式同步给 DifficultyManager ----
+	## 难度模式只在"开始新游戏"时生效：DifficultyManager._on_game_started() 会读取
+	## user://settings.cfg 的 difficulty_mode 应用到本局；此处同步一次，保证界面选择
+	## 与全局单例状态一致（不改变正在进行的对局难度）
+	if DifficultyManager:
+		DifficultyManager.set_difficulty_mode(difficulty_mode)
+
+	## ---- 5.5) 主题：应用当前选择（下拉切换时已实时生效，此处幂等兜底；
+	##            ThemeManager.set_theme 内部同主题直接跳过，不会重复广播） ----
+	if ThemeManager and theme_id != "":
+		ThemeManager.set_theme(theme_id)
+
+	## ---- 6) 自动射击：如果当前 Player 正在游戏中，实时生效
+	## Main.gd 也会监听 settings_applied 信号做同样的事，这里兜底
+	var players: Array = get_tree().get_nodes_in_group("player")
+	for p in players:
+		if p.has_method("set_auto_shoot"):
+			p.set_auto_shoot(auto_shoot)
+
 ## 设置窗口尺寸，并保证窗口完整落在当前屏幕可用区域内
 ## 修复"点 Apply 后底部按钮莫名消失"：旧实现直接 get_window().size = 目标尺寸，
 ## 当目标分辨率超过屏幕时（如 1080p 屏幕选 1920x1280 / 2560x1440），窗口底部会落到
@@ -647,26 +656,6 @@ func _apply_window_size_safely(target_size: Vector2i) -> void:
 
 	## 居中到屏幕可用区域内，确保窗口四边（尤其是底部）都在可见范围内
 	win.position = usable.position + (usable.size - safe_size) / 2
-
-	## ---- 5) 难度：将选择的难度档映射为起始阶段，通知 DifficultyManager ----
-	## 下次开始新游戏时，DifficultyManager._on_game_started() 会读取 user://settings.cfg
-	## 的 difficulty 值并应用为起始阶段。这里也发一次信号给可能存在的 Main.gd
-	if DifficultyManager:
-		## 把当前选择档 (0~3) → 起始阶段
-		var start_level: int = DIFFICULTY_START_LEVELS[clamp(difficulty, 0, DIFFICULTY_START_LEVELS.size() - 1)]
-		DifficultyManager.set_start_level(start_level)
-
-	## ---- 5.5) 主题：应用当前选择（下拉切换时已实时生效，此处幂等兜底；
-	##            ThemeManager.set_theme 内部同主题直接跳过，不会重复广播） ----
-	if ThemeManager and theme_id != "":
-		ThemeManager.set_theme(theme_id)
-
-	## ---- 6) 自动射击：如果当前 Player 正在游戏中，实时生效
-	## Main.gd 也会监听 settings_applied 信号做同样的事，这里兜底
-	var players: Array = get_tree().get_nodes_in_group("player")
-	for p in players:
-		if p.has_method("set_auto_shoot"):
-			p.set_auto_shoot(auto_shoot)
 
 ## 三路音量立即同步到 AudioServer 总线 + AudioManager（重置/加载/应用 均调用此函数）
 func _apply_volumes_immediate() -> void:
@@ -710,7 +699,9 @@ func _load_settings() -> void:
 
 	if err == OK:
 		## ---- 游戏性设置 ----
-		difficulty       = config.get_value("Settings", "difficulty",        1)
+		## 难度模式：新键名 difficulty_mode（旧的 difficulty 键为"起始阶段选择"遗留，
+		## 直接忽略以回落到默认普通，避免旧索引 0/1/2/3 与新三档错位）
+		difficulty_mode  = config.get_value("Settings", "difficulty_mode", 0)
 		show_fps         = config.get_value("Settings", "show_fps",          false)
 		auto_shoot       = config.get_value("Settings", "auto_shoot",        true)
 		## ---- 主题设置：回填主题id（ThemeManager 启动时已应用该主题，

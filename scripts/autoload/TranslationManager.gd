@@ -72,8 +72,7 @@ var translations: Dictionary = {
 		"SETTINGS_HINT": "LT / RT 切换分类 · 方向键选择 · 左右调节数值 · A 确认 · B 返回",
 
 		
-		## 难度选项翻译
-		"DIFFICULTY_EASY":   "简单",
+		## 难度选项翻译（三档：普通/困难/专家）
 		"DIFFICULTY_NORMAL": "普通",
 		"DIFFICULTY_HARD":   "困难",
 		"DIFFICULTY_EXPERT": "专家",
@@ -180,8 +179,7 @@ var translations: Dictionary = {
 		"SETTINGS_HINT": "LT / RT Switch Tab · D-Pad Navigate · Left / Right Adjust · A Confirm · B Back",
 
 		
-		## 难度选项翻译（英文）
-		"DIFFICULTY_EASY":   "Easy",
+		## 难度选项翻译（英文，三档：Normal/Hard/Expert）
 		"DIFFICULTY_NORMAL": "Normal",
 		"DIFFICULTY_HARD":   "Hard",
 		"DIFFICULTY_EXPERT": "Expert",

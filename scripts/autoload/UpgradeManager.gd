@@ -31,6 +31,12 @@ const ShieldEquipmentDataClass = preload("res://scripts/resources/equipment/Shie
 ## 弹道构型资源类（data/bullet/pattern/*.tres 类型校验用）
 const BulletShotPatternClass = preload("res://scripts/resources/bullet/BulletShotPattern.gd")
 
+## 拾取二次确认面板场景脚本（专家机制：是/否确认，纯代码构建UI）
+const PICKUP_CONFIRM_PANEL_SCRIPT = preload("res://scripts/ui/PickupConfirmPanel.gd")
+
+## 护盾组件脚本（读取 MAX_SHIELD_STACK，供专家模式判断护盾是否已满层）
+const EquipmentShieldComponentScript = preload("res://scripts/components/EquipmentShieldComponent.gd")
+
 ## 护盾装备池目录（数据驱动扫描，与 Shop._random_shield 同源）
 ## 新增护盾类型只需放入 .tres，护盾三选一自动纳入候选
 const SHIELD_POOL_DIR: String = "res://data/equipment"
@@ -144,6 +150,14 @@ var _pending_shield_choices: int = 0
 ## 排队等待的"弹道构型"三选一次数（同上）
 var _pending_shot_pattern_choices: int = 0
 
+## ========== 专家模式拾取二次确认运行时状态 ==========
+
+## 专家模式下等待二次确认的拾取物节点（确认/取消后清空；非专家模式恒为 null）
+var _expert_pickup: Node = null
+
+## 专家模式下等待二次确认的拾取物类别（DropItem.ItemType，-1=无）
+var _expert_item_type: int = -1
+
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 进入场景树时初始化
@@ -165,6 +179,9 @@ func _on_game_started() -> void:
 	_pending_attribute_choices = 0
 	_pending_shield_choices = 0
 	_pending_shot_pattern_choices = 0
+	## 清空专家模式拾取二次确认状态（上一局残留）
+	_expert_pickup = null
+	_expert_item_type = -1
 	player_stats = {
 		"damage_mult": 1.0,
 		"bullet_speed_mult": 1.0,
@@ -270,6 +287,10 @@ func _load_shot_pattern_pool() -> void:
 ## 队列设计：面板显示期间又触发升级（玩家边战斗边捡宝石/神庙交互）时，排队等待，
 ##           当前面板关闭后自动展示下一组选项，避免连续弹出多个面板
 func open_level_up_choice() -> void:
+	## 专家模式：三选一逻辑被移除——直接按拾取物类别（特效技能）随机升级，不弹面板
+	if DifficultyManager != null and DifficultyManager.is_expert_mode():
+		grant_expert_random_upgrade(DropItem.ItemType.BUFF)
+		return
 	## 正在选择中：排队等待，不重复打开
 	if is_choosing:
 		_pending_upgrades += 1
@@ -331,6 +352,10 @@ func _do_open_level_up_choice() -> void:
 ## 队列设计：与技能三选一共用 is_choosing 锁；面板显示期间又拾取到护盾掉落物时排队，
 ##           当前面板关闭后自动展示下一组候选，避免连续弹出多个面板
 func open_shield_choice() -> void:
+	## 专家模式：三选一逻辑被移除——直接按拾取物类别（护盾装备）随机升级/替换，不弹面板
+	if DifficultyManager != null and DifficultyManager.is_expert_mode():
+		grant_expert_random_upgrade(DropItem.ItemType.EQUIPMENT)
+		return
 	## 正在选择中：排队等待，不重复打开
 	if is_choosing:
 		_pending_shield_choices += 1
@@ -429,6 +454,10 @@ func _on_shield_cancelled() -> void:
 ## 说明：与特效技能三选一共用 is_choosing 锁、LEVEL_UP_CHOICE 上下文与 LevelUpPanel 面板，
 ##       仅候选池不同（只含属性词条，不含特效技能），保证"属性技能书只给属性技能"
 func open_attribute_skill_choice() -> void:
+	## 专家模式：三选一逻辑被移除——直接按拾取物类别（属性技能）随机升级，不弹面板
+	if DifficultyManager != null and DifficultyManager.is_expert_mode():
+		grant_expert_random_upgrade(DropItem.ItemType.ATTRIBUTE_SKILL)
+		return
 	## 正在选择中：排队等待，不重复打开
 	if is_choosing:
 		_pending_attribute_choices += 1
@@ -505,6 +534,10 @@ func _on_attribute_skill_cancelled() -> void:
 ## 流程：从构型池抽3个 → 显示紧凑底栏面板（不暂停游戏）→ 玩家选择 → 替换当前弹道 → 关闭
 ## 语义：区别于技能/属性/护盾的"叠层"，构型选定即整体替换玩家当前弹道（不叠层、无等级）
 func open_shot_pattern_choice() -> void:
+	## 专家模式：三选一逻辑被移除——直接按拾取物类别（弹道构型）随机替换，不弹面板
+	if DifficultyManager != null and DifficultyManager.is_expert_mode():
+		grant_expert_random_upgrade(DropItem.ItemType.SHOT_PATTERN)
+		return
 	## 正在选择中：排队等待，不重复打开
 	if is_choosing:
 		_pending_shot_pattern_choices += 1
@@ -713,19 +746,253 @@ func _process_pending() -> void:
 	## 无排队，解锁选择状态
 	is_choosing = false
 
-## 关闭并销毁选择面板（连同 CanvasLayer 一起清理；特效技能/属性技能/护盾/构型三选一共用）
+## 关闭并销毁选择面板（连同 CanvasLayer 一起清理；特效技能/属性技能/护盾/构型三选一
+## 与专家拾取二次确认面板共用）
 func _close_panel() -> void:
-	## 条件注销选择上下文：仅当栈顶确实是本面板上下文时才pop。
-	## 跨场景重开（Main.reset_context）后栈已被重置，无条件pop会破坏新栈。
-	## 四类三选一均复用 LEVEL_UP_CHOICE 上下文，故此处判断对四类面板同时生效
-	if InputManager and InputManager.get_current_context() == "LEVEL_UP_CHOICE":
-		InputManager.pop_context()
+	## 条件注销选择上下文：LEVEL_UP_CHOICE=四类三选一面板，EVENT_POPUP=专家拾取二次确认面板。
+	## 仅当栈顶确实是本面板上下文时才pop；跨场景重开（Main.reset_context）后栈已被重置，
+	## 无条件pop会破坏新栈
+	if InputManager:
+		var ctx: String = InputManager.get_current_context()
+		if ctx == "LEVEL_UP_CHOICE" or ctx == "EVENT_POPUP":
+			InputManager.pop_context()
 	if _panel != null and is_instance_valid(_panel):
 		_panel.queue_free()
 	_panel = null
 	if _overlay_layer != null and is_instance_valid(_overlay_layer):
 		_overlay_layer.queue_free()
 	_overlay_layer = null
+
+## ========== 专家模式：拾取二次确认 + 按类别随机升级 ==========
+
+## 受理专家模式下的拾取二次确认请求（PickUp.pickup 在专家模式+类别型拾取物时调用）
+## 参数：pickup - 发起拾取的 PickUp 节点（确认后据此销毁；取消则保留）
+##       item_type - 拾取物类别（DropItem.ItemType）
+## 返回：true=已受理并进入确认流程；false=当前已有选择/确认进行中，未受理（拾取物保留原地）
+func request_expert_pickup(pickup: Node, item_type: int) -> bool:
+	## 已经有三选一或专家确认进行中：拒绝本次，拾取物保持在地面，玩家稍后可重试
+	if is_choosing:
+		return false
+	## 立即上锁并记录待确认目标；实际打开延迟到帧末，避开物理回调的当前帧
+	is_choosing = true
+	_expert_pickup = pickup
+	_expert_item_type = item_type
+	_do_open_expert_confirm.call_deferred()
+	return true
+
+## 实际创建专家拾取确认面板（延迟一帧后执行）
+func _do_open_expert_confirm() -> void:
+	## 延迟期间状态可能已变化（重开局/游戏结束）：is_choosing 被重置则取消本次确认
+	if not is_choosing:
+		return
+	## 延迟期间游戏可能已结束（玩家死亡）：取消本次确认并释放拾取物
+	if GameManager.current_state == GameManager.GameState.GAME_OVER:
+		is_choosing = false
+		cancel_expert_pickup()
+		return
+	## 延迟期间拾取物已被回收（寿命到期等）：视为取消
+	if _expert_pickup == null or not is_instance_valid(_expert_pickup):
+		is_choosing = false
+		_expert_pickup = null
+		_expert_item_type = -1
+		return
+
+	## 创建专用 CanvasLayer 作为面板父节点（独立 transform，面板始终位于屏幕底部）
+	_overlay_layer = CanvasLayer.new()
+	_overlay_layer.name = "ExpertPickupConfirmOverlay"
+	## layer=50 与三选一同级（用户即时交互必须最显眼）
+	_overlay_layer.layer = 50
+	get_tree().root.add_child(_overlay_layer)
+
+	## 创建二次确认面板（挂到 CanvasLayer 下）
+	_panel = PICKUP_CONFIRM_PANEL_SCRIPT.new()
+	_overlay_layer.add_child(_panel)
+	## 连接确认信号：玩家选"是"→ 随机升级 + 消耗拾取物
+	_panel.confirmed.connect(_on_expert_pickup_confirmed)
+	## 连接取消信号：玩家选"否"→ 保留拾取物，不升级
+	_panel.cancelled.connect(_on_expert_pickup_cancelled)
+
+	## 注册 EVENT_POPUP 上下文：仅放行 game_confirm(是)/game_cancel(否)，
+	## push 自带 0.2s 屏蔽期，防止拾取瞬间残留的交互/攻击键直接确认
+	InputManager.push_context("EVENT_POPUP")
+
+	## 初始化面板显示（展示拾取物名称）
+	_panel.setup(_get_expert_pickup_name())
+
+## 玩家确认拾取的回调（响应 PickupConfirmPanel.confirmed）
+## 语义：按类别随机升级一项，并消耗掉该拾取物
+func _on_expert_pickup_confirmed() -> void:
+	## 先按拾取物类别发放随机升级
+	grant_expert_random_upgrade(_expert_item_type)
+	## 消耗拾取物（播放音效并销毁）
+	finish_expert_pickup()
+	## 关闭面板并消化排队
+	_close_panel()
+	_process_pending()
+
+## 玩家取消拾取的回调（响应 PickupConfirmPanel.cancelled）
+## 语义：不升级、不消耗——拾取物恢复可拾取状态并保留在原地（玩家可稍后重试）
+func _on_expert_pickup_cancelled() -> void:
+	## 拾取物恢复可拾取状态，保留在场景中
+	cancel_expert_pickup()
+	## 四类排队计数清零（与三选一取消语义一致，避免残留计数错乱）
+	_pending_upgrades = 0
+	_pending_attribute_choices = 0
+	_pending_shield_choices = 0
+	_pending_shot_pattern_choices = 0
+	## 关闭面板并解锁
+	_close_panel()
+	is_choosing = false
+
+## 消耗当前待确认的拾取物（玩家确认"是"后调用）
+func finish_expert_pickup() -> void:
+	if _expert_pickup != null and is_instance_valid(_expert_pickup):
+		if _expert_pickup.has_method("finish_expert_pickup"):
+			_expert_pickup.finish_expert_pickup()
+		else:
+			_expert_pickup.queue_free()
+	_expert_pickup = null
+	_expert_item_type = -1
+
+## 取消当前待确认的拾取物（玩家选择"否"后调用，物品保留在原地）
+func cancel_expert_pickup() -> void:
+	if _expert_pickup != null and is_instance_valid(_expert_pickup):
+		if _expert_pickup.has_method("cancel_expert_pickup"):
+			_expert_pickup.cancel_expert_pickup()
+	_expert_pickup = null
+	_expert_item_type = -1
+
+## 读取当前待确认拾取物的显示名称（确认面板文案用；无名称时回退"道具"）
+func _get_expert_pickup_name() -> String:
+	if _expert_pickup != null and is_instance_valid(_expert_pickup):
+		var item: Variant = _expert_pickup.get("drop_item")
+		if item != null and "item_name" in item and str(item.item_name) != "":
+			return str(item.item_name)
+	return "道具"
+
+## 按拾取物类别发放一次随机升级（专家机制核心入口）
+## 参数：item_type - DropItem.ItemType
+## 返回：是否成功发放
+func grant_expert_random_upgrade(item_type: int) -> bool:
+	match item_type:
+		DropItem.ItemType.BUFF:
+			## 特效技能书：在特效技能类内随机升级
+			return _grant_expert_upgrade_from_pool(true)
+		DropItem.ItemType.ATTRIBUTE_SKILL:
+			## 属性技能书：在属性技能类内随机升级
+			return _grant_expert_upgrade_from_pool(false)
+		DropItem.ItemType.EQUIPMENT:
+			## 护盾装备：随机升级/替换护盾
+			return _grant_expert_random_shield()
+		DropItem.ItemType.SHOT_PATTERN:
+			## 弹道构型书：随机替换构型
+			return _grant_expert_random_shot_pattern()
+	return false
+
+## 从指定类别词条池随机挑一项 +1 级（特效类/属性类共用）
+## 规则："随机增加等级"——从该类未满级（未达 max_stacks）的池中随机取一项 apply_upgrade；
+##       若该类已持有种类数达到上限，apply_upgrade 内部会自动随机替换掉一个旧技能（"满则随机替换"）
+## 参数：want_effect - true=特效技能类 / false=属性技能类
+## 返回：是否成功
+func _grant_expert_upgrade_from_pool(want_effect: bool) -> bool:
+	## 收集该类当前未满级的词条（含已持有与未持有——已持有则叠层升级，未持有则新增/触发替换）
+	var candidates: Array = []
+	for upgrade in _upgrade_pool:
+		if upgrade.is_effect_upgrade() != want_effect:
+			continue
+		if _upgrade_stacks.get(upgrade.upgrade_id, 0) >= upgrade.max_stacks:
+			continue
+		candidates.append(upgrade)
+	## 该类全部满级（无可用词条）时无升级可发
+	if candidates.is_empty():
+		return false
+	var picked: Resource = candidates[RandomManager.randi_range(0, candidates.size() - 1)]
+	apply_upgrade(picked)
+	return true
+
+## 专家模式：随机升级护盾（单槽位）
+## 规则：未装备→随机抽一面装备；已装备且未满层→叠加当前护盾层数（"增加等级"的唯一途径）；
+##       已装备且已满层→随机抽一面不同的护盾替换（"满则随机替换"）
+## 返回：是否成功
+func _grant_expert_random_shield() -> bool:
+	if _shield_pool.is_empty():
+		return false
+	var player: Node2D = _get_player()
+	if player == null or not player.has_method("equip_shield"):
+		return false
+	## 读取当前已装备护盾及其层数（护盾组件为 EquipmentShieldComponent，无 class_name，走 has_method 动态调用）
+	var shield_comp: Node = _get_shield_component(player)
+	var owned: Resource = null
+	var owned_stack: int = 0
+	if shield_comp != null and shield_comp.has_method("get_shield_data"):
+		owned = shield_comp.get_shield_data()
+		if shield_comp.has_method("get_shield_stack"):
+			owned_stack = int(shield_comp.get_shield_stack())
+	var max_stack: int = int(EquipmentShieldComponentScript.MAX_SHIELD_STACK)
+	## 已装备且未满层：叠加当前护盾（提升层数）
+	if owned != null and owned_stack < max_stack:
+		player.equip_shield(owned)
+		return true
+	## 未装备 或 已满层：从池中随机抽一面（满层时排除当前护盾，保证确实发生替换）
+	var exclude_id: String = str(owned.shield_id) if owned != null else ""
+	var picked: Resource = _pick_random_shield_excluding(exclude_id)
+	if picked == null:
+		return false
+	player.equip_shield(picked)
+	return true
+
+## 从护盾池随机抽一面护盾（可排除指定 shield_id；排除后为空则退回完整池兜底）
+## 参数：exclude_id - 要排除的 shield_id（空串表示不排除）
+## 返回：随机护盾资源；池为空时返回 null
+func _pick_random_shield_excluding(exclude_id: String) -> Resource:
+	if _shield_pool.is_empty():
+		return null
+	var pool: Array = []
+	for s in _shield_pool:
+		if s != null and not exclude_id.is_empty() and str(s.shield_id) == exclude_id:
+			continue
+		pool.append(s)
+	## 兜底：池中仅此一种且被排除时不能返回空，否则无法替换
+	if pool.is_empty():
+		pool = _shield_pool.duplicate()
+	if pool.is_empty():
+		return null
+	return pool[RandomManager.randi_range(0, pool.size() - 1)]
+
+## 获取玩家的护盾组件节点（EquipmentShieldComponent）
+## 返回：组件节点；玩家无该属性时返回 null
+func _get_shield_component(player: Node2D) -> Node:
+	if player == null:
+		return null
+	var comp: Variant = player.get("equipment_shield")
+	if comp is Node:
+		return comp as Node
+	return null
+
+## 专家模式：随机换弹道构型（单槽位、不叠层、无等级）
+## 规则：从构型池随机抽一个（排除当前已装备的，避免"换了等于没换"）→ 替换当前弹道
+## 返回：是否成功
+func _grant_expert_random_shot_pattern() -> bool:
+	if _shot_pattern_pool.is_empty():
+		return false
+	var player: Node2D = _get_player()
+	if player == null or not player.has_method("equip_shot_pattern"):
+		return false
+	## 排除当前已装备构型（按 pattern_id 比对，避免深拷贝引用不同而漏排除）
+	var owned_id: String = _get_owned_pattern_id()
+	var pool: Array = []
+	for p in _shot_pattern_pool:
+		if p != null and not owned_id.is_empty() and str(p.pattern_id) == owned_id:
+			continue
+		pool.append(p)
+	## 兜底：池中仅一种且已装备时退回完整池（否则无法替换）
+	if pool.is_empty():
+		pool = _shot_pattern_pool.duplicate()
+	if pool.is_empty():
+		return false
+	var picked: Resource = pool[RandomManager.randi_range(0, pool.size() - 1)]
+	player.equip_shot_pattern(picked)
+	return true
 
 ## ========== 词条应用 ==========
 

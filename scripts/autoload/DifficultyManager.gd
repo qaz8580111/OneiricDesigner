@@ -4,9 +4,12 @@
 ## 设计意图：
 ##   1. 难度与阶段强绑定（用户定制规则）：每次难度提升都必须先击败当前阶段的守门 Boss，
 ##      难度不再随时间自动爬升——"打倒 Boss"是唯一的升级途径，Boss 不倒下就永远卡在当前难度
-##   2. 数据驱动调参：所有缩放系数均为常量，集中在文件顶部，调平衡无需改动逻辑
-##   3. 缩放只作用于"实例副本"：绝不修改共享的.tres资源，避免跨局/跨实例串扰
-##   4. 波次事件（趣味性/随机性）：每N级触发一次敌潮，制造高压时刻与爽点
+##   2. 三档难度模式（用户定制规则）：普通/困难/专家三档，全局统一从难度1开局；
+##      普通=基线，困难=在基线之上叠加"HARD_* 倍率"，专家=与困难数值一致并额外启用专家机制
+##      （专家机制：移除三选一，拾取物二次确认后按类别随机升级，见 UpgradeManager）
+##   3. 数据驱动调参：所有缩放系数均为常量，集中在文件顶部，调平衡无需改动逻辑
+##   4. 缩放只作用于"实例副本"：绝不修改共享的.tres资源，避免跨局/跨实例串扰
+##   5. 波次事件（趣味性/随机性）：每N级触发一次敌潮，制造高压时刻与爽点
 ## 数据流：StageDirector 在击败阶段 Boss 时调用 advance_by_boss() → 等级+1 并广播
 ##         difficulty_changed/wave_started → GameWorld/Enemy 生成敌人时调用
 ##         get_*_mult()/apply_to_enemy_data() 完成属性缩放
@@ -21,6 +24,27 @@ signal difficulty_changed(new_level: int)
 ## 波次开始信号：触发敌潮事件时发出（GameWorld批量刷怪、HUD显示警告）
 ## 参数：wave_number - 波次序号（第几波），spawn_count - 本波建议刷怪数量
 signal wave_started(wave_number: int, spawn_count: int)
+
+## ========== 难度模式（三档，用户定制规则） ==========
+
+## 难度模式枚举（与 Settings.gd DIFFICULTY_KEYS 顺序严格一致）
+##   NORMAL(0) - 普通：完全沿用既有难度曲线，不叠加任何模式倍率（基线）
+##   HARD(1)   - 困难：在基线之上叠加 HARD_* 倍率（伤害/血量×2，速度轴小幅提升，掉率下调）
+##   EXPERT(2) - 专家：数值与困难一致，并额外启用"专家机制"（移除三选一 + 拾取二次确认随机升级）
+enum DifficultyMode { NORMAL = 0, HARD = 1, EXPERT = 2 }
+
+## 困难档：敌人血量倍率（用户要求：普通数值的 2 倍）
+const HARD_HEALTH_MULT: float = 2.0
+## 困难档：敌人伤害倍率（用户要求：普通数值的 2 倍）
+const HARD_DAMAGE_MULT: float = 2.0
+## 困难档：敌人移速倍率（速度轴"适当增加"，避免直接翻倍导致无法走位）
+const HARD_MOVE_SPEED_MULT: float = 1.15
+## 困难档：敌人子弹飞行速度倍率（速度轴"适当增加"）
+const HARD_BULLET_SPEED_MULT: float = 1.15
+## 困难档：敌人攻速倍率（>1 表示攻击更频繁，内部换算为冷却缩短）
+const HARD_ATTACK_SPEED_MULT: float = 1.1
+## 困难档：掉落系数（<1 表示"爆率适当下降"，作用于掉落概率 drop_chance）
+const HARD_DROP_MULT: float = 0.6
 
 ## ========== 调参常量（难度曲线的核心配置，集中管理便于平衡调整） ==========
 
@@ -79,7 +103,7 @@ const MIN_ATTACK_COOLDOWN: float = 0.25
 
 ## 当前难度等级（从1开始，与"当前阶段"严格一一对应）
 ## 唯一提升途径：StageDirector 在击败阶段守门 Boss 后调用 advance_by_boss()
-## 开局档可通过 set_start_level() 指定起始等级（等价于"起始阶段"，即前几关Boss视为已通过）
+## 每局恒从 1 开局（用户规则：已取消"起始阶段"机制，档位差异改由难度模式倍率承担）
 var level: int = 1
 
 ## 登塔增幅系数组（无尽模式专用）：由 TowerManager 每层递增写入，1.0=未登塔
@@ -97,9 +121,13 @@ var tower_mults: Dictionary = {
 	"bullet_speed": 1.0,
 }
 
-## 已配置的开局起始等级（Settings 界面设置后生效，下次新游戏从这里起步）
-## 默认=1（新手标准）；值范围 1~10（过大开局会直接秒杀玩家）
-var _configured_start_level: int = 1
+## 本局生效的难度模式（DifficultyMode 枚举值，0=普通/1=困难/2=专家）
+## 由 _on_game_started() 从配置快照读取并锁定——对局进行中修改配置不影响本局
+var difficulty_mode: int = DifficultyMode.NORMAL
+
+## 已配置的难度模式（Settings 界面设置后生效，下次新游戏从这里起步）
+## 默认=普通（NORMAL）；值范围 0~2，越界由 set_difficulty_mode() 兜底夹取
+var _configured_difficulty_mode: int = DifficultyMode.NORMAL
 
 ## 已触发的波次计数（用于wave_started信号的序号参数）
 var _wave_count: int = 0
@@ -108,32 +136,34 @@ var _wave_count: int = 0
 
 ## _ready() - 进入场景树时初始化
 ## 工作：
-##   1. 从 settings.cfg 加载玩家保存的难度档（这样即便从未打开设置界面也会用保存的难度开局）
+##   1. 从 settings.cfg 加载玩家保存的难度模式（这样即便从未打开设置界面也会用保存的难度开局）
 ##   2. 连接 game_started 信号
 func _ready() -> void:
-	## 先加载保存的难度档 → 映射到起始等级
-	_load_start_level_from_config()
+	## 先加载保存的难度模式 → 作为下次新游戏的配置快照
+	_load_difficulty_mode_from_config()
 	## 监听游戏开始信号：每局开始时重置难度状态
 	GameManager.game_started.connect(_on_game_started)
 
 ## 重置本局难度状态（响应GameManager.game_started）
-## 算法：直接跳到配置的起始等级（起始阶段），不再模拟时间流逝
-##   - 目标等级=1：正常开局
-##   - 目标等级=4（困难档）：直接被认定为阶段4，前3个守门 Boss 视为已通过
-## 注意事项：
-##   * 本函数由 autoload 顺序保证先于 StageDirector._on_game_started 执行，
-##     因此 StageDirector 可以在自己的开局回调里直接读 DifficultyManager.level 作为起始阶段，
-##     从而保证"难度 == 阶段"从第一帧起就严格挂钩
-##   * 跳级只广播 difficulty_changed（让 HUD 立刻显示正确难度），
-##     不播音效、不触发波次事件（开局瞬间堆一波怪会给玩家莫名其妙的压力）
+## 算法：
+##   1. 锁定本局难度模式：把配置快照 _configured_difficulty_mode 拷入 difficulty_mode，
+##      之后本局全程使用该模式，对局中改设置不影响正在进行的这一局
+##   2. 难度等级恒从 1 开始（用户规则：取消"起始阶段"机制，三档统一从难度1/阶段1开局，
+##      仅靠数值倍率与专家机制区分难度，不再有 档位→起始阶段 的跳级映射）
+## 注意事项：本函数由 autoload 顺序保证先于 StageDirector._on_game_started 执行，
+##          因此 StageDirector 可以在自己的开局回调里直接读 DifficultyManager.level 作为起始阶段，
+##          从而保证"难度 == 阶段"从第一帧起就严格挂钩
 func _on_game_started() -> void:
 	## ---- 基础重置 ----
 	_wave_count = 0
 	## 登塔增幅复位：每局从无增幅开始（TowerManager 会在无尽模式登塔时重新赋值）
 	reset_tower_mults()
 
-	## ---- 直接落到配置的起始阶段 ----
-	level = clampi(_configured_start_level, 1, MAX_LEVEL)
+	## ---- 锁定本局难度模式 ----
+	difficulty_mode = _configured_difficulty_mode
+
+	## ---- 统一从难度1开局（已取消起始阶段机制） ----
+	level = 1
 	## 广播难度变化信号（HUD更新难度显示；StageDirector 亦以此作为起始阶段）
 	difficulty_changed.emit(level)
 	## 上报统计（结算面板展示本局达到的最高难度）
@@ -141,54 +171,50 @@ func _on_game_started() -> void:
 
 ## ========== 外部 API（Settings.gd / Main.gd 使用） ==========
 
-## 设置开局起始等级（Settings 界面点击应用后调用）
-## 语义：等同于"起始阶段"——设为4则开局即是阶段4/难度4，前3个守门 Boss 视为已通过
-## 参数：start_level - 下次新游戏的起始难度等级（1~MAX_LEVEL，越大约猛）
-func set_start_level(start_level: int) -> void:
-	_configured_start_level = clampi(start_level, 1, MAX_LEVEL)
+## 设置难度模式（Settings 界面点击应用后调用）
+## 语义：只在"开始新游戏"时生效——set 后仅更新配置快照并持久化，不改变正在进行的对局
+## 参数：mode - 难度模式（DifficultyMode 枚举值，0=普通/1=困难/2=专家），越界自动夹取到 0~2
+func set_difficulty_mode(mode: int) -> void:
+	_configured_difficulty_mode = clampi(mode, DifficultyMode.NORMAL, DifficultyMode.EXPERT)
 	## 同时保存到 settings.cfg（确保关闭游戏再打开仍然记得）
-	_save_start_level_to_config()
-	print("[DifficultyManager] 配置开局起始阶段 = ", _configured_start_level)
+	_save_difficulty_mode_to_config()
+	print("[DifficultyManager] 配置难度模式 = ", _configured_difficulty_mode)
 
-## ========== 配置文件读写（与 Settings 共享 user://settings.cfg 的 difficulty 字段） ==========
+## 获取本局生效的难度模式（DifficultyMode 枚举值）
+## 返回：0=普通 / 1=困难 / 2=专家（对局中由 _on_game_started 锁定）
+func get_difficulty_mode() -> int:
+	return difficulty_mode
 
-## 难度档→起始阶段映射表（必须与 Settings.gd DIFFICULTY_START_LEVELS 保持完全一致）
-## 设计：两文件分开定义同一组映射，避免循环依赖；任一修改时必须同步另一处
-const _DIFFICULTY_START_LEVELS: Array[int] = [1, 2, 4, 7]
+## 是否处于专家模式（专家机制：移除三选一 + 拾取二次确认随机升级）
+## 返回：true 表示本局为专家模式
+func is_expert_mode() -> bool:
+	return difficulty_mode == DifficultyMode.EXPERT
 
-## 从 user://settings.cfg 读取 difficulty (0~3) 并转为起始等级
+## ========== 配置文件读写（与 Settings 共享 user://settings.cfg 的 difficulty_mode 字段） ==========
+
+## 从 user://settings.cfg 读取 difficulty_mode (0~2) 作为难度模式配置快照
 ## 调用时机：DifficultyManager._ready() → 首次 autoload 启动时读一次
-func _load_start_level_from_config() -> void:
+## 说明：旧版键名为 "difficulty"（起始阶段选择遗留），此处直接忽略旧键 → 回落默认普通，
+##       避免旧索引 0/1/2/3 与新三档语义错位
+func _load_difficulty_mode_from_config() -> void:
 	var config := ConfigFile.new()
 	var err: int = config.load("user://settings.cfg")
 	if err == OK:
-		## 读取难度档（0=简单/1=普通/2=困难/3=专家），默认普通档
-		var difficulty_idx: int = int(config.get_value("Settings", "difficulty", 1))
-		## 映射到起始阶段，越界兜底为普通档(level=2)
-		if difficulty_idx >= 0 and difficulty_idx < _DIFFICULTY_START_LEVELS.size():
-			_configured_start_level = _DIFFICULTY_START_LEVELS[difficulty_idx]
-		else:
-			_configured_start_level = 2
+		## 读取难度模式（0=普通/1=困难/2=专家），默认普通档
+		var mode_idx: int = int(config.get_value("Settings", "difficulty_mode", DifficultyMode.NORMAL))
+		_configured_difficulty_mode = clampi(mode_idx, DifficultyMode.NORMAL, DifficultyMode.EXPERT)
 	else:
 		## 首次启动无配置 → 使用普通档开局（业界通用默认）
-		_configured_start_level = 2
-	print("[DifficultyManager] 读取到起始阶段配置 = ", _configured_start_level)
+		_configured_difficulty_mode = DifficultyMode.NORMAL
+	print("[DifficultyManager] 读取到难度模式配置 = ", _configured_difficulty_mode)
 
-## 把当前 _configured_start_level 反查回难度档索引，写回 settings.cfg
-## 调用时机：set_start_level() 被外部设置之后，持久化到磁盘
-func _save_start_level_to_config() -> void:
+## 把当前 _configured_difficulty_mode 写回 settings.cfg
+## 调用时机：set_difficulty_mode() 被外部设置之后，持久化到磁盘
+func _save_difficulty_mode_to_config() -> void:
 	var config := ConfigFile.new()
-	var err: int = config.load("user://settings.cfg")
 	## 加载失败也能写：ConfigFile 空对象就是空配置，保存会创建新文件
-	var best_idx: int = 1  # 存回普通档兜底
-	var best_dist: int = 9999
-	## 找到离当前 start_level 最近的难度档索引（反查）
-	for i in range(_DIFFICULTY_START_LEVELS.size()):
-		var d: int = abs(_DIFFICULTY_START_LEVELS[i] - _configured_start_level)
-		if d < best_dist:
-			best_dist = d
-			best_idx = i
-	config.set_value("Settings", "difficulty", best_idx)
+	config.load("user://settings.cfg")
+	config.set_value("Settings", "difficulty_mode", _configured_difficulty_mode)
 	config.save("user://settings.cfg")
 
 ## ========== 难度提升核心逻辑 ==========
@@ -264,6 +290,40 @@ func get_max_enemies(base_max: int) -> int:
 func get_drop_value_mult() -> float:
 	return minf(1.0 + DROP_VALUE_PER_LEVEL * (level - 1), DROP_VALUE_MULT_MAX)
 
+## ========== 难度模式倍率查询（模式倍率在难度曲线之上再叠一层，普通档全为1.0） ==========
+## 说明：困难与专家共用同一套数值倍率（用户规则：专家"其他数值和困难一致"），
+##       仅专家额外启用"专家机制"（见 UpgradeManager.is_expert_mode）
+
+## 当前是否处于"困难档及以上"（困难或专家）
+## 返回：true 表示需要叠加 HARD_* 数值倍率
+func _is_hard_tier() -> bool:
+	return difficulty_mode == DifficultyMode.HARD or difficulty_mode == DifficultyMode.EXPERT
+
+## 获取难度模式的敌人血量倍率（普通=1.0，困难/专家=HARD_HEALTH_MULT）
+func get_mode_health_mult() -> float:
+	return HARD_HEALTH_MULT if _is_hard_tier() else 1.0
+
+## 获取难度模式的敌人伤害倍率（普通=1.0，困难/专家=HARD_DAMAGE_MULT）
+func get_mode_damage_mult() -> float:
+	return HARD_DAMAGE_MULT if _is_hard_tier() else 1.0
+
+## 获取难度模式的敌人移速倍率（普通=1.0，困难/专家=HARD_MOVE_SPEED_MULT）
+func get_mode_move_speed_mult() -> float:
+	return HARD_MOVE_SPEED_MULT if _is_hard_tier() else 1.0
+
+## 获取难度模式的敌人子弹飞行速度倍率（普通=1.0，困难/专家=HARD_BULLET_SPEED_MULT）
+func get_mode_bullet_speed_mult() -> float:
+	return HARD_BULLET_SPEED_MULT if _is_hard_tier() else 1.0
+
+## 获取难度模式的敌人攻速倍率（普通=1.0，困难/专家=HARD_ATTACK_SPEED_MULT；>1 攻击更频繁）
+func get_mode_attack_speed_mult() -> float:
+	return HARD_ATTACK_SPEED_MULT if _is_hard_tier() else 1.0
+
+## 获取难度模式的掉落倍率（普通=1.0，困难/专家=HARD_DROP_MULT < 1 表示爆率下调）
+## 使用方：DropItem.should_drop() 在概率判定时乘以此系数
+func get_mode_drop_mult() -> float:
+	return HARD_DROP_MULT if _is_hard_tier() else 1.0
+
 ## 获取难度显示文本（HUD使用）
 ## 返回：如"难度 3"
 func get_difficulty_label() -> String:
@@ -312,10 +372,16 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 	var tower_attack_speed: float = get_tower_mult("attack_speed")
 	var tower_move_speed: float = get_tower_mult("move_speed")
 	var tower_bullet_speed: float = get_tower_mult("bullet_speed")
-	## 计算实际应用的各级系数：(1.0 + 难度增量*缩放强度) × 对应轴的登塔系数
-	var health_mult: float = (1.0 + (get_health_mult() - 1.0) * intensity) * tower_health
-	var damage_mult: float = (1.0 + (get_damage_mult() - 1.0) * intensity) * tower_damage
-	var speed_mult: float = (1.0 + (get_speed_mult() - 1.0) * intensity) * tower_move_speed
+	## 难度模式倍率（三档难度）：普通档全为 1.0，困难/专家在此注入 2 倍伤害/血量与速度轴增幅
+	var mode_health: float = get_mode_health_mult()
+	var mode_damage: float = get_mode_damage_mult()
+	var mode_move_speed: float = get_mode_move_speed_mult()
+	var mode_bullet_speed: float = get_mode_bullet_speed_mult()
+	var mode_attack_speed: float = get_mode_attack_speed_mult()
+	## 计算实际应用的各级系数：(1.0 + 难度增量*缩放强度) × 对应轴的登塔系数 × 难度模式倍率
+	var health_mult: float = (1.0 + (get_health_mult() - 1.0) * intensity) * tower_health * mode_health
+	var damage_mult: float = (1.0 + (get_damage_mult() - 1.0) * intensity) * tower_damage * mode_damage
+	var speed_mult: float = (1.0 + (get_speed_mult() - 1.0) * intensity) * tower_move_speed * mode_move_speed
 
 	## 缩放基础属性（使用"in"检查保证对任意EnemyData子类安全）
 	if "max_health" in enemy_data:
@@ -327,12 +393,13 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 	if "wander_speed" in enemy_data:
 		enemy_data.wander_speed = enemy_data.wander_speed * speed_mult
 
-	## 缩放攻击冷却：登塔"攻速增幅"在此换算为冷却缩短（冷却 = 原冷却 / 攻速倍数）
+	## 缩放攻击冷却：登塔"攻速增幅"与难度模式攻速在此换算为冷却缩短
+	## （冷却 = 原冷却 / (攻速倍数 × 模式攻速倍数)）
 	## 下限保护 MIN_ATTACK_COOLDOWN：极高层数下冷却不得趋近 0，否则同帧可重复触发攻击，
 	## 弹幕会在瞬间饱和。当前所有敌人的基础冷却均 ≥1.0，未登塔时下限不产生任何影响
 	if "attack_cooldown" in enemy_data:
 		enemy_data.attack_cooldown = maxf(
-			enemy_data.attack_cooldown / tower_attack_speed, MIN_ATTACK_COOLDOWN)
+			enemy_data.attack_cooldown / (tower_attack_speed * mode_attack_speed), MIN_ATTACK_COOLDOWN)
 
 	## 缩放敌人子弹伤害：duplicate子弹数据后修改伤害
 	## 注意：EnemyData.duplicate()默认不深拷贝子资源，bullet_data与池内共享，
@@ -342,11 +409,11 @@ func apply_to_enemy_data(enemy_data: Resource, is_elite: bool = false) -> void:
 		## 子弹伤害与碰撞伤害同系数缩放
 		if "damage" in bullet_copy:
 			bullet_copy.damage = maxi(int(ceil(bullet_copy.damage * damage_mult)), 1)
-		## 子弹飞行速度：登塔"弹速增幅"独立生效
+		## 子弹飞行速度：登塔"弹速增幅"与难度模式弹速独立生效
 		## 注意：此链路只覆盖普通攻击弹幕；高级怪的技能弹幕速度配置在 MonsterSkill 中，
 		##       不经过 bullet_data，故不受登塔增幅影响（既有行为，保持不变）
 		if "speed" in bullet_copy:
-			bullet_copy.speed = bullet_copy.speed * tower_bullet_speed
+			bullet_copy.speed = bullet_copy.speed * tower_bullet_speed * mode_bullet_speed
 		## 替换为独立副本（该副本只属于这个敌人实例的数据）
 		enemy_data.bullet_data = bullet_copy
 
