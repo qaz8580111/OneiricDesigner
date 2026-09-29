@@ -11,10 +11,13 @@
   - 动画槽位（CharacterSkin 已预留命名）：`idle`（待机 2~4 帧）、`move`（移动 4~6 帧）、`attack`（2~4 帧）、`hit`（1~2 帧）、`death`（4~6 帧）
 - 关键：**所有角色用同一像素颗粒度（如统一 16×16 网格画风）**，混用风格会很违和
 
-**2. 技能 / 装备 / 词条图标**
+**2. 词条 / 装备 / 护盾 / 主动技能图标**
 - 格式：**PNG，正方形，16×16 或 32×32**，透明底
-- 命名直接用 upgrade_id（如 `upg_damage.png`、`upg_burning.png`），之后接入可以零配置自动映射
-- 21 个技能 + 装备 + 掉落物，建议一次性画一套同风格图标包
+- 命名规则：稀有度词条图标 = `icon_upg_<upgrade_id>.png`（如 `icon_upg_damage.png`、`icon_upg_burning.png`），
+  放入 `assets/art/ui/icons/<稀有度目录>/`，由 [IconLibrary.gd](file:///d:/Projects/OneiricDesigner/scripts/ui/IconLibrary.gd) 零配置自动映射
+- 目前需制作：**21 张稀有度词条图标**（属性词条 5 + 特效词条 16，另有 4 个词条暂无图标），
+  加上护盾蓝图 4 + 装备主动技能（弹道构型）7，详见 [技能特效装备清单.md](file:///d:/Projects/OneiricDesigner/docs/技能特效装备清单.md) 第八章
+- 建议一次性画一套同风格图标包
 
 **3. 场景背景**
 - 格式：**PNG，可无缝平铺（tileable）**
@@ -67,6 +70,6 @@
 1. Kenney 上下一个角色包 + 一个 tileset（CC0，零风险）
 2. jsfxr 生成 10 个射击/爆炸音效
 3. BeepBox 做一段 1 分钟循环 BGM
-4. 自己用 Aseprite/Piskel 画 21 个技能图标（或先用 Kenney UI 包凑）
+4. 自己用 Aseprite/Piskel 画 21 张词条图标（或先用 Kenney UI 包凑）
 
 资源备齐后按上次说的目录放进 `assets/`，把文件位置发我，我来接入代码；接入完成后以后替换文件即可，不需要再改代码。
