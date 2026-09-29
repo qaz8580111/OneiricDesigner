@@ -13,6 +13,7 @@
 ;       ├── ResumeButton (Button) - 继续游戏按钮
 ;       ├── SettingsButton (Button) - 设置按钮
 ;       ├── StatusButton (Button) - 查看状态按钮（打开状态子面板）
+;       ├── EquipmentButton (Button) - 装备背包按钮（打开装备/背包子面板）
 ;       └── QuitButton (Button) - 返回主菜单按钮
 ;
 ; 使用方式：游戏暂停时作为UIStack的子节点动态加载到CanvasLayer中
@@ -92,6 +93,12 @@ text = "Settings"
 [node name="StatusButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "View Status"
+
+; EquipmentButton (Button) - 装备背包按钮
+; 打开暂停菜单内的装备/背包子面板，展示6个装备槽并可穿戴/卸下背包装备
+[node name="EquipmentButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Equipment"
 
 ; QuitButton (Button) - 返回主菜单按钮
 ; 退出当前游戏，返回主菜单

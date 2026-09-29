@@ -36,6 +36,9 @@ const EnemyDataClass = preload("res://scripts/resources/enemy/EnemyData.gd")
 ## 掉落物数据资源类：配置 Boss 丰厚掉落
 const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
 
+## 装备数据资源类：Boss 掉落装备时取稀有度枚举（EquipmentData.Rarity）
+const EquipmentDataClass = preload("res://scripts/resources/equipment/EquipmentData.gd")
+
 ## 子弹数据资源类：终极 BOSS 普攻强化配置（伤害/速度提升）
 const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
@@ -479,16 +482,18 @@ func _build_boss_data(world: Node2D, stage: int, is_final: bool) -> EnemyDataCla
 	heal.is_rare = false
 	heal.auto_adsorb = true
 	boss_data.drop_items.append(heal)
-	## 增益道具（关底必掉，守门 50%）
-	var buff: DropItemClass = DropItemClass.new()
-	buff.item_id = "boss_buff"
-	buff.item_name = "Power Boost"
-	buff.item_type = DropItemClass.ItemType.BUFF
-	buff.value = 8 if is_final else 5
-	buff.drop_chance = 1.0 if is_final else 0.5
-	buff.is_rare = true
-	buff.auto_adsorb = false
-	boss_data.drop_items.append(buff)
+	## 装备掉落（关底必掉，守门 50%；保底一件稀有装备作为 Boss 奖励）
+	## 装备系统统一承载四大成长维度，故 Boss 奖励由旧"增益道具"改为一件稀有装备
+	var equip_drop: DropItemClass = DropItemClass.new()
+	equip_drop.item_id = "equipment_drop"
+	equip_drop.item_name = "装备"
+	equip_drop.item_type = DropItemClass.ItemType.EQUIPMENT
+	equip_drop.value = 0
+	equip_drop.drop_chance = 1.0 if is_final else 0.5
+	equip_drop.is_rare = true
+	equip_drop.auto_adsorb = false
+	equip_drop.equipment_data = UpgradeManager.generate_equipment(-1, EquipmentDataClass.Rarity.RARE)
+	boss_data.drop_items.append(equip_drop)
 
 	return boss_data
 

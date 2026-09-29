@@ -4,8 +4,8 @@
 ## 出现方式：GameWorld 在游戏进行满 5 分钟后于竞技场中心 Vector2.ZERO 生成，之后永久存在不消失
 ## 交互方式：玩家靠近后按 E（GameWorld 统一处理 E 键，优先级神庙 > 商店 > 拾取物）→ 调用 interact(player)
 ## 进入规则：进入商店后游戏暂停（GameManager.pause_game），关闭面板后恢复
-## 商品规则：每 60 秒随机刷新一次 3 件商品，商品全部落在现有技能/装备体系内
-##          （属性词条 / 特效词条 / 装备护盾 / 血包），价格体系见 docs 商品清单
+## 商品规则：每 60 秒随机刷新一次 3 件商品，商品全部落在现有装备体系内
+##          （随机装备 / 血包），价格体系见 docs 商品清单
 ## 视觉方案：_draw() 程序化绘制（柜台 + 顶棚 + 发光宝石，脉冲呼吸），与主题皮肤无关
 ## 扩展性：商品生成集中在 _roll_products/_generate_product，新增商品种类只需加一个填充分支
 extends Area2D
@@ -16,10 +16,6 @@ extends Area2D
 const ShopProductClass = preload("res://scripts/resources/shop/ShopProduct.gd")
 ## 商店面板脚本（纯代码 UI）
 const SHOP_PANEL_SCRIPT = preload("res://scripts/ui/ShopPanel.gd")
-## 装备护盾数据类（护盾类商品扫描 data/equipment/ 时做类型校验）
-const ShieldEquipmentDataClass = preload("res://scripts/resources/equipment/ShieldEquipmentData.gd")
-## 升级词条数据类（属性/技能类商品从 UpgradeManager 获取后做类型收窄）
-const UpgradeDataClass = preload("res://scripts/resources/upgrade/UpgradeData.gd")
 
 ## ========== 常量 ==========
 
@@ -29,21 +25,14 @@ const INTERACT_RANGE: float = 64.0
 ## 商品刷新间隔（秒）：每 60 秒随机一次商品
 const REFRESH_INTERVAL: float = 60.0
 
-## 每次刷新的商品数量（横向 3 件，与升级三选一数量一致，面板可完整排开）
+## 每次刷新的商品数量（横向 3 件，面板可完整排开）
 const PRODUCT_COUNT: int = 3
 
 ## ---------- 价格体系（梦境碎片，与 docs 商品清单保持一致） ----------
-## 属性类词条：按稀有度分档
-const PRICE_ATTR_COMMON: int = 30
-const PRICE_ATTR_RARE: int = 60
-const PRICE_ATTR_EPIC: int = 100
-## 技能类（子弹特效）词条：略高于属性类，特效更稀有
-const PRICE_SKILL_COMMON: int = 40
-const PRICE_SKILL_RARE: int = 80
-const PRICE_SKILL_EPIC: int = 130
-## 护盾类：基础护盾 / 特效护盾
-const PRICE_SHIELD_BASIC: int = 40
-const PRICE_SHIELD_SPECIAL: int = 100
+## 装备类：按稀有度分档
+const PRICE_EQUIPMENT_COMMON: int = 60
+const PRICE_EQUIPMENT_RARE: int = 120
+const PRICE_EQUIPMENT_EPIC: int = 220
 ## 血包：固定恢复量 + 固定价格
 const PRICE_HEALTH: int = 20
 const HEALTH_AMOUNT: int = 30
@@ -174,9 +163,6 @@ func interact(_player: Node) -> void:
 		return
 	if not GameManager.is_playing():
 		return
-	## 升级三选一面板排队中/正在选择：不允许进入（防止上下文栈与暂停状态交叉）
-	if UpgradeManager and UpgradeManager.is_choosing:
-		return
 
 	_open = true
 	_open_panel()
@@ -202,61 +188,64 @@ func _roll_products() -> void:
 ## 生成一件商品：随机品类 → 从现有体系填充载荷 + 按价格体系定价
 func _generate_product() -> ShopProductClass:
 	var product: ShopProductClass = ShopProductClass.new()
-	## 品类随机分布：属性 30% / 技能 30% / 护盾 20% / 血包 20%
+	## 品类随机分布：装备 80% / 血包 20%
 	var roll: float = RandomManager.randf()
-	if roll < 0.3:
-		_fill_attribute_product(product)
-	elif roll < 0.6:
-		_fill_skill_product(product)
-	elif roll < 0.8:
-		_fill_shield_product(product)
+	if roll < 0.8:
+		_fill_equipment_product(product)
 	else:
 		_fill_health_product(product)
 	return product
 
-## 填充属性类商品（随机一个 bullet_effect 为空的属性词条）
-func _fill_attribute_product(product: ShopProductClass) -> void:
-	var upgrade: UpgradeDataClass = UpgradeManager.get_random_attribute_upgrade() as UpgradeDataClass
-	if upgrade == null:
-		## 属性词条池耗尽时回退为血包，保证商店永远有货
+## 填充装备类商品（随机生成一件装备，放入背包）
+func _fill_equipment_product(product: ShopProductClass) -> void:
+	var eq: Resource = UpgradeManager.generate_equipment()
+	if eq == null:
+		## 装备生成失败时回退为血包，保证商店永远有货
 		_fill_health_product(product)
 		return
-	product.product_type = ShopProductClass.ProductType.ATTRIBUTE
-	product.product_id = "attr_" + str(upgrade.upgrade_id)
-	product.display_name = str(upgrade.display_name)
-	product.description = str(upgrade.description)
-	product.price = _upgrade_price(upgrade, false)
-	product.product_color = _rarity_color(int(upgrade.rarity))
-	product.upgrade_data = upgrade
+	product.product_type = ShopProductClass.ProductType.EQUIPMENT
+	product.product_id = "eq_" + str(eq.equipment_id)
+	product.display_name = str(eq.display_name)
+	product.description = _equipment_description(eq)
+	product.price = _equipment_price(int(eq.rarity))
+	product.product_color = _rarity_color(int(eq.rarity))
+	product.equipment_data = eq
 
-## 填充技能类商品（随机一个 bullet_effect 非空的子弹特效词条）
-func _fill_skill_product(product: ShopProductClass) -> void:
-	var upgrade: UpgradeDataClass = UpgradeManager.get_random_effect_upgrade() as UpgradeDataClass
-	if upgrade == null:
-		## 特效词条池耗尽时回退为血包
-		_fill_health_product(product)
-		return
-	product.product_type = ShopProductClass.ProductType.SKILL
-	product.product_id = "skill_" + str(upgrade.upgrade_id)
-	product.display_name = str(upgrade.display_name)
-	product.description = str(upgrade.description)
-	product.price = _upgrade_price(upgrade, true)
-	product.product_color = _rarity_color(int(upgrade.rarity))
-	product.upgrade_data = upgrade
+## 组装装备商品描述（词条概览 + 特效数量 + 护盾/主动技能提示）
+## 参数：eq - EquipmentData 资源
+func _equipment_description(eq: Resource) -> String:
+	var parts: PackedStringArray = []
+	## 词条概览：最多展示前 2 条，其余以"等N条"概括
+	var affixes: Array = eq.get("affixes") if "affixes" in eq else []
+	if affixes.size() > 0:
+		var affix_texts: PackedStringArray = []
+		for i in range(mini(2, affixes.size())):
+			var affix: Resource = affixes[i]
+			affix_texts.append(str(affix.get_display_text()))
+		var affix_line: String = "词条：" + "、".join(affix_texts)
+		if affixes.size() > 2:
+			affix_line += " 等%d条" % affixes.size()
+		parts.append(affix_line)
+	## 特效数量提示
+	var effects: Array = eq.get("bullet_effects") if "bullet_effects" in eq else []
+	if effects.size() > 0:
+		parts.append("特效 x%d" % effects.size())
+	## 护盾提示
+	if eq.get("shield_data") != null:
+		parts.append("附带护盾")
+	## 主动技能提示
+	if eq.has_method("has_active_skill") and eq.has_active_skill():
+		parts.append("附带主动技能")
+	if parts.is_empty():
+		parts.append("一件普通的梦境装备")
+	return "\n".join(parts)
 
-## 填充护盾类商品（随机一件 data/equipment/ 下的装备护盾）
-func _fill_shield_product(product: ShopProductClass) -> void:
-	var shield: ShieldEquipmentDataClass = _random_shield()
-	if shield == null:
-		_fill_health_product(product)
-		return
-	product.product_type = ShopProductClass.ProductType.SHIELD
-	product.product_id = "shield_" + str(shield.shield_id)
-	product.display_name = str(shield.display_name)
-	product.description = "装备护盾：同类型叠加（最多3层），不同类型替换为1层"
-	product.price = PRICE_SHIELD_SPECIAL if shield.is_special else PRICE_SHIELD_BASIC
-	product.product_color = shield.shield_color
-	product.shield_data = shield
+## 按稀有度返回装备价格（0=普通 / 1=稀有 / 2=史诗）
+func _equipment_price(rarity: int) -> int:
+	match rarity:
+		2: return PRICE_EQUIPMENT_EPIC
+		1: return PRICE_EQUIPMENT_RARE
+		_: return PRICE_EQUIPMENT_COMMON
 
 ## 填充血包商品（固定恢复量 + 固定价格）
 func _fill_health_product(product: ShopProductClass) -> void:
@@ -267,43 +256,6 @@ func _fill_health_product(product: ShopProductClass) -> void:
 	product.price = PRICE_HEALTH
 	product.product_color = Color(1.0, 0.45, 0.45, 1.0)
 	product.heal_amount = HEALTH_AMOUNT
-
-## 随机加载一件装备护盾（扫描 data/equipment/ 目录，数据驱动）
-func _random_shield() -> ShieldEquipmentDataClass:
-	var shields: Array[ShieldEquipmentDataClass] = []
-	var dir_path: String = "res://data/equipment"
-	var dir: DirAccess = DirAccess.open(dir_path)
-	if dir == null:
-		return null
-
-	dir.list_dir_begin()
-	var file_name: String = dir.get_next()
-	while file_name != "":
-		if not dir.current_is_dir() and file_name.ends_with(".tres"):
-			var res: Resource = load(dir_path + "/" + file_name)
-			if res is ShieldEquipmentDataClass:
-				shields.append(res as ShieldEquipmentDataClass)
-		file_name = dir.get_next()
-	dir.list_dir_end()
-
-	if shields.is_empty():
-		return null
-	return shields[RandomManager.randi_range(0, shields.size() - 1)]
-
-## 按词条稀有度与品类计算价格（属性/技能分档，见常量区）
-## 参数：upgrade - 词条数据；is_skill - true=技能(特效)类，false=属性类
-func _upgrade_price(upgrade: UpgradeDataClass, is_skill: bool) -> int:
-	var rarity: int = int(upgrade.rarity)
-	if is_skill:
-		match rarity:
-			2: return PRICE_SKILL_EPIC
-			1: return PRICE_SKILL_RARE
-			_: return PRICE_SKILL_COMMON
-	else:
-		match rarity:
-			2: return PRICE_ATTR_EPIC
-			1: return PRICE_ATTR_RARE
-			_: return PRICE_ATTR_COMMON
 
 ## 按稀有度返回展示颜色（0=普通白 / 1=稀有蓝 / 2=史诗紫）
 func _rarity_color(rarity: int) -> Color:
@@ -352,16 +304,23 @@ func _on_product_selected(product: Resource) -> void:
 
 	## 余额不足：只提示，不扣款不发货
 	if not player.has_method("spend_dream_fragment") or player.dream_fragment < int(product.price):
-		if AudioManager:
-			AudioManager.play("ui_click", 0.6)
-		if _panel != null and _panel.has_method("notify_insufficient"):
-			_panel.notify_insufficient()
+		_notify_failure()
 		return
 
-	## 先扣款再发货（apply 失败也视为已扣，当前所有商品 apply 均必成功）
+	## 装备类且背包已满：直接拒绝（避免扣款后装备无处安放而丢失）
+	if int(product.product_type) == ShopProductClass.ProductType.EQUIPMENT and _is_backpack_full(player):
+		_notify_failure()
+		return
+
+	## 先扣款再发货
 	if not player.spend_dream_fragment(int(product.price)):
 		return
-	product.apply(player)
+	## 发货失败（如背包竞态满）→ 退款兜底，保证玩家不白花钱
+	if not product.apply(player):
+		if player.has_method("add_dream_fragment"):
+			player.add_dream_fragment(int(product.price))
+		_notify_failure()
+		return
 
 	## 购买成功音效
 	if AudioManager:
@@ -369,6 +328,22 @@ func _on_product_selected(product: Resource) -> void:
 	## 刷新面板上的碎片余额显示
 	if _panel != null and _panel.has_method("refresh_after_purchase"):
 		_panel.refresh_after_purchase()
+
+## 购买失败提示（余额不足 / 背包已满 / 发货失败）：播放提示音并让面板标题闪红
+func _notify_failure() -> void:
+	if AudioManager:
+		AudioManager.play("ui_click", 0.6)
+	if _panel != null and _panel.has_method("notify_insufficient"):
+		_panel.notify_insufficient()
+
+## 玩家背包是否已满（无背包组件时视为未满）
+func _is_backpack_full(player: Node) -> bool:
+	if player == null or not player.has_method("get_backpack"):
+		return false
+	var backpack: Node = player.get_backpack()
+	if backpack == null or not backpack.has_method("is_full"):
+		return false
+	return bool(backpack.is_full())
 
 ## 获取玩家节点（通过 player 组查找）
 func _get_player() -> Node:

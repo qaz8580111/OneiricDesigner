@@ -9,6 +9,7 @@ display_name = "梦境壁垒"
 description = "装备护盾耐久上限 +20%"
 rarity = 0
 max_stacks = 5
+equip_slots = Array[int]([2, 3])
 stat_modifiers = {
 "shield_max_mult": 0.2
 }

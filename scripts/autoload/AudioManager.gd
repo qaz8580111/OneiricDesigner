@@ -53,7 +53,7 @@ const BGM_PATH: String = "res://assets/audio/bgm/bgm.ogg"
 ## 顺序刻意安排：先建池再生成音效，保证任何系统的首次play()调用时池与缓存均已就绪
 func _ready() -> void:
 	## 设置为ALWAYS处理模式：暂停状态下音效仍可播放
-	## 设计意图：升级三选一/结算面板等UI在暂停时触发音效（upgrade_pick/ui_click等），
+	## 设计意图：神庙/商店/结算面板等UI在暂停时触发音效（upgrade_pick/ui_click等），
 	## 默认INHERIT模式会被场景树暂停卡住声音
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	## 预建语音池（一次性创建，运行期零分配）
@@ -240,7 +240,7 @@ func _generate_all_sfx() -> void:
 	_sfx_cache["game_over"]          = _gen_sfx_slide(400, 100, 1.0, "sawtooth")
 
 	## ---------- 升级/难度系统类（roguelike核心循环反馈音） ----------
-	## 升级三选一选定瞬间：专属确认音"嗒"（比通用ui_click更柔和有厚度）
+	## 选择面板选定瞬间：专属确认音"嗒"（比通用ui_click更柔和有厚度）
 	## 参数考量：1400Hz略高于ui_click的1200Hz更清脆；triangle波比square柔和不刺耳；
 	## 0.05s比ui_click的0.04s略长保证可闻性；amp 0.5与奖励音拉开层次
 	_sfx_cache["upgrade_confirm"]    = _gen_sfx_beep(1400, 0.05, "triangle", 0.5)

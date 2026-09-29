@@ -148,6 +148,14 @@ game_shoot={
 , Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":0,"button_index":2,"pressure":0.0,"pressed":false,"script":null)
 ]
 }
+; game_skill=主动技能释放（装备系统：武器/戒指/法宝携带的弹道构型主动技，带冷却）；键盘R(physical_keycode=82)/鼠标右键(button_index=2)/手柄Y键(Godot4 JOY_BUTTON_Y=3)
+game_skill={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":82,"key_label":0,"unicode":114,"location":0,"echo":false,"script":null)
+, Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":0,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":0,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":2,"canceled":false,"pressed":false,"double_click":false,"script":null)
+, Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":0,"button_index":3,"pressure":0.0,"pressed":false,"script":null)
+]
+}
 ; game_pause=PauseBreak键(键盘)/START键(手柄，Godot4 JOY_BUTTON_START=6；旧Godot3索引9在Godot4是左肩键LB，已修正)
 game_pause={
 "deadzone": 0.5,
@@ -180,7 +188,7 @@ game_aim_down={
 "events": [Object(InputEventJoypadMotion,"resource_local_to_scene":false,"resource_name":"","device":0,"axis":3,"axis_value":1.0,"script":null)
 ]
 }
-; ===== 升级三选一切换（用户定制：手柄从D-Pad改为后下方扳机LT/RT，键盘Q/E保留） =====
+; ===== 选择面板切换（用户定制：手柄从D-Pad改为后下方扳机LT/RT，键盘Q/E保留） =====
 ; game_choice_prev=键盘Q(physical_keycode=81)/手柄LT扳机(轴axis=4按下到1.0，deadzone0.5为半扣阈值，≥0.15符合规范)
 game_choice_prev={
 "deadzone": 0.5,

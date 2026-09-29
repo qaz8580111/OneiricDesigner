@@ -66,7 +66,7 @@ const TRIGGER_PRESSED_THRESHOLD: float = 0.5
 
 ## 扳机两次边沿触发之间的最小间隔（秒）
 ## 修复：手柄LT/RT是模拟轴，半扣时轴值会在0.5阈值附近抖动，产生多次"松开→扣下"边沿，
-##       导致升级三选一/神庙/商店的左右切换"稍微按一下就连续滑到最前/最后"。
+##       导致神庙/商店的左右切换"稍微按一下就连续滑到最前/最后"。
 ##       加冷却后，同一扳机在一次扣下后的0.2秒内不再重复触发，抖动被吞掉。
 const TRIGGER_EDGE_COOLDOWN: float = 0.2
 
@@ -119,7 +119,7 @@ func _input(event: InputEvent) -> void:
 		_mouse_left_pressed = event.pressed
 		## 仅在 GAMEPLAY 上下文中将鼠标左键按下缓存为 game_shoot 动作
 		## 铁律：鼠标左键在 project.godot 中只绑定 game_shoot，绝不能再绑 game_interact——
-		## 否则战斗中开枪会同时触发拾取，路过技能书/护盾时被"自动捡走"（玩家没按E却拾取）。
+		## 否则战斗中开枪会同时触发拾取，路过掉落物时被"自动捡走"（玩家没按E却拾取）。
 		## 手动拾取的 game_interact 只用 E/空格/Enter/手柄A（见 project.godot 绑定）
 		if event.pressed and get_current_context() == "GAMEPLAY":
 			_just_pressed_actions["game_shoot"] = true
@@ -147,9 +147,10 @@ func _input(event: InputEvent) -> void:
 		# 检查键盘/手柄游戏动作
 		var game_actions: Array[String] = [
 			"game_move_up", "game_move_down", "game_move_left", "game_move_right",
-			"game_shoot", "game_interact", "game_confirm", "game_cancel",
+			# game_skill：装备主动技能释放（武器/戒指/法宝携带的弹道构型主动技）
+			"game_shoot", "game_skill", "game_interact", "game_confirm", "game_cancel",
 			"game_advance", "game_skip", "game_pause",
-			# 升级三选一切换：本分支只收键盘Q/E；手柄LT/RT是轴事件无pressed，
+			# 选择面板切换：本分支只收键盘Q/E；手柄LT/RT是轴事件无pressed，
 			# 由_handle_trigger_motion单独做越阈边沿检测
 			"game_choice_prev", "game_choice_next",
 			# UI方向动作也统一捕获：D-Pad/方向键在菜单与选择面板中经网关消费，
@@ -167,7 +168,7 @@ func _input(event: InputEvent) -> void:
 				if _is_action_allowed_in_context(action):
 					_just_pressed_actions[action] = true
 
-## 处理手柄轴事件中的LT/RT扳机（升级三选一切换用）
+## 处理手柄轴事件中的LT/RT扳机（选择面板切换用）
 ## 背景：InputEventJoypadMotion无pressed属性，走不了通用按键缓存；
 ##       这里按轴值是否越过TRIGGER_PRESSED_THRESHOLD自行做"按下/松开"边沿检测，
 ##       只在松开→扣下的跳变沿写入一次just_pressed缓存（与按键语义一致）
@@ -425,7 +426,8 @@ func _is_action_allowed_in_context(action: String) -> bool:
 	# 定义上下文允许的动作列表（值为动作名或前缀，如"ui_"放行全部ui_开头的动作）
 	var allowed_actions: Dictionary = {
 		# game_pause：手柄START/键盘Pause呼出暂停；瞄准为网关内轮询轴，game_aim_仅作文档化标注
-		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot", "game_pause", "game_aim_"],
+		# game_skill：装备主动技能释放（武器/戒指/法宝的弹道构型主动技）
+		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot", "game_skill", "game_pause", "game_aim_"],
 		# game_pause：暂停菜单中再按START恢复游戏（ui_cancel=B/ESC由菜单导航器处理恢复）
 		# game_choice_prev/next：手柄LT/RT扳机（设置页切换标签页）；键盘Q/E同动作
 		"PAUSE_MENU": ["ui_", "game_interact", "game_pause", "game_choice_prev", "game_choice_next"],
@@ -434,23 +436,15 @@ func _is_action_allowed_in_context(action: String) -> bool:
 		"EVENT_POPUP": ["game_confirm", "game_cancel"],
 		"DIALOGUE": ["game_advance", "game_skip"],
 		"INVENTORY": ["ui_navigate", "ui_confirm", "ui_cancel"],
-		# 升级三选一：不暂停战斗，移动/射击/交互全部保留；
-		# 卡片左右切换优先用手柄LT/RT扳机(game_choice_prev/next)，键盘Q/E同义；
-		# D-Pad/方向键(ui_left/ui_right)保留为备用，确认用A/Space
-		"LEVEL_UP_CHOICE": [
-			"game_move_", "game_shoot", "game_interact", "game_aim_",
-			"game_choice_prev", "game_choice_next",
-			"ui_up", "ui_down", "ui_left", "ui_right", "ui_confirm", "game_confirm", "ui_cancel"
-		],
 		"TEMPLE_CHOICE": [
 			"game_move_", "game_shoot", "game_interact", "game_aim_",
-			# 神庙选项左右选择与升级三选一同款：优先手柄LT/RT扳机(game_choice_prev/next)、键盘Q/E同义，
+			# 神庙选项左右选择：优先手柄LT/RT扳机(game_choice_prev/next)、键盘Q/E同义，
 			# D-Pad/方向键(ui_left/ui_right)保留为备用
 			"game_choice_prev", "game_choice_next",
 			"ui_up", "ui_down", "ui_left", "ui_right", "ui_confirm", "game_confirm", "ui_cancel"
 		],
 		# 中央商店：进入后游戏暂停，移动/射击自然停止，无需放行移动/交互键；
-		# 商品左右选择与升级三选一同款：LT/RT扳机(game_choice_prev/next)、键盘Q/E，
+		# 商品左右选择：LT/RT扳机(game_choice_prev/next)、键盘Q/E，
 		# D-Pad/方向键(ui_left/ui_right)备用；确认购买用A/Space(game_confirm/ui_confirm)，ESC关闭(ui_cancel)
 		"SHOP_CHOICE": [
 			"game_choice_prev", "game_choice_next",

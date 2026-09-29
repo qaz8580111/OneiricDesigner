@@ -1544,7 +1544,7 @@ func _flash_hit() -> void:
 	_flash_active = true
 
 	## 等待0.1秒后恢复颜色
-	## 第二参数process_always=false：闪烁计时走"游戏时间"——游戏暂停（三选一/暂停菜单）时
+	## 第二参数process_always=false：闪烁计时走"游戏时间"——游戏暂停（暂停菜单/面板）时
 	## 计时冻结，避免暂停期间恢复回调与恢复后的新受击闪烁交错错乱
 	await get_tree().create_timer(0.1, false).timeout
 
@@ -1752,123 +1752,34 @@ func _generate_default_drops() -> Array:
 		d.auto_adsorb = true
 		drops.append(d)
 
-	## BUFF：10%概率精英怪（伤害加成）
-	if is_elite and randf() < 0.1:
-		var d: DropItemClass = DropItemClass.new()
-		d.item_id = "buff_attack"
-		d.item_name = "Power Boost"
-		d.item_type = DropItemClass.ItemType.BUFF
-		d.value = 3
-		d.drop_chance = 1.0
-		d.is_rare = true
-		d.auto_adsorb = false
-		drops.append(d)
-
-	## ---------- 装备护盾掉落 ----------
-	## 普通护盾：5%概率所有怪，精英怪 15%
-	var chance_normal_shield: float = 0.05 if not is_elite else 0.15
-	if randf() < chance_normal_shield:
-		var sd: DropItemClass = DropItemClass.new()
-		sd.item_id = "shield_basic"
-		sd.item_name = "基础护盾"
-		sd.item_type = DropItemClass.ItemType.EQUIPMENT
-		sd.value = 0
-		sd.drop_chance = 1.0
-		sd.is_rare = false
-		sd.auto_adsorb = false
-		## 动态创建基础护盾数据（无特效）
-		var ShieldDataClass = load("res://scripts/resources/equipment/ShieldEquipmentData.gd")
-		var shield_data = ShieldDataClass.new()
-		shield_data.shield_id = "shield_basic"
-		shield_data.display_name = "基础护盾"
-		shield_data.shield_color = Color(0.3, 0.6, 1.0, 0.8)
-		shield_data.max_hp = 30.0
-		shield_data.absorb_per_hit = 30.0
-		shield_data.regen_delay = 10.0
-		shield_data.regen_rate = 10.0
-		shield_data.is_special = false
-		shield_data.shield_effect = null
-		sd.shield_equipment = shield_data
-		drops.append(sd)
-
-	## 特效护盾：2%概率所有怪，精英怪 8%（旧0.5%/3%太低，实测几乎看不到特效护盾掉落）
-	var chance_special_shield: float = 0.02 if not is_elite else 0.08
-	if randf() < chance_special_shield:
-		## 随机选择一种特效护盾
-		var special_types: Array = ["shield_poison", "shield_frost", "shield_reflect"]
-		var chosen: String = special_types[randi() % special_types.size()]
-		## 真实护盾名映射（旧版统一写"特效护盾"，玩家捡到也不认识是哪种）
-		var display_names: Dictionary = {
-			"shield_poison": "毒雾护盾",
-			"shield_frost": "冰霜护盾",
-			"shield_reflect": "反击护盾",
-		}
-		var sd2: DropItemClass = DropItemClass.new()
-		sd2.item_id = chosen
-		sd2.item_name = display_names[chosen]
-		sd2.item_type = DropItemClass.ItemType.EQUIPMENT
-		sd2.value = 0
-		sd2.drop_chance = 1.0
-		sd2.is_rare = true
-		sd2.auto_adsorb = false
-		## 从 .tres 资源加载特效护盾数据
-		var path_map: Dictionary = {
-			"shield_poison": "res://data/equipment/shield_poison.tres",
-			"shield_frost": "res://data/equipment/shield_frost.tres",
-			"shield_reflect": "res://data/equipment/shield_reflect.tres",
-		}
-		sd2.shield_equipment = load(path_map[chosen])
-		drops.append(sd2)
-
-	## ---------- 属性技能书掉落（图标 icon_AS） ----------
-	## 掉落概率与护盾同档：5%概率所有怪，精英怪 15%
-	## 拾取后打开"属性技能三选一"（候选只含属性词条）——与特效技能书完全分离
-	var chance_attr_skill: float = 0.05 if not is_elite else 0.15
-	if randf() < chance_attr_skill:
-		var da: DropItemClass = DropItemClass.new()
-		## item_id 需与 IconLibrary.DROP_ICON_MAP 登记一致（buff_attribute → icon_AS）
-		da.item_id = "buff_attribute"
-		da.item_name = "属性技能书"
-		da.item_type = DropItemClass.ItemType.ATTRIBUTE_SKILL
-		da.value = 0
-		da.drop_chance = 1.0
-		da.is_rare = false
-		da.auto_adsorb = false
-		drops.append(da)
-
-	## ---------- 特效技能书掉落（图标 icon_skill） ----------
-	## 掉落概率与护盾同档：5%概率所有怪，精英怪 15%
-	## 拾取后打开"特效技能三选一"（候选只含特效技能，不再混入属性技能）
-	## item_id 复用 buff_attack：与精英怪/Boss 的技能奖励共用 icon_skill 图标
-	var chance_effect_skill: float = 0.05 if not is_elite else 0.15
-	if randf() < chance_effect_skill:
-		var de: DropItemClass = DropItemClass.new()
-		de.item_id = "buff_attack"
-		de.item_name = "特效技能书"
-		de.item_type = DropItemClass.ItemType.BUFF
-		de.value = 0
-		de.drop_chance = 1.0
-		de.is_rare = false
-		de.auto_adsorb = false
-		drops.append(de)
-
-	## ---------- 弹道构型书掉落（图标 icon_BC） ----------
-	## 掉落概率与特效护盾同档：2%概率所有怪，精英怪 8%
-	## 拾取后打开"弹道构型三选一"（候选只含构型），选定即替换当前弹道（不叠层）
-	var chance_shot_pattern: float = 0.02 if not is_elite else 0.08
-	if randf() < chance_shot_pattern:
-		var dp: DropItemClass = DropItemClass.new()
-		## item_id 需与 IconLibrary.DROP_ICON_MAP 登记一致（shot_pattern → icon_BC）
-		dp.item_id = "shot_pattern"
-		dp.item_name = "弹道构型书"
-		dp.item_type = DropItemClass.ItemType.SHOT_PATTERN
-		dp.value = 0
-		dp.drop_chance = 1.0
-		dp.is_rare = true
-		dp.auto_adsorb = false
-		drops.append(dp)
+	## ---------- 装备掉落（四大成长维度统一聚合为一件随机装备） ----------
+	## 设计：装备系统把四大成长维度（基础属性/特效/护盾/弹道构型）统一聚合为装备，
+	##       因此敌人掉落的"成长奖励"全部改为一件随机装备（词条/特效/护盾/主动技能由槽位+稀有度决定）
+	## 概率：普通怪 8%，精英怪 30%
+	var chance_equipment: float = 0.08 if not is_elite else 0.30
+	if randf() < chance_equipment:
+		drops.append(_make_equipment_drop())
 
 	return drops
+
+## 生成一件"装备掉落物"
+## 参数：rarity - 指定稀有度（EquipmentData.Rarity）；-1 = 按掉落权重随机
+##       slot   - 指定槽位（EquipmentData.Slot）；-1 = 按掉落权重随机
+## 返回：配置好的 DropItem（item_type=EQUIPMENT，equipment_data=随机生成的装备实例）
+## 说明：装备从 UpgradeManager.generate_equipment 统一产出（随机性收敛于一处）；
+##       稀有度大于普通时置 is_rare 触发地面光圈/稀有音效
+func _make_equipment_drop(rarity: int = -1, slot: int = -1) -> DropItemClass:
+	var d: DropItemClass = DropItemClass.new()
+	d.item_id = "equipment_drop"
+	d.item_name = "装备"
+	d.item_type = DropItemClass.ItemType.EQUIPMENT
+	d.value = 0
+	d.drop_chance = 1.0
+	d.auto_adsorb = false
+	var eq: Resource = UpgradeManager.generate_equipment(slot, rarity)
+	d.equipment_data = eq
+	d.is_rare = eq != null and int(eq.rarity) > 0
+	return d
 
 ## ========== 碰撞检测 ==========
 

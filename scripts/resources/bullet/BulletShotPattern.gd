@@ -11,10 +11,10 @@ extends Resource
 ## 构型唯一标识（用于日志、调试和按 ID 查找）
 @export var pattern_id: String = "single"
 
-## 构型显示名称（弹道构型三选一面板卡片用；留空时调用方回退显示 pattern_id）
+## 构型显示名称（装备主动技能展示用；留空时调用方回退显示 pattern_id）
 @export var display_name: String = ""
 
-## 构型说明（弹道构型三选一面板 tooltip 用；描述该构型的弹道特点与取舍）
+## 构型说明（装备主动技能 tooltip 用；描述该构型的弹道特点与取舍）
 @export var description: String = ""
 
 ## 计算本次开火的全部弹道（扩展插槽，子类必须重写）

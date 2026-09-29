@@ -76,7 +76,7 @@ func _spawn_curse_runes(world: Node2D, pos: Vector2) -> void:
 ## 设计意图：单次await计时器即可（无tick需求）；醒后校验目标仍有效再复原，
 ##           避免目标已销毁时访问报错或"复活残留Debuff"
 func _curse_target(target: Node2D, dur: float, orig_dmg: int) -> void:
-	## 第二参数process_always=false：诅咒时长走"游戏时间"，暂停（三选一/菜单）时冻结，
+	## 第二参数process_always=false：诅咒时长走"游戏时间"，暂停（菜单/面板）时冻结，
 	## 与燃烧/中毒/减速等所有战斗计时保持同一时钟基准
 	await target.get_tree().create_timer(dur, false).timeout
 	if is_instance_valid(target):

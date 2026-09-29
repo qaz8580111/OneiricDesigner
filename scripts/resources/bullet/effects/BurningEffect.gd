@@ -99,7 +99,7 @@ func _burn_target(target: Node2D, dur: float, dps: int) -> void:
 	var tick_interval: float = 0.3
 	while ticks > 0 and is_instance_valid(target):
 		## 第二参数process_always=false：燃烧tick走"游戏时间"，暂停时冻结——
-		## 否则三选一面板停留期间燃烧照样结算，敌人会在暂停中掉血甚至死亡掉落
+		## 否则暂停面板停留期间燃烧照样结算，敌人会在暂停中掉血甚至死亡掉落
 		await target.get_tree().create_timer(tick_interval, false).timeout
 		if not is_instance_valid(target) or not target.has_method("take_damage"):
 			break

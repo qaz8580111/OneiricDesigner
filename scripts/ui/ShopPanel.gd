@@ -1,7 +1,7 @@
-## ShopPanel.gd - 商店购买面板（紧凑底栏样式，与升级三选一/神庙同款横向排版）
+## ShopPanel.gd - 商店购买面板（紧凑底栏样式，与神庙同款横向排版）
 ## 职责：展示商店 3 件商品、碎片余额，玩家选定后发出购买信号、按取消关闭商店
 ## 设计意图：
-##   1. 与 LevelUpPanel/TemplePanel 同风格：屏幕底部居中面板，商品横向一行排开
+##   1. 与 TemplePanel 同风格：屏幕底部居中面板，商品横向一行排开
 ##   2. 鼠标点击/数字键1-3/手柄LT·RT扳机左右+D-Pad备用+A购买；ESC/B 关闭商店
 ##   3. 描述走 tooltip 减小占用；标题栏实时显示玩家碎片余额
 ## 输入架构：选择输入全部经 InputManager 网关（SHOP_CHOICE 上下文放行
@@ -13,11 +13,11 @@ extends Control
 
 ## ========== 预加载资源 ==========
 
-## 商品数据类（读取 ProductType 枚举做"属性/技能/护盾/回血"类型标注；
+## 商品数据类（读取 ProductType 枚举做"装备/回血"类型标注；
 ## 本项目禁止用全局类名引用，一律 preload）
 const ShopProductLib = preload("res://scripts/resources/shop/ShopProduct.gd")
 
-## 卡片样式共享工具（与三选一/神庙同款：粗边框+外发光+底色提亮的选中态）
+## 卡片样式共享工具（与神庙面板同款：粗边框+外发光+底色提亮的选中态）
 const ChoiceCardStyleLib = preload("res://scripts/ui/ChoiceCardStyle.gd")
 
 ## ========== 信号定义 ==========
@@ -97,7 +97,7 @@ func _ready() -> void:
 	_title.text = "✦ 梦境商店 ✦"
 	_vbox.add_child(_title)
 
-	## 商品水平容器（与升级三选一同款横向排版，3 件一行不溢出）
+	## 商品水平容器（与神庙面板同款横向排版，3 件一行不溢出）
 	_hbox = HBoxContainer.new()
 	_hbox.add_theme_constant_override("separation", 6)
 	_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -234,7 +234,7 @@ func _set_selection(index: int) -> void:
 	_refresh_selection_visual()
 
 ## 刷新全部商品的选中态视觉（选中=粗边框+外发光+底色提亮+放大，其余=1px 细边框常态）
-## 具体样式由 ChoiceCardStyle 统一提供，三选一/商店/神庙三处表现完全一致
+## 具体样式由 ChoiceCardStyle 统一提供，商店/神庙两处表现完全一致
 func _refresh_selection_visual() -> void:
 	for i in range(_buttons.size()):
 		var btn: Button = _buttons[i]
@@ -244,17 +244,13 @@ func _refresh_selection_visual() -> void:
 
 ## 商品类型文案（用于卡片上的类型标注与 tooltip）
 ## 参数：product - 商品资源（ShopProduct）
-## 返回："属性"/"技能"/"护盾"/"回血"；类型字段缺失时返回空串（容错，不显示标签）
+## 返回："装备"/"回血"；类型字段缺失时返回空串（容错，不显示标签）
 func _product_type_text(product: Resource) -> String:
 	if product == null or not ("product_type" in product):
 		return ""
 	match int(product.product_type):
-		ShopProductLib.ProductType.ATTRIBUTE:
-			return "属性"
-		ShopProductLib.ProductType.SKILL:
-			return "技能"
-		ShopProductLib.ProductType.SHIELD:
-			return "护盾"
+		ShopProductLib.ProductType.EQUIPMENT:
+			return "装备"
 		ShopProductLib.ProductType.HEALTH:
 			return "回血"
 	return ""

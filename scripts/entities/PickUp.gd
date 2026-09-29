@@ -17,7 +17,7 @@ extends Area2D
 ## 掉落道具数据资源类，用于配置道具属性和效果
 const DropItemClass = preload("res://scripts/resources/enemy/DropItem.gd")
 
-## 图标加载库（掉落物统一按 item_id 经 DROP_ICON_MAP 加载图标贴图，含护盾掉落）
+## 图标加载库（掉落物统一按 item_id 经 DROP_ICON_MAP 加载图标贴图，含装备掉落）
 const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 
 ## ========== 静态纹理缓存（性能优化） ==========
@@ -26,7 +26,7 @@ const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 static var _texture_cache: Dictionary = {}
 
 ## 图标缩小纹理缓存：命名空间:id|尺寸 → 按道具尺寸预缩小的 ImageTexture
-## 命名空间区分来源（shield:护盾装备 / drop:消耗品），同类掉落物共享同一份缩小纹理
+## 命名空间为 drop（消耗品/装备掉落统一走掉落物图标），同类掉落物共享同一份缩小纹理
 ## 设计意图：图标原图可能远大于掉落物显示尺寸，加载后立即缩小一次并按键缓存，
 ##           多个同类掉落物共享；且不动 sprite.scale（脉冲动画按scale=1基线做绝对值tween）
 static var _icon_texture_cache: Dictionary = {}
@@ -122,7 +122,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	## 自动吸附类型（梦境碎片、回血）：飞向玩家
-	## 手动类型（武器、物品、BUFF/技能）：原地停留，需玩家走到位置后按E拾取
+	## 手动类型（武器、道具、装备）：原地停留，需玩家走到位置后按E拾取
 	## 扩展：新增装备类型时，在DropItem.get_auto_adsorb()中返回false即可走手动拾取路径
 	if drop_item.get_auto_adsorb() and _player != null:
 		## 计算从道具位置指向玩家位置的方向向量并归一化
@@ -137,11 +137,11 @@ func _physics_process(delta: float) -> void:
 			## 更新道具位置（方向 × 速度 × 乘数 × 时间）
 			position += direction * adsorb_speed * speed_multiplier * delta
 
-	## 注意：手动拾取（BUFF技能书/护盾等）不在本节点轮询交互键——
+	## 注意：手动拾取（武器/道具/装备等）不在本节点轮询交互键——
 	## 统一由 GameWorld._handle_manual_pickup() 处理（神庙交互优先级 > 拾取）。
 	## 旧实现在此与GameWorld双重轮询同一个game_interact边沿（读取即消费），
 	## 谁先执行不确定，可能抢在神庙前吞掉按键；且game_interact曾误绑鼠标左键，
-	## 导致玩家开枪路过时"自动捡走"技能书。现单一入口，本节点只负责自动吸附位移。
+	## 导致玩家开枪路过时"自动捡走"掉落物。现单一入口，本节点只负责自动吸附位移。
 
 ## ========== 生命周期管理（性能修复核心） ==========
 
@@ -150,7 +150,7 @@ func _physics_process(delta: float) -> void:
 ## 回收路径说明：queue_free触发tree_exiting信号 → GameWorld._on_pickup_tree_exiting
 ## 同步清理_pickups管理列表（生成时已连接），无需额外通知逻辑
 func _update_lifetime(delta: float) -> void:
-	## 已进入拾取流程（含专家模式二次确认等待期）：冻结寿命累计，
+	## 已进入拾取流程：冻结寿命累计，
 	## 保证玩家在确认面板上做决定时道具不会在脚下悄悄过期消失
 	if _is_picking:
 		return
@@ -208,12 +208,8 @@ func set_drop_item(item: DropItemClass) -> void:
 			## 普通物品：浅灰色，20x20（预留类型，暂无图标→显示浅灰方块）
 			color = Color(0.8, 0.8, 0.8, 1)
 			size = Vector2(20, 20)
-		DropItemClass.ItemType.BUFF:
-			## 增益效果：兜底色紫色，22x22（正常使用 icon_skill 真实图标）
-			color = Color(1, 0, 1, 1)
-			size = Vector2(22, 22)
 		DropItemClass.ItemType.EQUIPMENT:
-			## 装备：兜底色青蓝色，24x24（正常使用对应护盾真实图标）
+			## 装备：兜底色青蓝色，24x24（正常使用 equipment_drop 映射的真实图标）
 			color = Color(0.3, 0.6, 1.0, 1)
 			size = Vector2(24, 24)
 
@@ -223,8 +219,8 @@ func set_drop_item(item: DropItemClass) -> void:
 
 	## ========== 外观解析：优先真实图标，缺失才用占位色块 ==========
 	## 统一走掉落物图标路径（敌人掉落目录，item_id 经 DROP_ICON_MAP 映射），
-	## 不再按类型拆分支：护盾装备也在 DROP_ICON_MAP 登记为 icon_shield_basic，
-	## 地面掉落阶段只告知"这是护盾"，具体护盾种类留给拾取后的三选一决定
+	## 不再按类型拆分支：装备也以 item_id="equipment_drop" 登记为 icon_shield_basic，
+	## 地面掉落阶段只告知"这是一件装备"，具体词条/槽位/稀有度留给拾取入包后查看
 	var icon_src: Texture2D = IconLibraryLib.get_drop_icon(item.item_id)
 	var icon_cache_key: String = "drop:%s" % item.item_id
 
@@ -322,7 +318,7 @@ func _on_body_entered(body: Node2D) -> void:
 	if _is_picking or not body.is_in_group("player"):
 		return
 	
-	## 手动拾取类型（武器、物品、BUFF）：不触发接触拾取，必须通过交互键
+	## 手动拾取类型（武器、物品、装备）：不触发接触拾取，必须通过交互键
 	if drop_item != null and not drop_item.get_auto_adsorb():
 		return
 	
@@ -373,62 +369,24 @@ func pickup(target: Node2D) -> void:
 	if _is_picking or drop_item == null:
 		return
 
-	## 专家模式：类别型道具（BUFF/属性技能/护盾/弹道构型）不再立即生效，
-	## 改走"二次确认"——是→按类别随机升级并消耗；否→保留道具在原地。
-	## 具体升级发放与销毁由 UpgradeManager 负责，本节点只负责发起与状态切换。
-	if _is_expert_choice_item():
-		## 未受理（已有三选一/确认进行中）：保持原样，玩家稍后可重试
-		if UpgradeManager == null or not UpgradeManager.request_expert_pickup(self, drop_item.item_type):
-			return
-		## 锁定拾取：防止确认期间被重复触发；同时冻结寿命与脉冲闪烁
-		_is_picking = true
-		return
-
 	## 标记正在拾取（防止重复拾取）
 	_is_picking = true
 	
-	## 拾取音效：稀有BUFF用特殊音效
-	if AudioManager:
+	## 应用道具效果到目标（添加碎片、恢复血量、装备入背包等）
+	## 返回 false 表示未生效（如背包已满）：不消耗道具，复位锁定并保留在原地，玩家可稍后重试
+	var applied: bool = drop_item.apply(target)
+	if not applied:
+		_is_picking = false
+		return
+
+	## 拾取音效：稀有道具用特殊音效
+	## 装备类由 Player.add_equipment_to_backpack() 内部播放音效，此处跳过避免重复播放
+	if AudioManager and drop_item.item_type != DropItemClass.ItemType.EQUIPMENT:
 		var sfx: String = "buff_pickup" if drop_item.is_rare else "pickup_item"
 		AudioManager.play_2d(sfx, global_position, 0.8)
 	
-	## 应用道具效果到目标（添加碎片、恢复血量等）
-	drop_item.apply(target)
-	
 	## 从场景树中移除并销毁拾取物节点
 	queue_free()
-
-## 判定当前道具是否为专家模式需要二次确认的"类别型"拾取物
-## （BUFF特效技能 / 属性技能 / 护盾装备 / 弹道构型；碎片、回血无类别，仍走自动吸附立即拾取）
-## 返回：true=专家模式下应走二次确认流程
-func _is_expert_choice_item() -> bool:
-	if drop_item == null:
-		return false
-	## 非专家模式：不启用二次确认
-	if DifficultyManager == null or not DifficultyManager.is_expert_mode():
-		return false
-	## 四类"书 / 宝石"共用手动拾取 + 类别随机升级；用数组包含代替多分支 match，便于日后扩展
-	return drop_item.item_type in [
-		DropItemClass.ItemType.BUFF,
-		DropItemClass.ItemType.ATTRIBUTE_SKILL,
-		DropItemClass.ItemType.EQUIPMENT,
-		DropItemClass.ItemType.SHOT_PATTERN,
-	]
-
-## 完成专家确认拾取（玩家选择"是"，由 UpgradeManager 调用）
-## 语义：播放拾取音效并销毁道具本体
-func finish_expert_pickup() -> void:
-	if AudioManager:
-		var sfx: String = "buff_pickup" if (drop_item != null and drop_item.is_rare) else "pickup_item"
-		AudioManager.play_2d(sfx, global_position, 0.8)
-	queue_free()
-
-## 取消专家确认拾取（玩家选择"否"，由 UpgradeManager 调用）
-## 语义：解除拾取锁定，道具保留在原地并恢复可拾取显示，玩家可稍后重试
-func cancel_expert_pickup() -> void:
-	_is_picking = false
-	if sprite != null:
-		sprite.modulate = _original_color
 
 ## ========== 范围检测方法 ==========
 

@@ -365,7 +365,7 @@ func _connect_signals() -> void:
 ## _process() - 手柄LT/RT扳机循环切换标签页（每帧轮询，无按键时零开销）
 ## 设计意图：设置页四大标签页手柄可切换——LT/RT轴事件由InputManager做越阈边沿检测
 ##           转为 game_choice_prev/next 动作（PAUSE_MENU/SETTINGS上下文均放行），
-##           键盘Q/E绑定同动作，桌面端等效可用；与升级三选一切换共用同一套手感
+##           键盘Q/E绑定同动作，桌面端等效可用；与选择面板切换共用同一套手感
 func _process(_delta: float) -> void:
 	if tab_container == null:
 		return

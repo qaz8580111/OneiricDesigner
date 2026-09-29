@@ -5,8 +5,7 @@
 ##   1. 难度与阶段强绑定（用户定制规则）：每次难度提升都必须先击败当前阶段的守门 Boss，
 ##      难度不再随时间自动爬升——"打倒 Boss"是唯一的升级途径，Boss 不倒下就永远卡在当前难度
 ##   2. 三档难度模式（用户定制规则）：普通/困难/专家三档，全局统一从难度1开局；
-##      普通=基线，困难=在基线之上叠加"HARD_* 倍率"，专家=与困难数值一致并额外启用专家机制
-##      （专家机制：移除三选一，拾取物二次确认后按类别随机升级，见 UpgradeManager）
+##      普通=基线，困难=在基线之上叠加"HARD_* 倍率"，专家=与困难数值一致（无专属机制）
 ##   3. 数据驱动调参：所有缩放系数均为常量，集中在文件顶部，调平衡无需改动逻辑
 ##   4. 缩放只作用于"实例副本"：绝不修改共享的.tres资源，避免跨局/跨实例串扰
 ##   5. 波次事件（趣味性/随机性）：每N级触发一次敌潮，制造高压时刻与爽点
@@ -30,7 +29,7 @@ signal wave_started(wave_number: int, spawn_count: int)
 ## 难度模式枚举（与 Settings.gd DIFFICULTY_KEYS 顺序严格一致）
 ##   NORMAL(0) - 普通：完全沿用既有难度曲线，不叠加任何模式倍率（基线）
 ##   HARD(1)   - 困难：在基线之上叠加 HARD_* 倍率（伤害/血量×2，速度轴小幅提升，掉率下调）
-##   EXPERT(2) - 专家：数值与困难一致，并额外启用"专家机制"（移除三选一 + 拾取二次确认随机升级）
+##   EXPERT(2) - 专家：数值与困难一致（无专属机制）
 enum DifficultyMode { NORMAL = 0, HARD = 1, EXPERT = 2 }
 
 ## 困难档：敌人血量倍率（用户要求：普通数值的 2 倍）
@@ -185,11 +184,6 @@ func set_difficulty_mode(mode: int) -> void:
 func get_difficulty_mode() -> int:
 	return difficulty_mode
 
-## 是否处于专家模式（专家机制：移除三选一 + 拾取二次确认随机升级）
-## 返回：true 表示本局为专家模式
-func is_expert_mode() -> bool:
-	return difficulty_mode == DifficultyMode.EXPERT
-
 ## ========== 配置文件读写（与 Settings 共享 user://settings.cfg 的 difficulty_mode 字段） ==========
 
 ## 从 user://settings.cfg 读取 difficulty_mode (0~2) 作为难度模式配置快照
@@ -291,8 +285,7 @@ func get_drop_value_mult() -> float:
 	return minf(1.0 + DROP_VALUE_PER_LEVEL * (level - 1), DROP_VALUE_MULT_MAX)
 
 ## ========== 难度模式倍率查询（模式倍率在难度曲线之上再叠一层，普通档全为1.0） ==========
-## 说明：困难与专家共用同一套数值倍率（用户规则：专家"其他数值和困难一致"），
-##       仅专家额外启用"专家机制"（见 UpgradeManager.is_expert_mode）
+## 说明：困难与专家共用同一套数值倍率（专家档当前与困难档完全一致，无专属机制）
 
 ## 当前是否处于"困难档及以上"（困难或专家）
 ## 返回：true 表示需要叠加 HARD_* 数值倍率

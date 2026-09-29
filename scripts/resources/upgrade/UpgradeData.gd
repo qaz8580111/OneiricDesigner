@@ -1,15 +1,15 @@
-## UpgradeData.gd - 升级词条数据资源类
-## 职责：定义一条可被玩家获得的升级词条（属性加成或子弹特效），实现词条的数据驱动
+## UpgradeData.gd - 装备词条模板数据资源类
+## 职责：定义一条可被装备携带的词条（属性加成或子弹特效），实现词条的数据驱动
 ## 继承：Resource（Godot资源类，可在编辑器中创建和配置）
-## 使用场景：在 data/upgrades/ 目录下创建 .tres 文件即可新增词条，
+## 使用场景：在 data/upgrades/ 目录下创建 .tres 文件即可新增词条模板，
 ##          UpgradeManager会自动扫描该目录加载所有词条（无需改代码，可扩展性核心）
-## 被引用方：UpgradeManager（扫描/按稀有度抽取/应用词条）、LevelUpPanel（三选一UI展示）、
-##           Player（应用后按stat_modifiers修改属性、把bullet_effect追加进子弹effects）
-## 数据流：data/upgrades/*.tres → UpgradeManager加载入池 → 升级时三选一展示 →
-##         玩家选择后属性词条累加进Player、特效词条追加进子弹配置
-## 设计意图：roguelike三选一升级系统的基础数据单元——
+## 被引用方：UpgradeManager（扫描/作为装备基础属性与特效词条模板来源）、
+##           EquipmentGenerator（按槽位/稀有度为装备实例 roll 出词条）
+## 数据流：data/upgrades/*.tres → UpgradeManager加载入模板池 → EquipmentGenerator 生成装备时抽取 →
+##         装备穿戴后由 EquipmentComponent 聚合进 UpgradeManager.recompute_stats()
+## 设计意图：装备词条系统的数据单元——
 ##          属性词条通过stat_modifiers字典描述数值加成，
-##          特效词条直接引用BulletEffect资源（复用已有的16种子弹特效）
+##          特效词条直接引用BulletEffect资源（生成装备特效实例时复用）
 class_name UpgradeData
 extends Resource
 
@@ -27,16 +27,16 @@ enum Rarity {
 ## 词条唯一标识（用于去重、日志和调试）
 @export var upgrade_id: String = ""
 
-## 词条显示名称（三选一界面展示）
+## 词条显示名称（装备面板展示）
 @export var display_name: String = ""
 
-## 词条描述文本（说明效果，三选一界面展示）
+## 词条描述文本（说明效果，装备面板展示）
 @export var description: String = ""
 
 ## 词条稀有度（决定抽取权重和UI颜色）
 @export var rarity: Rarity = Rarity.COMMON
 
-## 最大叠加层数（全局统一规则：所有技能均可升至5级，满级后从三选一候选中移除）
+## 最大叠加层数（全局统一规则：所有技能均可升至5级，满级后不再参与装备抽词）
 @export var max_stacks: int = 5
 
 ## ========== 数值加成（属性词条使用） ==========
@@ -52,6 +52,15 @@ enum Rarity {
 ##          Player/UpgradeManager按约定键名读取即可
 @export var stat_modifiers: Dictionary = {}
 
+## ========== 装备词条模板适配（RPG装备化改造） ==========
+
+## 装备槽位适配：该词条可作为哪些装备槽的"基础属性/特效"参与随机 roll
+## 取值对应 EquipmentData.Slot（WEAPON=0, ARMOR=1, BOOTS=2, SHIELD=3, RING=4, TALISMAN=5）
+## 空数组 = 该词条仅作占位、不参与装备生成抽词
+## 设计意图：让同一份 .tres 词条模板可被 EquipmentGenerator._templates_for_slot() 按槽位筛选，
+##          实现"每件装备有各自的基础属性池"（如鞋子池含移速、护甲池含血量/回血）
+@export var equip_slots: Array[int] = []
+
 ## ========== 子弹特效（特效词条使用） ==========
 
 ## 子弹特效资源引用（复用data/bullet/effect/下的16种特效.tres）
@@ -62,7 +71,7 @@ enum Rarity {
 
 ## ========== 核心方法 ==========
 
-## 获取稀有度显示颜色（三选一界面使用）
+## 获取稀有度显示颜色（装备面板使用）
 ## 返回：稀有度对应的Color
 func get_rarity_color() -> Color:
 	match rarity:
@@ -73,7 +82,7 @@ func get_rarity_color() -> Color:
 		_:
 			return Color(0.9, 0.9, 0.9)    ## 普通：白色
 
-## 获取稀有度显示文本（三选一界面使用）
+## 获取稀有度显示文本（装备面板使用）
 ## 返回：稀有度中文名
 func get_rarity_text() -> String:
 	match rarity:

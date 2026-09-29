@@ -4,7 +4,7 @@
 ##   路径 = assets/art/ui/icons/<目录名>/icon_<资源id>.png
 ##   目录名由类型/稀有度映射：普通=白色普通、稀有=蓝色稀有、史诗=紫色史诗、
 ##   护盾装备=灰色护盾、敌人掉落物=敌人掉落（掉落物 item_id 经 DROP_ICON_MAP 映射到文件名）
-## 使用场景：LevelUpPanel（三选一卡片）、GameHUD（buff图标/护盾显示）、PickUp（掉落物贴图）
+## 使用场景：PauseMenu 装备/背包面板（装备与词条图标）、GameHUD（buff图标/护盾显示）、PickUp（掉落物贴图）
 ## 数据流：调用方传入 upgrade_id/shield_id/item_id → 本类拼路径 → load() → 缓存后返回
 ## 设计意图：
 ##   1. 约定优于配置：只要 png 按 icon_<id>.png 命名放进对应目录，UI 自动显示，无需改任何 .tres/代码
@@ -30,14 +30,14 @@ const RARITY_FOLDERS: Dictionary = {
 ## 护盾装备图标子目录名（装备无稀有度维度，独立目录）
 const SHIELD_FOLDER: String = "灰色护盾"
 
-## 敌人掉落物图标子目录名（碎片/血包/技能书等消耗品）
+## 敌人掉落物图标子目录名（碎片/血包/装备掉落等掉落物）
 const DROP_FOLDER: String = "敌人掉落"
 
 ## 掉落物 item_id → 图标文件名（不含扩展名）映射表
 ## 设计意图：item_id 与美术文件名按英文语义对应但不完全同名（如 fragment_small → icon_fragments_small，
 ##           精英怪变体 elite_* 共用同一张大图），故用映射表做"按英文自动适配"的唯一登记点；
 ##           新增掉落物种类时：美术放 icon_xxx.png 到"敌人掉落"目录 + 本表加一行，零代码改动
-## 取值来源：Enemy._generate_default_drops() 动态生成的 item_id，以及 data/items/*.tres 的预留 id
+## 取值来源：Enemy._generate_default_drops() 与 GameWorld/StageDirector 动态生成的 item_id
 const DROP_ICON_MAP: Dictionary = {
 	## 梦境碎片：小碎片用小图；中碎片/精英碎片/Boss碎片共用大图（大小掉落从图标尺寸上也能区分）
 	"fragment_small": "icon_fragments_small",
@@ -48,23 +48,23 @@ const DROP_ICON_MAP: Dictionary = {
 	"health_small": "icon_blood_small",
 	"elite_health": "icon_blood_big",
 	"boss_health": "icon_blood_big",
-	## 特效技能书：普通怪与精英怪/Boss 的即时技能奖励共用技能图标
-	## 设计意图：技能书已拆分为"特效技能"与"属性技能"两类掉落，
-	##           本组 id 统一映射 icon_skill，拾取后只展示特效技能三选一
-	"buff_attack": "icon_skill",
-	"elite_buff_attack": "icon_skill",
-	"boss_buff": "icon_skill",
-	## 属性技能书：拾取后只展示属性技能三选一（与特效技能掉落完全分离）
-	"buff_attribute": "icon_AS",
-	## 弹道构型书：拾取后只展示弹道构型三选一（构型不叠层，选定即替换当前弹道）
-	"shot_pattern": "icon_BC",
-	## 护盾掉落：基础/特效护盾在地面掉落物阶段统一显示同一张"基础护盾"图标
-	## 设计意图：掉落物只需告知玩家"这是一个护盾"，具体护盾种类由拾取后的三选一决定，
-	##           故 4 种护盾 id 全部映射到 icon_shield_basic（不再显示各特效护盾专属图标）
-	"shield_basic": "icon_shield_basic",
-	"shield_poison": "icon_shield_basic",
-	"shield_frost": "icon_shield_basic",
-	"shield_reflect": "icon_shield_basic",
+	## 装备掉落：四大成长维度统一聚合为装备后，地面掉落物用"基础护盾"图标占位
+	## 设计意图：掉落物只需告知玩家"这是一件装备"（不暴露具体槽位/稀有度，保留惊喜感），
+	##           具体词条/特效/护盾/主动技能由拾取入包后在背包/装备面板中查看
+	"equipment_drop": "icon_shield_basic",
+}
+
+## 装备槽位 → 兜底代表图标文件名（不含扩展名）
+## 设计意图：装备实例本身不存图标，get_equipment_icon 会先尝试"护盾蓝图/首条词条"解析，
+##           全都解析不出时才按槽位给一张"代表图标"，保证任何装备在 UI 上都有图可显示
+## 键与 EquipmentData.Slot 枚举对齐：0=武器 1=护甲 2=鞋子 3=盾牌 4=戒指 5=法宝
+const SLOT_ICON_FILES: Dictionary = {
+	0: "icon_upg_damage",       ## 武器 → 伤害
+	1: "icon_upg_max_hp",       ## 护甲 → 血量上限
+	2: "icon_upg_move_speed",   ## 鞋子 → 移动速度
+	3: "icon_shield_basic",     ## 盾牌 → 基础护盾（该图在"灰色护盾"目录）
+	4: "icon_upg_fire_rate",    ## 戒指 → 射速
+	5: "icon_upg_random",       ## 法宝 → 随机
 }
 
 ## ========== 静态缓存 ==========
@@ -77,7 +77,7 @@ static var _miss_cache: Dictionary = {}
 
 ## ========== 对外接口 ==========
 
-## 获取升级词条图标（三选一卡片 / HUD buff 图标共用）
+## 获取升级词条图标（装备/背包面板与状态面板的词条图标共用）
 ## 参数：upgrade_id - 词条唯一标识（如 "upg_damage"）；rarity - 稀有度枚举值（决定子目录）
 ## 返回：图标纹理；图标缺失或 id 为空时返回 null（调用方自行回退文字显示）
 static func get_upgrade_icon(upgrade_id: String, rarity: int) -> Texture2D:
@@ -96,7 +96,7 @@ static func get_shield_icon(shield_id: String) -> Texture2D:
 		return null
 	return _load_icon("%s/%s/icon_%s.png" % [BASE_PATH, SHIELD_FOLDER, shield_id])
 
-## 获取敌人掉落物图标（碎片/血包/技能书贴图用）
+## 获取敌人掉落物图标（碎片/血包/装备掉落贴图用）
 ## 参数：item_id - 掉落物唯一标识（DropItem.item_id，如 "fragment_small"）
 ## 返回：图标纹理；id 未登记映射或图标文件缺失时返回 null（调用方回退占位色块）
 static func get_drop_icon(item_id: String) -> Texture2D:
@@ -107,6 +107,74 @@ static func get_drop_icon(item_id: String) -> Texture2D:
 	if icon_name.is_empty():
 		return null
 	return _load_icon("%s/%s/%s.png" % [BASE_PATH, DROP_FOLDER, icon_name])
+
+## 获取子弹特效图标（装备/背包面板展示特效词条用）
+## 参数：effect_id - 特效唯一标识（BulletEffect.effect_id，不含前缀，如 "lifesteal"）
+##       rarity - 稀有度枚举值（决定图标子目录）
+## 返回：图标纹理；缺失或 id 为空时返回 null
+## 说明：特效图标复用属性词条图标（美术按 icon_upg_<effect_id>.png 命名），故此处统一补 "upg_" 前缀
+static func get_effect_icon(effect_id: String, rarity: int) -> Texture2D:
+	if effect_id.is_empty():
+		return null
+	return get_upgrade_icon("upg_" + effect_id, rarity)
+
+## 获取装备槽位兜底图标（装备自身/词条/护盾都解析不出图标时的最后一级回退）
+## 参数：slot - 槽位枚举值（EquipmentData.Slot）；rarity - 稀有度枚举值（决定首选子目录）
+## 返回：图标纹理；SLOT_ICON_FILES 未登记的槽位返回 null
+## 加载策略：先按稀有度目录找，找不到再兜底到"灰色护盾"/"敌人掉落"目录
+##           （原因：盾牌代表图标 icon_shield_basic 只存在于后两个目录，不在稀有度目录）
+static func get_slot_icon(slot: int, rarity: int = 0) -> Texture2D:
+	var file_name: String = SLOT_ICON_FILES.get(slot, "")
+	if file_name.is_empty():
+		return null
+	## 候选目录顺序：稀有度目录 → 灰色护盾 → 敌人掉落
+	var folders: Array[String] = [
+		String(RARITY_FOLDERS.get(rarity, RARITY_FOLDERS[0])),
+		SHIELD_FOLDER,
+		DROP_FOLDER,
+	]
+	for folder: String in folders:
+		var tex: Texture2D = _load_icon("%s/%s/%s.png" % [BASE_PATH, folder, file_name])
+		if tex != null:
+			return tex
+	return null
+
+## 获取一件装备的展示图标（装备/背包面板统一入口）
+## 参数：data - EquipmentData 实例
+## 返回：图标纹理；全链路都解析不出时返回 null（调用方回退色块/文字）
+## 解析优先级（尽量展示"这件装备最独特的地方"）：
+##   1. 装备自带 icon（美术若为某件装备单独配图，则优先级最高）
+##   2. 盾牌槽：护盾蓝图图标（体现护盾种类）
+##   3. 首条"带来源 id"的基础属性词条图标（体现主要属性）
+##   4. 首个子弹特效图标（体现特效）
+##   5. 按槽位兜底代表图标（保证任何装备都有图可显示）
+static func get_equipment_icon(data: EquipmentData) -> Texture2D:
+	if data == null:
+		return null
+	## 1. 装备自带图标
+	if data.icon != null:
+		return data.icon
+	## 2. 盾牌槽：护盾蓝图图标
+	if data.slot == EquipmentData.Slot.SHIELD and data.shield_data != null:
+		var shield_icon: Texture2D = get_shield_icon(data.shield_data.shield_id)
+		if shield_icon != null:
+			return shield_icon
+	## 3. 首条带来源 id 的基础属性词条图标
+	for affix: EquipmentAffix in data.affixes:
+		if affix == null or affix.source_id.is_empty():
+			continue
+		var affix_icon: Texture2D = get_upgrade_icon(affix.source_id, data.rarity)
+		if affix_icon != null:
+			return affix_icon
+	## 4. 首个子弹特效图标
+	for effect: BulletEffect in data.bullet_effects:
+		if effect == null:
+			continue
+		var effect_icon: Texture2D = get_effect_icon(effect.effect_id, data.rarity)
+		if effect_icon != null:
+			return effect_icon
+	## 5. 按槽位兜底
+	return get_slot_icon(data.slot, data.rarity)
 
 ## ========== 内部方法 ==========
 

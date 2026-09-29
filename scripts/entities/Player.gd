@@ -17,9 +17,6 @@ extends CharacterBody2D
 ## 子弹数据资源类，用于配置子弹属性（伤害、速度、形态、特效等）
 const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
-## 弹道构型资源类（弹道构型三选一选定后装备到私有子弹副本时做类型校验）
-const BulletShotPatternClass = preload("res://scripts/resources/bullet/BulletShotPattern.gd")
-
 ## 角色皮肤资源类（主题系统：皮肤决定外观+动画参数）
 const CharacterSkinClass = preload("res://scripts/resources/skin/CharacterSkin.gd")
 
@@ -34,6 +31,12 @@ const DamageNumberClass = preload("res://scripts/components/DamageNumber.gd")
 
 ## 竞技场常量（相机limit边界必须与物理墙同源，改战场大小时只改ArenaConfig）
 const ArenaConfigClass = preload("res://scripts/world/ArenaConfig.gd")
+
+## 装备组件（RPG装备系统：管理6槽装备，聚合词条/特效/护盾/主动技能；无 class_name 走 preload）
+const EquipmentComponentClass = preload("res://scripts/components/EquipmentComponent.gd")
+
+## 背包组件（RPG装备系统：持有拾取到的装备，提供穿戴/卸下入口；无 class_name 走 preload）
+const BackpackComponentClass = preload("res://scripts/components/BackpackComponent.gd")
 
 ## ========== 导出变量（编辑器可配置） ==========
 
@@ -116,6 +119,23 @@ var _last_attacker: Node = null
 
 ## 最近一次攻击上下文（is_bullet/direction/bullet_data 等）
 var _last_attack_context: Dictionary = {}
+
+## ========== 装备系统（RPG化成长：属性/特效/护盾/弹道构型统一挂载到装备） ==========
+
+## 装备组件（6槽管理；由 _ready 动态创建并 add_child）
+var _equipment: Node = null
+
+## 背包组件（持有拾取到的装备；由 _ready 动态创建并 add_child）
+var _backpack: Node = null
+
+## 减伤率（0~0.9）：装备词条 damage_reduction 汇总值，take_damage 最前统一打折
+var _damage_reduction: float = 0.0
+
+## 当前装备提供的主动技能（EquipmentActiveSkill；null=无）
+var _active_skill: Resource = null
+
+## 主动技能冷却剩余时间（秒；<=0 表示可用）
+var _active_skill_cd: float = 0.0
 
 ## ========== 险胜反馈系统（直播增强："差点死"的紧张感） ==========
 ## 红血存活计时器：进入红血后累计存活时间，存活5秒以上触发险胜奖励
@@ -214,12 +234,24 @@ func _ready() -> void:
 	## 创建私有子弹数据副本（词条特效/伤害修改的作用对象）
 	_init_private_bullet_data()
 
-	## 监听升级词条应用信号：任何词条应用后重新同步属性到自身
-	## 数据流：UpgradeManager.apply_upgrade → upgrade_applied信号 → 此回调 → 同步移速/射速/弹属性
-	if UpgradeManager:
-		UpgradeManager.upgrade_applied.connect(_on_upgrade_applied)
+	## 创建装备组件（RPG装备系统：管理6槽装备，聚合词条/特效/护盾/主动技能）
+	_equipment = EquipmentComponentClass.new()
+	_equipment.name = "EquipmentComponent"
+	add_child(_equipment)
+	_equipment.setup(self)
 
-	## 初始同步一次（兜底：若词条在玩家实例化之前已应用，也能拿到正确属性）
+	## 创建背包组件（持有拾取到的装备；需在装备组件之后创建，以便注入穿戴执行者引用）
+	_backpack = BackpackComponentClass.new()
+	_backpack.name = "BackpackComponent"
+	add_child(_backpack)
+	_backpack.setup(self, _equipment)
+
+	## 监听属性重算信号：任一加成来源（旧词条/装备）变化导致 player_stats 重算后重新同步到自身
+	## 数据流：UpgradeManager.recompute_stats → stats_recomputed信号 → 此回调 → 同步移速/射速/弹属性
+	if UpgradeManager and UpgradeManager.has_signal("stats_recomputed"):
+		UpgradeManager.stats_recomputed.connect(_on_stats_recomputed)
+
+	## 初始同步一次（兜底：若词条/装备在玩家实例化之前已生效，也能拿到正确属性）
 	_sync_upgrade_stats()
 
 	## ========== 相机接管（修复重开后相机不跟随的bug） ==========
@@ -324,6 +356,19 @@ func _sync_upgrade_stats() -> void:
 	## 子弹速度乘算
 	_private_bullet_data.speed = _base_bullet_speed * float(stats.get("bullet_speed_mult", 1.0))
 
+	## 减伤率（装备词条 damage_reduction 汇总；take_damage 最前按此打折，钳制上限0.9）
+	_damage_reduction = clampf(float(stats.get("damage_reduction", 0.0)), 0.0, 0.9)
+
+	## ========== 下发核心血上限加成（全量重算模型：按目标总量统一增量扩容/缩减） ==========
+	## 数据流：UpgradeManager.player_stats.max_hp_bonus → CoreHealthComponent.set_hp_bonus_total
+	## 返回本次实际上限变化量：扩容时弹金色"+N"，缩容不提示（避免负面反馈）
+	if health_controller != null:
+		var core_comp: Node = health_controller.get_node_or_null("CoreHealthComponent")
+		if core_comp != null and core_comp.has_method("set_hp_bonus_total"):
+			var hp_delta: float = core_comp.set_hp_bonus_total(float(stats.get("max_hp_bonus", 0.0)))
+			if hp_delta > 0.5:
+				DamageNumberClass.pop(global_position + Vector2(0, -44), int(round(hp_delta)), false, Color(1.0, 0.85, 0.2), "+")
+
 	## ========== 下发装备护盾属性词条（耐久上限/回盾速度） ==========
 	if equipment_shield != null and equipment_shield.has_method("apply_stat_modifiers"):
 		equipment_shield.apply_stat_modifiers(
@@ -336,33 +381,13 @@ func _sync_upgrade_stats() -> void:
 			float(stats.get("invincible_mult", 1.0)),
 			float(stats.get("hp_regen", 0.0)))
 
-## 词条应用信号回调（响应UpgradeManager.upgrade_applied）
-## 参数：upgrade - 被应用的词条（特效词条已由UpgradeManager直接调用apply_bullet_effect，
-##        此处只需同步属性词条带来的数值变化）
-func _on_upgrade_applied(_upgrade: Resource) -> void:
+## 属性重算信号回调（响应 UpgradeManager.stats_recomputed）
+## 参数：_stats - 重算后的完整属性字典（与 UpgradeManager.player_stats 同源，此处无需直接使用）
+func _on_stats_recomputed(_stats: Dictionary) -> void:
 	## 重新同步全部属性（同步成本低，统一处理最简单可靠）
 	_sync_upgrade_stats()
 
-## 追加子弹特效（词条特效/BUFF的统一入口，由UpgradeManager调用）
-## 数据流：UpgradeManager.apply_upgrade(特效词条) → 此方法 → 追加到私有子弹副本
-## 参数：effect - 子弹特效资源（data/bullet/effect/下的.tres）
-func apply_bullet_effect(effect: Resource) -> void:
-	## 空特效或副本未初始化时拒绝
-	if effect == null or _private_bullet_data == null:
-		return
-	## 按effect_id去重：同一特效不重复挂载（重复挂载会多次触发）
-	## 已拥有时改为叠层成长：调用已拥有实例的add_stack放大其关键参数
-	## （特效词条从"只能拥有一次"升级为"每级数值成长"，重复抽取不再无效）
-	if has_bullet_effect(effect.effect_id if "effect_id" in effect else ""):
-		_stack_owned_effect(effect)
-		return
-	## 追加到私有子弹副本的特效列表（每发子弹都会携带）
-	_private_bullet_data.effects.append(effect)
-	## 播放获得特效音效（区别于普通拾取的强化感）
-	if AudioManager:
-		AudioManager.play("buff_pickup", 0.8)
-
-## 查询是否已拥有某子弹特效（UpgradeManager三选一去重过滤用）
+## 查询是否已拥有某子弹特效（装备特效注入去重过滤用）
 ## 参数：effect_id - 特效唯一标识（如"explosion"）
 ## 返回：true表示已拥有
 func has_bullet_effect(effect_id: String) -> bool:
@@ -375,12 +400,12 @@ func has_bullet_effect(effect_id: String) -> bool:
 			return true
 	return false
 
-## 给已拥有的特效叠层（重复获得同一特效词条时调用）
-## 数据流：apply_bullet_effect去重分支 → 找到私有副本中已拥有的实例 → add_stack成长
+## 给已拥有的特效叠层（重复获得同一特效的装备时调用）
+## 数据流：apply_equipment_effect去重分支 → 找到私有副本中已拥有的实例 → add_stack成长
 ## 设计意图：放大的对象是玩家私有副本中的特效实例（duplicate(true)深拷贝产物），
 ##           绝不修改共享.tres；子弹发射时duplicate()浅拷贝共享该实例，
 ##           新参数下一发子弹立即生效；子弹运行时状态全存bullet.meta（互不干扰）
-## 参数：effect - 新获得的特效词条引用的资源（用其effect_id定位已拥有实例）
+## 参数：effect - 新获得装备携带的特效资源（用其effect_id定位已拥有实例）
 func _stack_owned_effect(effect: Resource) -> void:
 	var target_id: String = effect.effect_id if "effect_id" in effect else ""
 	if target_id == "":
@@ -393,8 +418,8 @@ func _stack_owned_effect(effect: Resource) -> void:
 				owned.add_stack()
 			break
 
-## 移除指定子弹特效（技能种类上限随机替换时调用）
-## 数据流：UpgradeManager._remove_upgrade(特效词条) → 此方法 → 从私有子弹副本移除该特效实例
+## 移除指定子弹特效（EquipmentComponent 卸下携带该特效的装备时调用）
+## 数据流：EquipmentComponent._refresh_effects → 此方法 → 从私有子弹副本移除该特效实例
 ## 参数：effect_id - 特效唯一标识（如"explosion"）
 func remove_bullet_effect(effect_id: String) -> void:
 	if _private_bullet_data == null or effect_id == "":
@@ -406,73 +431,23 @@ func remove_bullet_effect(effect_id: String) -> void:
 			_private_bullet_data.effects.remove_at(i)
 			break
 
-## 将指定子弹特效实例精确提升到目标等级（神庙"融合技能"用）
-## 数据流：UpgradeManager._set_effect_to_level → 此方法 → 定位同id特效实例逐级 add_stack
-## 设计意图：融合技能的等级取两个源技能的较高值，需把两个特效都精确拉到该等级；
-##           逐级 add_stack（内部触发 _on_stack_grown 参数放大）而非直接改 stack_count，
-##           保证成长策略与正常叠层完全一致，且不污染共享 .tres
-## 参数：effect_id - 特效唯一标识；level - 目标等级（≥当前层数时成长，否则保持原样）
-func set_bullet_effect_level(effect_id: String, level: int) -> void:
-	if _private_bullet_data == null or effect_id == "" or level < 1:
+## 注入装备来源的子弹特效（EquipmentComponent 装备变更时调用）
+## 数据流：EquipmentComponent._refresh_effects → 此方法 → 追加到私有子弹副本特效列表
+## 已拥有同 id（其他装备提供）→ 叠层成长；卸下装备时由 remove_bullet_effect 精准移除
+## 参数：effect - 特效资源（来自 EquipmentData.bullet_effects）
+func apply_equipment_effect(effect: Resource) -> void:
+	if effect == null or _private_bullet_data == null:
 		return
-	## 定位私有副本中已拥有的特效实例
-	for owned in _private_bullet_data.effects:
-		if owned != null and owned.effect_id == effect_id:
-			## 计算还需成长的层数（当前层数可能已 ≥ 目标，则不操作）
-			var diff: int = level - int(owned.stack_count)
-			for i in range(diff):
-				if owned.has_method("add_stack"):
-					owned.add_stack()
-			break
-
-## 应用核心血量上限加值（UpgradeManager血量词条调用）
-## 数据流：UpgradeManager.apply_upgrade(max_hp_bonus词条) → 此方法 → 血量组件扩容
-## 参数：amount - 上限增加值（同时立即治疗等量血量）
-func apply_max_hp_bonus(amount: int) -> void:
-	## 非法增量或控制器缺失时拒绝
-	if amount <= 0 or health_controller == null:
+	var eid: String = effect.effect_id if "effect_id" in effect else ""
+	if eid == "":
 		return
-	## 查找核心血量组件并调用扩容方法（has_method检查保证健壮性）
-	var core_comp: Node = health_controller.get_node_or_null("CoreHealthComponent")
-	if core_comp != null and core_comp.has_method("expand_max_hp"):
-		core_comp.expand_max_hp(float(amount))
-		## 飘金色"+N"提示：扩上限会同时等量治疗，若不提示，玩家只会看到血条瞬间回满，
-		## 察觉不到"上限变大"这件事（这正是血量成长此前无感的根因之一）
-		DamageNumberClass.pop(global_position + Vector2(0, -44), amount, false, Color(1.0, 0.85, 0.2), "+")
-
-## 移除核心血量上限加值（技能种类上限随机替换移除"梦境之心"词条时调用）
-## 数据流：UpgradeManager._remove_upgrade(max_hp_bonus词条) → 此方法 → 血量组件缩减上限
-## 参数：amount - 上限缩减值（正数）
-func remove_max_hp_bonus(amount: int) -> void:
-	## 非法增量或控制器缺失时拒绝
-	if amount <= 0 or health_controller == null:
+	## 已拥有同 id（其他装备提供）→ 叠层成长
+	if has_bullet_effect(eid):
+		_stack_owned_effect(effect)
 		return
-	## 查找核心血量组件并调用缩减方法（has_method检查保证健壮性）
-	var core_comp: Node = health_controller.get_node_or_null("CoreHealthComponent")
-	if core_comp != null and core_comp.has_method("shrink_max_hp"):
-		core_comp.shrink_max_hp(float(amount))
-
-## 拾取"特效技能书"（青绿宝珠BUFF道具，手动按E拾取后由DropItem.apply调用）
-## 数据流：敌人掉落特效技能书 → 玩家手动按E拾取 → DropItem.apply(BUFF) → 此方法
-## 设计意图：技能书=立即获得一次"三选一"升级机会（打开与经验升级完全相同的选择面板，
-##           由玩家自选词条），而非随机直接塞一个——玩家对Build有控制权，体验与捡碎片升级一致，
-##           不会再出现"捡了书却莫名获得技能"的困惑。open_level_up_choice自带is_choosing锁与
-##           _pending_upgrades排队：连捡多本或与经验升级同时触发时会依次排队弹出，不会叠加/丢帧
-## 语义收敛：本入口只给"特效技能"（bullet_effect 非空）——属性技能已拆分为独立掉落
-##           （见 request_attribute_skill_choice），二者不再混在同一面板里
-## 参数：item_id - 道具id（预留：未来可区分不同品质技能书），value - 数值（预留扩展）
-func add_buff(item_id: String, value: int) -> void:
-	if UpgradeManager:
-		UpgradeManager.open_level_up_choice()
-
-## 请求打开"属性技能"三选一（拾取 ATTRIBUTE_SKILL 类型掉落物时由 DropItem.apply 调用）
-## 数据流：敌人掉落属性技能书(icon_AS) → 玩家手动按E拾取 → DropItem.apply(ATTRIBUTE_SKILL) → 此方法
-##        → UpgradeManager.open_attribute_skill_choice() → 面板随机3选1（候选只含属性词条）
-## 设计意图：与特效技能书完全分离——属性技能书只提供属性词条、特效技能书只提供特效技能，
-##           玩家可凭掉落图标（icon_AS / icon_skill）一眼区分获得的成长方向
-func request_attribute_skill_choice() -> void:
-	if UpgradeManager:
-		UpgradeManager.open_attribute_skill_choice()
+	_private_bullet_data.effects.append(effect)
+	if AudioManager:
+		AudioManager.play("buff_pickup", 0.8)
 
 ## ========== 物理帧更新方法 ==========
 
@@ -488,6 +463,8 @@ func _physics_process(delta: float) -> void:
 	_move(delta)
 	## 处理玩家射击
 	_handle_shoot(delta)
+	## 处理装备主动技能（冷却推进 + game_skill 输入释放）
+	_update_active_skill(delta)
 
 ## ========== 险胜反馈系统（直播增强） ==========
 
@@ -678,6 +655,11 @@ func _shoot() -> void:
 ## 伤害拦截顺序：装备护盾（EquipmentShieldComponent）→ 分段护盾（ShieldComponent）→ 核心血量
 ## 参数：amount - 伤害数值
 func take_damage(amount: float) -> void:
+	## ---------- 减伤机制（装备词条 damage_reduction）：所有伤害在拦截前统一打折 ----------
+	## 钳制上限0.9：防止叠满减伤后完全免伤导致游戏失去挑战性
+	if _damage_reduction > 0.0:
+		amount *= (1.0 - clampf(_damage_reduction, 0.0, 0.9))
+
 	var remaining: float = amount
 	var shield_absorbed: float = 0.0  ## 护盾吸收的伤害量（用于蓝色数字显示）
 	var core_damage: float = 0.0      ## 核心血扣减的伤害量（用于红色数字显示）
@@ -693,8 +675,8 @@ func take_damage(amount: float) -> void:
 		## 记录受伤前的状态，用于检测是否刚进入无敌状态
 		var state_before: Dictionary = health_controller.get_survival_state()
 		var was_invincible: bool = state_before.get("is_invincible", false)
-		var hp_before: float = state_before.get("core_hp", 0)
-		var shield_before: int = state_before.get("shield_segments", 0)
+		var hp_before: float = state_before.get("core", 0.0)
+		var shield_before: int = state_before.get("shield", 0)
 
 		## 调用健康控制器处理伤害（先扣分段护盾，再扣核心血）
 		health_controller.apply_damage(remaining, "unknown")
@@ -702,8 +684,8 @@ func take_damage(amount: float) -> void:
 		## 记录受伤后的状态
 		var state_after: Dictionary = health_controller.get_survival_state()
 		var is_invincible: bool = state_after.get("is_invincible", false)
-		var shield_after: int = state_after.get("shield_segments", 0)
-		var hp_after: float = state_after.get("core_hp", 0)
+		var shield_after: int = state_after.get("shield", 0)
+		var hp_after: float = state_after.get("core", 0.0)
 
 		## 计算分段护盾吸收了多少（简化：remaining - 核心血实际扣减）
 		core_damage = hp_before - hp_after
@@ -766,18 +748,7 @@ func set_last_attacker(attacker: Node, context: Dictionary = {}) -> void:
 	_last_attacker = attacker
 	_last_attack_context = context
 
-## 请求打开护盾三选一（拾取 EQUIPMENT 类型掉落物时由 DropItem.apply 调用）
-## 数据流：敌人掉落护盾 → 玩家手动按E拾取 → DropItem.apply(EQUIPMENT) → 此方法
-##        → UpgradeManager.open_shield_choice() → 面板随机3选1 → 选定后回调 Player.equip_shield()
-## 设计意图：护盾掉落物=一次"护盾三选一"机会（与技能书 add_buff 同款体验），
-##           地面掉落阶段只显示统一的基础护盾图标，具体装备哪面盾由玩家自选；
-##           open_shield_choice 自带 is_choosing 锁与 _pending_shield_choices 排队，
-##           连捡多个护盾或与技能三选一同时触发时会依次排队弹出，不会叠加
-func request_shield_choice() -> void:
-	if UpgradeManager:
-		UpgradeManager.open_shield_choice()
-
-## 装备护盾（真正落地装备，由护盾三选一选定后 UpgradeManager 回调 / 商店购买调用）
+## 装备护盾（由 EquipmentComponent 盾牌槽数据变化时下发 / 商店购买护盾调用）
 ## 参数：shield_data - 护盾装备数据资源
 func equip_shield(shield_data: Resource) -> void:
 	if equipment_shield != null and equipment_shield.has_method("equip"):
@@ -802,41 +773,106 @@ func has_equipped_shield() -> bool:
 			and equipment_shield.has_method("get_shield_data") \
 			and equipment_shield.get_shield_data() != null
 
-## ========== 弹道构型系统（第四维度成长：换弹道，不叠层） ==========
+## 卸下当前装备护盾（装备系统盾牌槽卸下/替换时由 EquipmentComponent 调用）
+func unequip_equipped_shield() -> void:
+	if equipment_shield != null and equipment_shield.has_method("unequip"):
+		equipment_shield.unequip()
 
-## 请求打开弹道构型三选一（拾取 SHOT_PATTERN 类型掉落物时由 DropItem.apply 调用）
-## 数据流：敌人掉落构型书(icon_BC) → 玩家手动按E拾取 → DropItem.apply(SHOT_PATTERN) → 此方法
-##        → UpgradeManager.open_shot_pattern_choice() → 面板随机3选1 → 选定后回调 equip_shot_pattern()
-## 设计意图：与技能/属性/护盾三选一同款体验（共用 is_choosing 锁与队列，不暂停游戏），
-##           区别在于构型不叠层——选定即整体替换当前弹道
-func request_shot_pattern_choice() -> void:
-	if UpgradeManager:
-		UpgradeManager.open_shot_pattern_choice()
+## ========== 装备与背包对外接口（供掉落/商店/UI 调用） ==========
 
-## 装备弹道构型（真正落地，由构型三选一选定后 UpgradeManager 回调）
-## 参数：pattern - 弹道构型资源（BulletShotPattern）
-## 实现：直接替换私有子弹副本的 shot_pattern —— 发射时 GameWorld.spawn_shot_pattern 会读取
-##       _private_bullet_data.get_final_shot_pattern() 并按新构型生成弹道，无需额外接线
-## 说明：构型不叠层、无等级，重复拾取即替换（旧构型直接丢弃）；与子弹外观形态 BulletForm 正交
-func equip_shot_pattern(pattern: Resource) -> void:
-	## 防御：私有副本未初始化时拒绝
-	if _private_bullet_data == null:
-		return
-	## 类型校验：只接受 BulletShotPattern（防止误传其他 Resource 导致发射期崩溃）
-	if not (pattern is BulletShotPatternClass):
-		return
-	_private_bullet_data.shot_pattern = pattern
-	## 装备音效（与装备护盾同一手感）
-	if AudioManager:
+## 获取装备组件（UI 装备面板查询已穿装备/主动技能）
+## 返回：EquipmentComponent 节点；未初始化时 null
+func get_equipment_component() -> Node:
+	return _equipment
+
+## 获取背包组件（UI 背包面板增删查询）
+## 返回：BackpackComponent 节点；未初始化时 null
+func get_backpack() -> Node:
+	return _backpack
+
+## 把一件装备放入背包（拾取掉落物/商店购买装备时调用）
+## 参数：data - EquipmentData 装备实例
+## 返回：true=放入成功；false=背包已满或组件缺失
+func add_equipment_to_backpack(data: Resource) -> bool:
+	if _backpack == null or not _backpack.has_method("add_item"):
+		return false
+	var ok: bool = _backpack.add_item(data)
+	if ok and AudioManager:
 		AudioManager.play_2d("buff_pickup", global_position, 0.8)
+	return ok
 
-## 获取当前装备的弹道构型（供 HUD / 暂停菜单状态面板读取）
-## 返回：当前构型资源；未装备时返回 null（刻意返回原始 shot_pattern 而非
-##       get_final_shot_pattern()——后者在未配置时返回兜底单发构型，无法区分"未装备"）
-func get_shot_pattern() -> Resource:
-	if _private_bullet_data == null:
-		return null
-	return _private_bullet_data.shot_pattern
+## 穿戴背包中指定下标的装备（UI 背包面板点击穿戴时调用）
+## 参数：index - 背包物品下标（0-based）
+## 返回：true=穿戴成功
+func equip_equipment_from_backpack(index: int) -> bool:
+	if _backpack == null or not _backpack.has_method("equip_from_backpack"):
+		return false
+	return _backpack.equip_from_backpack(index)
+
+## 卸下指定槽位的装备并放回背包（UI 装备面板点击卸下时调用）
+## 参数：slot - 槽位（EquipmentData.Slot）
+## 返回：true=卸下成功
+func unequip_equipment_slot(slot: int) -> bool:
+	if _backpack == null or not _backpack.has_method("unequip_to_backpack"):
+		return false
+	return _backpack.unequip_to_backpack(slot)
+
+## ========== 装备主动技能系统（第五维度：弹道构型做成带冷却的主动技） ==========
+
+## 设置当前装备提供的主动技能（EquipmentComponent 装备变更时下发）
+## 参数：skill - EquipmentActiveSkill 资源；null=清空（无装备携带主动技能）
+func set_active_skill(skill: Resource) -> void:
+	_active_skill = skill
+	## 重置冷却：换上技能立即可用（避免还需等待旧技能的剩余冷却）
+	_active_skill_cd = 0.0
+
+## 获取当前主动技能（HUD 冷却显示用）
+## 返回：EquipmentActiveSkill 资源；无则 null
+func get_active_skill() -> Resource:
+	return _active_skill
+
+## 获取主动技能冷却剩余比例（HUD 冷却环/图标灰度用）
+## 返回：0.0=冷却完毕可释放，1.0=刚进入冷却
+func get_active_skill_cooldown_ratio() -> float:
+	if _active_skill == null:
+		return 0.0
+	var cd: float = maxf(float(_active_skill.cooldown), 0.1)
+	return clampf(_active_skill_cd / cd, 0.0, 1.0)
+
+## 更新主动技能（每物理帧调用：推进冷却 + 检测 game_skill 输入释放）
+## 参数：delta - 帧间隔时间（秒）
+func _update_active_skill(delta: float) -> void:
+	## 冷却推进（<=0 表示可用）
+	if _active_skill_cd > 0.0:
+		_active_skill_cd = maxf(_active_skill_cd - delta, 0.0)
+	## 无技能 / 仍在冷却 / 非游戏进行中 → 不响应输入
+	if _active_skill == null or _active_skill_cd > 0.0:
+		return
+	if not GameManager.is_playing():
+		return
+	## 输入经 InputManager 读取（禁止业务层直接读 Input），消费后释放
+	if InputManager.is_action_just_pressed_safe("game_skill"):
+		_cast_active_skill()
+
+## 释放主动技能：以临时子弹数据（携带技能的弹道构型）发射一次
+## 设计：复用 shot 信号 + GameWorld.spawn_shot_pattern，无需新增子弹生成通道（解耦核心）
+func _cast_active_skill() -> void:
+	## 技能/构型/子弹副本任一缺失则不释放
+	if _active_skill == null or _active_skill.shot_pattern == null or _private_bullet_data == null:
+		return
+	## 进入冷却（下限保护，避免0冷却导致每帧释放）
+	_active_skill_cd = maxf(float(_active_skill.cooldown), 0.1)
+	## 构造临时子弹数据：深拷贝私有副本（保留伤害/特效），仅替换弹道构型为技能的构型
+	## 深拷贝使技能弹道拥有独立特效实例，避免与普通射击共享运行时状态
+	var temp_data: BulletDataClass = _private_bullet_data.duplicate(true)
+	temp_data.shot_pattern = _active_skill.shot_pattern
+	## 释放反馈：音效 + 攻击动画
+	if AudioManager:
+		AudioManager.play_2d("player_shoot", global_position, 0.9)
+	if animator != null:
+		animator.play_attack()
+	## 发出 shot 信号（GameWorld 按 temp_data 的构型生成弹道）
+	shot.emit(global_position, _aim_direction, temp_data)
 
 ## ========== 梦境碎片系统 ==========
 
@@ -853,9 +889,8 @@ func add_dream_fragment(amount: int) -> void:
 
 	## 上报统计（结算面板展示的碎片总数）
 	RunStats.add_fragment(amount)
-	## 碎片=纯收集计数（HUD显示+结算统计），与技能/升级完全无关——
-	## 获得新技能词条仅一条途径：手动按E拾取技能宝石（三选一面板）；
-	## 神庙"随机技能"只强化已拥有技能等级，不再给新技能
+	## 碎片=纯收集计数（HUD显示+结算统计），与装备成长完全无关——
+	## 玩家成长仅一条途径：拾取装备（按 E 入背包后在装备面板穿戴）；
 
 ## 扣除梦境碎片（商店购买支付专用）
 ## 注意：只做货币扣减与HUD刷新，不上报 RunStats（fragments_total 统计的是"累计获得"，

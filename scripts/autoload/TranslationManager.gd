@@ -89,9 +89,19 @@ var translations: Dictionary = {
 		"STATUS_ATTR": "属性",
 		"STATUS_SKILL": "技能",
 		"STATUS_SHIELD": "护盾",
-		"STATUS_PATTERN": "弹道构型",
-		"STATUS_PATTERN_CURRENT": "当前",
 		"STATUS_NONE": "暂无",
+		
+		## 暂停菜单 - 装备/背包子面板
+		"BUTTON_EQUIPMENT": "装备背包",
+		"EQUIPMENT_TITLE": "装备与背包",
+		"EQUIPMENT_SLOTS": "已装备",
+		"EQUIPMENT_BACKPACK": "背包",
+		"EQUIPMENT_EMPTY": "空",
+		"EQUIPMENT_FULL": "背包已满",
+		"EQUIPMENT_EFFECT": "特效",
+		"EQUIPMENT_ACTIVE": "主动技",
+		"EQUIPMENT_SHIELD_LABEL": "护盾",
+		"EQUIPMENT_HINT": "A 穿戴 / 卸下 · B 返回",
 		
 		## 游戏信息翻译
 		"GAME_SEED": "种子",
@@ -196,9 +206,19 @@ var translations: Dictionary = {
 		"STATUS_ATTR": "Attributes",
 		"STATUS_SKILL": "Skills",
 		"STATUS_SHIELD": "Shield",
-		"STATUS_PATTERN": "Shot Pattern",
-		"STATUS_PATTERN_CURRENT": "Active",
 		"STATUS_NONE": "None",
+		
+		## 暂停菜单 - 装备/背包子面板（英文）
+		"BUTTON_EQUIPMENT": "Equipment",
+		"EQUIPMENT_TITLE": "Equipment & Backpack",
+		"EQUIPMENT_SLOTS": "Equipped",
+		"EQUIPMENT_BACKPACK": "Backpack",
+		"EQUIPMENT_EMPTY": "Empty",
+		"EQUIPMENT_FULL": "Backpack Full",
+		"EQUIPMENT_EFFECT": "Effect",
+		"EQUIPMENT_ACTIVE": "Active",
+		"EQUIPMENT_SHIELD_LABEL": "Shield",
+		"EQUIPMENT_HINT": "A Equip / Unequip · B Back",
 		
 		## 游戏信息翻译（英文）
 		"GAME_SEED": "Seed",

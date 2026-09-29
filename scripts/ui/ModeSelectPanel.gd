@@ -6,7 +6,7 @@
 ##   1. 知情选择：两种模式的节奏与收尾完全不同（击破终极BOSS结束 vs 无限登塔至死），
 ##      必须在开局前讲清楚，避免玩家"打了半小时不知道自己在玩什么"
 ##   2. 沿用 GameOverPanel 的输入范式（LT/RT 切换 + A 确认 + B 返回），
-##      与升级三选一/结算面板共用同一套肌肉记忆
+##      与结算面板共用同一套肌肉记忆
 ##   3. 面板无状态：只负责"选模式 + 发信号"，开局流程仍由 Main.gd 掌控
 ## 数据流：MainMenu.start_game → Main._show_mode_select() → 本面板 →
 ##         start_requested(mode) → Main._start_game(mode) → GameManager.start_new_game(seed, mode)

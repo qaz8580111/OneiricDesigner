@@ -23,11 +23,15 @@ enum TriggerType {
 ## 特效唯一标识（用于日志、调试和按ID查找）
 @export var effect_id: String = ""
 
+## 特效显示名称（取自特效模板 display_name；装备面板展示特效词条时用）
+## 设计意图：装备实例不存图标，UI 可借 display_name/effect_id 展示"该装备携带何种特效"
+@export var display_name: String = ""
+
 ## 该特效的触发时机（决定何时执行特效逻辑）
 @export var trigger_type: TriggerType = TriggerType.ON_HIT
 
 ## 当前叠层层数（运行时状态：玩家重复获得同一特效词条时由add_stack递增）
-## 数据流：UpgradeManager.apply_upgrade → Player.apply_bullet_effect（已拥有时）→ add_stack
+## 数据流：EquipmentComponent._refresh_effects → Player.apply_equipment_effect（已拥有同id时）→ add_stack
 ## 注意：玩家持有的是bullet_data.duplicate(true)深拷贝出的独立特效实例，
 ##       在实例上放大的参数只影响本玩家，绝不会污染data/bullet/effect/下的共享.tres
 var stack_count: int = 1

@@ -4,11 +4,15 @@
 ## 数据流（被动刷新，HUD不持有游戏逻辑状态）：
 ##   Player.dream_fragment_changed / HealthController(health_changed, player_died) → 血量与碎片显示
 ##   DifficultyManager(difficulty_changed) → 难度文字
-##   EquipmentShieldComponent(shield_equipped/shield_hit/...) → 护盾类型图标与耐久显示
+##   EquipmentComponent(equipment_changed) → 底部 6 装备槽展示（武器/护甲/鞋子/盾牌/戒指/法宝）
+##   EquipmentShieldComponent(shield_equipped/shield_hit/...) → 护盾名称与耐久条
 extends Control
 
 ## 图标加载库（按"icon_<id>.png"路径契约自动加载，缺失时回退文字图标）
 const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
+
+## 装备数据类（仅用于访问 Slot 枚举常量；走 preload 与项目"资源类显式 preload"惯例一致）
+const EquipmentDataLib = preload("res://scripts/resources/equipment/EquipmentData.gd")
 
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
@@ -51,26 +55,32 @@ const TOP_LEFT_START_Y: float = 14.0    ## 第一行的 y
 const TOP_LEFT_LINE_H: float = 26.0     ## 行高（行距）
 const TOP_LEFT_FONT_SIZE: int = 16      ## 统一字号
 
-## ========== 底部图标栏（屏幕中间下方：属性/技能/护盾/构型四组分区） ==========
+## ========== 底部装备栏（屏幕中间下方：6 个装备槽，直接反映玩家当前穿戴） ==========
+## 设计意图：装备系统成为唯一成长载体后，HUD 只需展示"穿了什么"——
+##   武器/护甲/鞋子/盾牌/戒指/法宝六槽，图标取自装备本体（IconLibrary.get_equipment_icon）
+##   或槽位兜底图标；护盾槽角标显示叠层；携带主动技能的槽位叠一层冷却遮罩
 
-## 底部图标栏根容器（四组水平排列，屏幕底部居中，向上生长）
+## 装备栏根容器（单组"装备"，屏幕底部居中，向上生长）
 var _bottom_icon_root: HBoxContainer = null
 
-## 四组图标行容器：属性组（纯数值词条）/ 技能组（子弹特效词条）/ 护盾组（当前装备护盾）/
-## 构型组（当前装备弹道构型）
-var _attribute_row: HBoxContainer = null
-var _skill_row: HBoxContainer = null
-var _shield_icon_row: HBoxContainer = null
-var _pattern_icon_row: HBoxContainer = null
+## 装备栏内部图标行（6 个槽位控件水平排列）
+var _equipment_row: HBoxContainer = null
 
-## 属性图标缓存：key=upgrade_id, value=图标节点
-var _attribute_icons: Dictionary = {}
-## 技能图标缓存：key=upgrade_id, value=图标节点
-var _skill_icons: Dictionary = {}
-## 底部护盾图标（当前装备护盾，未装备时隐藏）
-var _shield_bottom_icon: Control = null
-## 底部弹道构型图标（当前装备构型，未装备时隐藏；单槽位、无层数角标）
-var _pattern_bottom_icon: Control = null
+## 槽位控件引用（下标即 EquipmentData.Slot 枚举值 0..5，长度固定 6）
+var _equip_slot_panels: Array[Panel] = []       ## 槽位底板（提供稀有度边框/底色）
+var _equip_slot_icons: Array[TextureRect] = []  ## 槽位图标
+var _equip_slot_badges: Array[Label] = []       ## 右下角角标（护盾叠层 ×N）
+var _equip_slot_masks: Array[ColorRect] = []    ## 主动技能冷却遮罩（自上而下覆盖）
+var _equip_slot_labels: Array[Label] = []       ## 槽位名标签（图标下方）
+
+## 装备组件引用（数据源：Player 的 EquipmentComponent；装备变更时刷新六槽）
+var _equipment_component: Node = null
+## 当前携带主动技能的槽位（-1=无；用于把冷却遮罩定位到对应槽位）
+var _active_skill_slot: int = -1
+
+## 槽位中文名（下标与 EquipmentData.Slot 枚举对齐：0=武器 1=护甲 2=鞋子 3=盾牌 4=戒指 5=法宝）
+## 说明：空槽位没有 EquipmentData 实例、拿不到 get_slot_text()，故此处保留一份槽位名常量
+const SLOT_TEXTS: Array[String] = ["武器", "护甲", "鞋子", "盾牌", "戒指", "法宝"]
 
 ## 单个图标的尺寸（正方形，像素）
 const BUFF_ICON_SIZE: float = 36.0
@@ -78,13 +88,10 @@ const BUFF_ICON_SIZE: float = 36.0
 ## 图标之间的间距（像素）
 const BUFF_ICON_GAP: float = 6.0
 
-## 弹道构型组边框与图标底色（橙黄，与弹道构型三选一面板主题色一致）
-const PATTERN_ACCENT_COLOR: Color = Color(1.0, 0.6, 0.2)
+## 装备栏外框与组名主题色（金色，RPG 装备的通用视觉语言）
+const EQUIPMENT_ACCENT_COLOR: Color = Color(0.95, 0.8, 0.4)
 
-## 弹道构型掉落物图标 id（对应 IconLibrary.DROP_ICON_MAP 的 "shot_pattern" → icon_BC.png）
-const PATTERN_DROP_ICON_ID: String = "shot_pattern"
-
-## ========== 装备护盾显示（屏幕正下方状态行：名称 + 耐久条，图标已移到底部护盾组） ==========
+## ========== 装备护盾显示（屏幕正下方状态行：名称 + 耐久条） ==========
 
 ## 护盾显示面板容器（名称耐久文字+耐久条，未装备护盾时整体隐藏）
 ## 运行时插入底部状态行，排在血条与碎片数之间
@@ -95,10 +102,8 @@ var _shield_name_label: Label = null
 var _shield_durability_bar: ProgressBar = null
 ## 装备护盾组件引用（数据源：Player下的EquipmentShieldComponent节点）
 var _equipment_shield: Node = null
-## 当前显示的护盾id（防止节流刷新时重复重建图标/颜色）
+## 当前显示的护盾id（防止节流刷新时重复重建名称/颜色）
 var _shield_display_id: String = ""
-## 底部护盾图标的贴图矩形（随护盾类型变化，缺失时隐藏露出色块）
-var _shield_bottom_icon_rect: TextureRect = null
 
 ## ========== 成员变量（运行时数据） ==========
 
@@ -174,36 +179,27 @@ func _ready() -> void:
 	if not _find_player():
 		call_deferred("_deferred_find_player")
 
-	## ========== 难度/词条系统信号连接 ==========
+	## ========== 难度信号连接 ==========
 
 	## 监听难度变化信号：更新难度文字（颜色随难度加深，制造紧迫感）
 	if DifficultyManager:
 		DifficultyManager.difficulty_changed.connect(_on_difficulty_changed)
 
-	## 监听已获得词条变化：新增技能/层数提升时刷新底部图标栏
-	## 数据流：UpgradeManager.apply_upgrade → upgrades_changed → 此回调
-	if UpgradeManager:
-		UpgradeManager.upgrades_changed.connect(_on_upgrades_changed)
-
 	## 初始化难度显示（本项目无角色等级系统，仅难度随时间提升；读取单例当前值兜底中途创建HUD）
 	_refresh_progress_displays()
 
-	## ========== 底部图标栏初始化 ==========
-	## 设计意图：屏幕中间下方按"属性/技能/护盾/构型"四组分区排列已获得词条、
-	## 护盾与弹道构型图标，让玩家直观看到当前持有的属性、技能各自几级（层数角标）
-	## 以及当前装备的护盾与构型
-	_build_bottom_icon_bar()
+	## ========== 底部装备栏初始化 ==========
+	## 设计意图：屏幕中间下方展示 6 个装备槽（武器/护甲/鞋子/盾牌/戒指/法宝），
+	## 让玩家一眼看到当前穿戴与主动技能冷却
+	_build_equipment_bar()
 	## ========== 装备护盾显示初始化 ==========
 	## 护盾名称+耐久条（未装备时隐藏，装备后插入屏幕正下方状态行）
 	_build_shield_display()
 	## 面板就绪后立即刷新一次（兜底HUD在护盾已装备后才创建的情况；
 	## _find_player中的那次刷新因面板未构建被空引用保护跳过）
 	_refresh_shield_display()
-	## 构型图标同样在就绪后刷新一次（兜底HUD在构型已装备后才创建的情况）
-	_refresh_pattern_display()
-	## 容器就绪后立即刷新一次（HUD可能在已有词条后才创建）
-	if UpgradeManager:
-		_refresh_buff_icons(UpgradeManager.get_acquired_upgrades())
+	## 装备栏就绪后立即刷新一次（兜底HUD在玩家已穿戴装备后才创建的情况）
+	_refresh_equipment_slots()
 
 	## 最后：根据 Settings 保存的 show_fps 初始化 FPS 标签
 	_init_fps_display()
@@ -269,12 +265,13 @@ func _process(delta: float) -> void:
 			_refresh_top_status()
 			## 护盾耐久回盾是持续过程（无信号通知），靠节流轮询同步进度条
 			_refresh_shield_display()
-			## 构型装备不发信号（四类三选一只有词条发 upgrades_changed），同样靠节流轮询同步显隐
-			_refresh_pattern_display()
 
 	## ---------- 血量条表现（每帧：动画缓动 + 红血呼吸 + 上限增长高亮） ----------
 	## 必须放在 _show_fps 的提前 return 之前：血量表现与 FPS 显示开关无关
 	_process_health_visuals(delta)
+
+	## ---------- 主动技能冷却遮罩（每帧平滑推进；无主动技能时零开销） ----------
+	_refresh_active_skill_cooldown()
 
 	## ---------- FPS 计数 ----------
 	if not _show_fps or _fps_label == null:
@@ -337,6 +334,13 @@ func _find_player() -> bool:
 	## 获取玩家引用
 	_player = players[0] as Node2D
 
+	## ========== 装备栏接管 ==========
+	## 获取装备组件引用（6 装备槽展示的数据源）
+	if _player.has_method("get_equipment_component"):
+		_equipment_component = _player.get_equipment_component()
+	if _equipment_component != null and _equipment_component.has_signal("equipment_changed"):
+		_equipment_component.connect("equipment_changed", _on_equipment_changed)
+
 	## ========== 装备护盾显示接管 ==========
 	## 获取装备护盾组件引用（护盾统计显示的数据源）
 	_equipment_shield = _player.get_node_or_null("EquipmentShieldComponent")
@@ -390,6 +394,8 @@ func _find_player() -> bool:
 	## 首次连接后立即刷新一次护盾显示（兜底HUD在护盾已装备后才创建的情况）
 	## 面板未构建时该调用被内部空引用保护跳过，_ready构建面板后会再次刷新
 	_refresh_shield_display()
+	## 首次连接后立即刷新一次装备栏（兜底HUD在玩家已穿戴装备后才创建的情况）
+	_refresh_equipment_slots()
 
 	return true
 
@@ -571,41 +577,36 @@ func _on_difficulty_changed(new_level: int) -> void:
 	else:
 		diff_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
 
-## ========== 底部图标栏 ==========
+## ========== 底部装备栏 ==========
 
-## 构建底部图标栏（屏幕底部，属性/技能/护盾/构型四组分区展示）
+## 构建底部装备栏（屏幕底部，6 个装备槽一组展示）
 ## 位置：锚定屏幕底部居中、向上生长，位于底部状态行（血条/护盾条/碎片数）之上，不遮挡战斗画面
-## 分区设计：四组各自独立外壳（边框色不同）+ 组名标签，属性/技能/护盾/构型互不混排
-func _build_bottom_icon_bar() -> void:
-	## 根容器：四组水平排列，锚定底部居中
+func _build_equipment_bar() -> void:
+	## 根容器：单组水平排列，锚定底部居中
 	_bottom_icon_root = HBoxContainer.new()
-	_bottom_icon_root.name = "BottomIconBar"
+	_bottom_icon_root.name = "EquipmentBar"
 	_bottom_icon_root.add_theme_constant_override("separation", 14)
 	_bottom_icon_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	## 锚定底部居中：水平双向生长（始终居中）、垂直向上生长（内容变高不压出屏幕）
 	_bottom_icon_root.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_bottom_icon_root.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_bottom_icon_root.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_bottom_icon_root.offset_top = -112.0   ## 向上留 60px（组名+图标一行的高度）
-	_bottom_icon_root.offset_bottom = -52.0 ## 距屏幕底边 52px：下方 44px 让给底部状态行（血条/护盾条/碎片数）
+	_bottom_icon_root.offset_top = -120.0   ## 向上留出"组名 + 图标 + 槽位名"三行高度
+	_bottom_icon_root.offset_bottom = -52.0 ## 距屏幕底边 52px：下方 44px 让给底部状态行
 	add_child(_bottom_icon_root)
 
-	## 四组：属性（金色边框）/ 技能（蓝色边框）/ 护盾（绿色边框）/ 构型（橙黄边框，紧邻护盾之后）
-	_attribute_row = _build_icon_group("属性", Color(0.95, 0.75, 0.3))
-	_skill_row = _build_icon_group("技能", Color(0.4, 0.7, 1.0))
-	_shield_icon_row = _build_icon_group("护盾", Color(0.4, 0.9, 0.5))
-	_pattern_icon_row = _build_icon_group("构型", PATTERN_ACCENT_COLOR)
-	## _build_icon_group 返回的是内部图标行(row)，其父级是 VBox，VBox 父级是外壳 PanelContainer；
-	## 必须把外壳加入根容器，边框/底色/组名才会真正显示
-	_bottom_icon_root.add_child(_attribute_row.get_parent().get_parent())
-	_bottom_icon_root.add_child(_skill_row.get_parent().get_parent())
-	_bottom_icon_root.add_child(_shield_icon_row.get_parent().get_parent())
-	_bottom_icon_root.add_child(_pattern_icon_row.get_parent().get_parent())
+	## 单组"装备"：_build_icon_group 返回内部图标行(row)，其父 VBox 的父 PanelContainer 才是外壳
+	_equipment_row = _build_icon_group("装备", EQUIPMENT_ACCENT_COLOR)
+	_bottom_icon_root.add_child(_equipment_row.get_parent().get_parent())
 
-	## 护盾组内预创建护盾图标（初始隐藏，装备护盾后由_refresh_shield_display显示）
-	_create_shield_bottom_icon()
-	## 构型组内预创建构型图标（初始隐藏，装备构型后由_refresh_pattern_display显示）
-	_create_pattern_bottom_icon()
+	## 预创建 6 个槽位控件（下标即 Slot 枚举值），初始为"空槽"外观
+	_equip_slot_panels.clear()
+	_equip_slot_icons.clear()
+	_equip_slot_badges.clear()
+	_equip_slot_masks.clear()
+	_equip_slot_labels.clear()
+	for slot: int in range(SLOT_TEXTS.size()):
+		_create_equipment_slot_widget(slot)
 
 ## 创建单个图标分组（外壳 + 组名标签 + 图标行），返回内部图标行 HBox
 ## 参数：group_name - 组名（属性/技能/护盾）；border_color - 分组外壳边框色（视觉区分三组）
@@ -655,193 +656,89 @@ func _build_icon_group(group_name: String, border_color: Color) -> HBoxContainer
 	vbox.add_child(row)
 	return row
 
-## 在护盾组内创建护盾图标（Panel底色 + 贴图 + 层数角标，与buff图标风格一致）
-## 初始隐藏；装备护盾后由_refresh_shield_display填充底色/贴图/角标并显示
-func _create_shield_bottom_icon() -> void:
-	if _shield_icon_row == null:
-		return
-	_shield_bottom_icon = Panel.new()
-	_shield_bottom_icon.name = "ShieldBottomIcon"
-	_shield_bottom_icon.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
-	_shield_bottom_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_shield_bottom_icon.visible = false
-	## 底色样式：初始用默认青蓝（实际颜色在刷新时按护盾类型覆盖）
-	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = Color(0.3, 0.6, 1.0)
-	style.corner_radius_top_left = 4
-	style.corner_radius_top_right = 4
-	style.corner_radius_bottom_left = 4
-	style.corner_radius_bottom_right = 4
-	style.border_width_left = 1
-	style.border_width_right = 1
-	style.border_width_top = 1
-	style.border_width_bottom = 1
-	style.border_color = Color(1, 1, 1, 0.4)
-	_shield_bottom_icon.add_theme_stylebox_override("panel", style)
+## 创建单个装备槽控件（VBox[底板 Panel(图标+冷却遮罩+角标), 槽位名 Label]）
+## 参数：slot - 槽位下标（EquipmentData.Slot）
+## 结构说明：底板用 Panel 提供稀有度边框与底色；冷却遮罩为自上而下覆盖的 ColorRect，
+##           高度由 anchor_bottom = 冷却剩余比例驱动（可在 0 尺寸下仍随容器等比缩放）
+func _create_equipment_slot_widget(slot: int) -> void:
+	## 外层：图标 + 槽位名（垂直排列）
+	var widget: VBoxContainer = VBoxContainer.new()
+	widget.name = "EquipSlot_%d" % slot
+	widget.add_theme_constant_override("separation", 2)
+	widget.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if _equipment_row != null:
+		_equipment_row.add_child(widget)
 
-	## 贴图矩形：等比缩放居中，内缩1px露出底板描边
-	_shield_bottom_icon_rect = TextureRect.new()
-	_shield_bottom_icon_rect.name = "ShieldTex"
-	_shield_bottom_icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_shield_bottom_icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_shield_bottom_icon_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_shield_bottom_icon_rect.offset_left = 1
-	_shield_bottom_icon_rect.offset_top = 1
-	_shield_bottom_icon_rect.offset_right = -1
-	_shield_bottom_icon_rect.offset_bottom = -1
-	_shield_bottom_icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_shield_bottom_icon.add_child(_shield_bottom_icon_rect)
+	## 底板：稀有度边框 + 底色（尺寸固定，内容用满铺锚点）
+	var panel: Panel = Panel.new()
+	panel.name = "Frame"
+	panel.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	widget.add_child(panel)
 
-	## 层数角标（右下角，2层起显示）
+	## 图标（等比居中，四边内缩 1px 露出底板描边）
+	var icon: TextureRect = TextureRect.new()
+	icon.name = "Icon"
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = 1
+	icon.offset_top = 1
+	icon.offset_right = -1
+	icon.offset_bottom = -1
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(icon)
+
+	## 冷却遮罩：默认隐藏，携带主动技能的槽位上由 _refresh_active_skill_cooldown() 驱动
+	## anchor_bottom = 剩余冷却比例 → 遮罩自上而下覆盖，冷却完毕整块消失
+	var mask: ColorRect = ColorRect.new()
+	mask.name = "CooldownMask"
+	mask.color = Color(0.05, 0.05, 0.1, 0.7)
+	mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mask.anchor_bottom = 0.0
+	mask.offset_bottom = 0.0
+	mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mask.visible = false
+	panel.add_child(mask)
+
+	## 角标：右下角（护盾槽显示叠层 ×N）
 	var badge: Label = Label.new()
-	badge.name = "LevelBadge"
+	badge.name = "Badge"
 	badge.add_theme_font_size_override("font_size", 11)
+	badge.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	badge.add_theme_constant_override("outline_size", 3)
 	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	badge.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	badge.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	badge.offset_left = -10
 	badge.offset_top = -12
 	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_shield_bottom_icon.add_child(badge)
+	panel.add_child(badge)
 
-	_shield_icon_row.add_child(_shield_bottom_icon)
+	## 槽位名（图标下方小字，空槽时半透明以示意"未装备"）
+	var name_label: Label = Label.new()
+	name_label.name = "SlotName"
+	name_label.text = SLOT_TEXTS[slot]
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.add_theme_font_size_override("font_size", 10)
+	name_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9, 0.9))
+	name_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	name_label.add_theme_constant_override("outline_size", 3)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	widget.add_child(name_label)
 
-## 更新护盾图标角标（层数≥2时显示"×N"，≥3层金色，与buff图标角标视觉一致）
-## 参数：stack - 当前护盾叠层数
-func _update_shield_bottom_badge(stack: int) -> void:
-	if _shield_bottom_icon == null or not is_instance_valid(_shield_bottom_icon):
-		return
-	var badge: Label = _shield_bottom_icon.get_node_or_null("LevelBadge")
-	if badge == null:
-		return
-	if stack <= 1:
-		badge.text = ""
-		return
-	badge.text = "×%d" % stack
-	if stack >= 3:
-		badge.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
-	else:
-		badge.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
-	badge.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	badge.add_theme_constant_override("outline_size", 3)
+	## 登记引用（下标即槽位值，供刷新逻辑按槽位直取）
+	_equip_slot_panels.append(panel)
+	_equip_slot_icons.append(icon)
+	_equip_slot_badges.append(badge)
+	_equip_slot_masks.append(mask)
+	_equip_slot_labels.append(name_label)
 
-## 在构型组内创建弹道构型图标（Panel底色 + 贴图）
-## 初始隐藏；装备构型后由_refresh_pattern_display显示
-## 与护盾图标的结构差异：构型单槽位、不叠层、无等级，故不建层数角标；
-## 且构型没有各自专属图标，统一用掉落物图标 icon_BC（地面掉落与HUD所见一致）
-func _create_pattern_bottom_icon() -> void:
-	if _pattern_icon_row == null:
-		return
-	_pattern_bottom_icon = Panel.new()
-	_pattern_bottom_icon.name = "PatternBottomIcon"
-	_pattern_bottom_icon.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
-	_pattern_bottom_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_pattern_bottom_icon.visible = false
-	## 底色：构型主题橙黄（固定色，不随构型类型变化，与三选一面板/*掉落图标呼应）
+## 应用槽位底板样式（底色 + 边框色）
+## 参数：panel - 槽位底板；bg_color - 底色；border_color - 边框色（空槽用暗灰，已装备用稀有度色）
+func _apply_slot_frame_style(panel: Panel, bg_color: Color, border_color: Color) -> void:
 	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = PATTERN_ACCENT_COLOR
-	style.corner_radius_top_left = 4
-	style.corner_radius_top_right = 4
-	style.corner_radius_bottom_left = 4
-	style.corner_radius_bottom_right = 4
-	style.border_width_left = 1
-	style.border_width_right = 1
-	style.border_width_top = 1
-	style.border_width_bottom = 1
-	style.border_color = Color(1, 1, 1, 0.4)
-	_pattern_bottom_icon.add_theme_stylebox_override("panel", style)
-
-	## 贴图矩形：等比缩放居中，内缩1px露出底板描边
-	## 图标缺失（png未在编辑器内导入）时隐藏贴图，露出底色块作为占位
-	var icon_rect: TextureRect = TextureRect.new()
-	icon_rect.name = "PatternTex"
-	icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	icon_rect.offset_left = 1
-	icon_rect.offset_top = 1
-	icon_rect.offset_right = -1
-	icon_rect.offset_bottom = -1
-	icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var icon_tex: Texture2D = IconLibraryLib.get_drop_icon(PATTERN_DROP_ICON_ID)
-	icon_rect.texture = icon_tex
-	icon_rect.visible = icon_tex != null
-	_pattern_bottom_icon.add_child(icon_rect)
-
-	_pattern_icon_row.add_child(_pattern_bottom_icon)
-
-## 稀有度对应的图标底色（普通灰白/稀有蓝/史诗紫，与三选一面板配色一致）
-func _get_rarity_color(rarity: int) -> Color:
-	match rarity:
-		1:
-			return Color(0.4, 0.7, 1.0)    ## 稀有：蓝色
-		2:
-			return Color(0.8, 0.4, 1.0)    ## 史诗：紫色
-		_:
-			return Color(0.85, 0.85, 0.9)  ## 普通：浅灰白
-
-## 刷新底部图标栏（响应UpgradeManager.upgrades_changed信号）
-## 设计意图：增量更新——已存在的词条id保留节点（仅更新层数角标，避免闪烁），
-##           新增的创建图标并按"属性/技能"类型归入对应组，已移除的销毁节点
-## 参数：acquired - get_acquired_upgrades()返回的词条信息字典数组
-func _refresh_buff_icons(acquired: Array) -> void:
-	if _attribute_row == null or _skill_row == null:
-		return
-
-	## 按类型分离：属性（is_effect=false）→ 属性组；技能（is_effect=true）→ 技能组
-	var attr_ids: Dictionary = {}
-	var skill_ids: Dictionary = {}
-	for info in acquired:
-		if bool(info.get("is_effect", false)):
-			skill_ids[info["id"]] = info
-		else:
-			attr_ids[info["id"]] = info
-
-	## 移除不再激活的属性图标
-	for eid in _attribute_icons.keys():
-		if not attr_ids.has(eid):
-			var old: Control = _attribute_icons[eid]
-			if old != null and is_instance_valid(old):
-				old.queue_free()
-			_attribute_icons.erase(eid)
-	## 新增/更新属性图标
-	for eid in attr_ids.keys():
-		var info: Dictionary = attr_ids[eid]
-		if _attribute_icons.has(eid):
-			_update_buff_badge(_attribute_icons[eid], int(info["stacks"]), int(info["max_stacks"]))
-			continue
-		var icon: Control = _create_buff_icon(info)
-		_attribute_row.add_child(icon)
-		_attribute_icons[eid] = icon
-
-	## 移除不再激活的技能图标
-	for eid in _skill_icons.keys():
-		if not skill_ids.has(eid):
-			var old: Control = _skill_icons[eid]
-			if old != null and is_instance_valid(old):
-				old.queue_free()
-			_skill_icons.erase(eid)
-	## 新增/更新技能图标
-	for eid in skill_ids.keys():
-		var info: Dictionary = skill_ids[eid]
-		if _skill_icons.has(eid):
-			_update_buff_badge(_skill_icons[eid], int(info["stacks"]), int(info["max_stacks"]))
-			continue
-		var icon: Control = _create_buff_icon(info)
-		_skill_row.add_child(icon)
-		_skill_icons[eid] = icon
-
-## 创建单个Buff图标（稀有度底色+技能名首2字+右下角层数角标）
-## 参数：info - 词条信息字典（id/name/rarity/stacks/max_stacks）
-## 返回：Buff图标节点
-func _create_buff_icon(info: Dictionary) -> Control:
-	## 外层Panel作为底色方块
-	var icon: Panel = Panel.new()
-	icon.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## 用StyleBoxFlat设置稀有度底色与白色描边
-	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = _get_rarity_color(int(info["rarity"]))
+	style.bg_color = bg_color
 	style.set_content_margin_all(0.0)
 	style.corner_radius_top_left = 4
 	style.corner_radius_top_right = 4
@@ -851,81 +748,111 @@ func _create_buff_icon(info: Dictionary) -> Control:
 	style.border_width_right = 1
 	style.border_width_top = 1
 	style.border_width_bottom = 1
-	style.border_color = Color(1, 1, 1, 0.4)
-	icon.add_theme_stylebox_override("panel", style)
+	style.border_color = border_color
+	panel.add_theme_stylebox_override("panel", style)
 
-	## 内层显示内容：优先真实图标（IconLibrary按id+稀有度加载），
-	## 图标缺失时回退技能名首2字文字（容错，游戏不因缺图报错）
-	var icon_tex: Texture2D = IconLibraryLib.get_upgrade_icon(String(info["id"]), int(info["rarity"]))
-	if icon_tex != null:
-		## 真实图标：TextureRect等比铺满（内缩1px露出稀有度边框色）
-		var tex_rect: TextureRect = TextureRect.new()
-		tex_rect.texture = icon_tex
-		## EXPAND_IGNORE_SIZE：忽略纹理原始1024px尺寸，按容器大小显示
-		tex_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		## KEEP_ASPECT_CENTERED：等比缩放居中，不拉伸变形
-		tex_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		tex_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		## 四边内缩1px：露出底层Panel的白色描边与稀有度底色边线
-		tex_rect.offset_left = 1
-		tex_rect.offset_top = 1
-		tex_rect.offset_right = -1
-		tex_rect.offset_bottom = -1
-		tex_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		icon.add_child(tex_rect)
-	else:
-		## 回退：Label显示技能名称首2字符（中文游戏名的快速识别方式）
-		var label: Label = Label.new()
-		var skill_name_fallback: String = String(info["name"])
-		label.text = skill_name_fallback.substr(0, 2)
-		label.add_theme_color_override("font_color", Color(0, 0, 0, 0.85))
-		label.add_theme_font_size_override("font_size", 13)
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		icon.add_child(label)
+## ========== 装备槽刷新 ==========
 
-	## 层数角标（右下角，Lv.2起显示；满级5用金色）
-	var badge: Label = Label.new()
-	badge.name = "LevelBadge"
-	badge.add_theme_font_size_override("font_size", 11)
-	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	badge.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	badge.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	badge.offset_left = -10
-	badge.offset_top = -12
-	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	icon.add_child(badge)
-	_update_buff_badge(icon, int(info["stacks"]), int(info["max_stacks"]))
-
-	## Tooltip显示完整技能名与层数（鼠标悬停查看）
-	icon.tooltip_text = "%s  Lv.%d/%d" % [String(info["name"]), int(info["stacks"]), int(info["max_stacks"])]
-
-	return icon
-
-## 更新图标右下角的层数角标（1级不显示，2级起白字，满级金字）
-## 参数：icon - 图标节点；stacks - 当前层数；max_stacks - 上限
-func _update_buff_badge(icon: Control, stacks: int, max_stacks: int) -> void:
-	var badge: Label = icon.get_node_or_null("LevelBadge")
-	if badge == null:
+## 刷新底部 6 个装备槽（响应 EquipmentComponent.equipment_changed 与首次手动刷新）
+## 数据流：EquipmentComponent.get_equipped(slot) → 本方法写UI
+## 说明：以"槽位"为唯一遍历单位，每个槽位直接读该槽的装备数据，天然支持任意替换/卸下
+func _refresh_equipment_slots() -> void:
+	## 面板未构建时直接返回（_find_player 先于 _ready 执行的兜底）
+	if _equipment_row == null or _equip_slot_panels.size() < SLOT_TEXTS.size():
 		return
-	if stacks <= 1:
+	## 懒获取装备组件（玩家可能在 HUD 之后创建）
+	if _equipment_component == null and _player != null and _player.has_method("get_equipment_component"):
+		_equipment_component = _player.get_equipment_component()
+
+	## 护盾叠层（盾牌槽角标；无护盾时为 0）
+	var shield_stack: int = 0
+	if _equipment_shield != null and _equipment_shield.has_method("get_shield_stack"):
+		shield_stack = _equipment_shield.get_shield_stack()
+
+	## 主动技能槽位：固定取"首个携带主动技能的槽位"（与 EquipmentComponent 的穿戴顺序一致）
+	_active_skill_slot = -1
+
+	for slot: int in range(SLOT_TEXTS.size()):
+		var data: Resource = null
+		if _equipment_component != null and _equipment_component.has_method("get_equipped"):
+			data = _equipment_component.get_equipped(slot)
+		## 记录主动技能槽位（首个命中即锁定，与 EquipmentComponent._refresh_active_skill 口径一致）
+		if data != null and _active_skill_slot < 0:
+			if data.has_method("has_active_skill") and data.has_active_skill():
+				_active_skill_slot = slot
+		_update_equipment_slot_visual(slot, data, shield_stack)
+
+	## 槽位集合变化后立即同步一次冷却遮罩（避免切换装备后遮罩残留/缺失）
+	_refresh_active_skill_cooldown()
+
+## 刷新单个装备槽的视觉（空槽暗灰占位 / 已装备稀有度边框 + 本体图标 + 叠层角标）
+## 参数：slot - 槽位下标；data - 该槽装备数据（null 表示空槽）；shield_stack - 护盾叠层（仅盾牌槽用）
+func _update_equipment_slot_visual(slot: int, data: Resource, shield_stack: int) -> void:
+	if slot < 0 or slot >= _equip_slot_panels.size():
+		return
+	var panel: Panel = _equip_slot_panels[slot]
+	var icon: TextureRect = _equip_slot_icons[slot]
+	var badge: Label = _equip_slot_badges[slot]
+	var mask: ColorRect = _equip_slot_masks[slot]
+	var name_label: Label = _equip_slot_labels[slot]
+	## 冷却遮罩由 _refresh_active_skill_cooldown() 统一驱动，此处先收起避免槽位复用残留
+	mask.visible = false
+
+	if data == null:
+		## 空槽：暗灰底板 + 槽位兜底图标（低透明度示意"未装备"）
+		_apply_slot_frame_style(panel, Color(0.12, 0.12, 0.16, 0.7), Color(0.4, 0.4, 0.5, 0.6))
+		icon.texture = IconLibraryLib.get_slot_icon(slot, 0)
+		icon.modulate = Color(1, 1, 1, 0.3)
 		badge.text = ""
+		name_label.modulate = Color(1, 1, 1, 0.5)
+		panel.tooltip_text = "%s：空" % SLOT_TEXTS[slot]
 		return
-	badge.text = "×%d" % stacks
-	if stacks >= max_stacks:
-		badge.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))  ## 满级金色
-	else:
-		badge.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))  ## 普通白色
-	## 描边保证深色底图上也清晰可读
-	badge.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	badge.add_theme_constant_override("outline_size", 3)
 
-## 已获得词条变化回调（响应UpgradeManager.upgrades_changed）
-## 参数：acquired - 最新的词条信息数组
-func _on_upgrades_changed(acquired: Array) -> void:
-	_refresh_buff_icons(acquired)
+	## 已装备：稀有度边框 + 底色
+	var rarity_color: Color = data.get_rarity_color() if data.has_method("get_rarity_color") else Color(0.85, 0.85, 0.9)
+	_apply_slot_frame_style(panel, Color(0.1, 0.1, 0.14, 0.85), rarity_color)
+
+	## 图标：装备本体图标（盾牌蓝图/词条/特效/槽位多级兜底由 IconLibrary 内部完成）
+	icon.texture = IconLibraryLib.get_equipment_icon(data)
+	icon.modulate = Color.WHITE
+	name_label.modulate = Color.WHITE
+
+	## 盾牌槽叠层角标（2 层起显示，满 3 层金色）
+	badge.text = ""
+	if slot == EquipmentDataLib.Slot.SHIELD and shield_stack > 1:
+		badge.text = "×%d" % shield_stack
+		if shield_stack >= 3:
+			badge.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+		else:
+			badge.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+
+	## Tooltip：装备名 + 稀有度
+	var equip_name: String = str(data.display_name) if "display_name" in data else SLOT_TEXTS[slot]
+	var rarity_text: String = data.get_rarity_text() if data.has_method("get_rarity_text") else ""
+	panel.tooltip_text = "%s [%s]" % [equip_name, rarity_text]
+
+## 刷新主动技能冷却遮罩（每帧调用；无主动技能时零开销）
+## 数据流：Player.get_active_skill_cooldown_ratio() → 遮罩高度（自上而下覆盖）
+func _refresh_active_skill_cooldown() -> void:
+	## 无携带主动技能的槽位时直接返回
+	if _active_skill_slot < 0 or _active_skill_slot >= _equip_slot_masks.size():
+		return
+	if _player == null or not _player.has_method("get_active_skill_cooldown_ratio"):
+		return
+	var mask: ColorRect = _equip_slot_masks[_active_skill_slot]
+	var ratio: float = float(_player.get_active_skill_cooldown_ratio())
+	## 冷却完毕（比例归零）：遮罩收起
+	if ratio <= 0.001:
+		mask.visible = false
+		return
+	## 冷却中：遮罩自上而下覆盖，高度 = 剩余冷却比例
+	mask.visible = true
+	mask.anchor_bottom = clampf(ratio, 0.0, 1.0)
+	mask.offset_bottom = 0.0
+
+## 装备变更信号回调（穿戴/替换/卸下装备时触发）
+func _on_equipment_changed() -> void:
+	_refresh_equipment_slots()
 
 ## ========== 装备护盾显示（类型图标 + 健康度） ==========
 
@@ -998,47 +925,19 @@ func _refresh_shield_display() -> void:
 	_shield_panel.visible = data != null
 	if data == null:
 		_shield_display_id = ""
-		## 未装备护盾：底部护盾图标同步隐藏
-		if _shield_bottom_icon != null and is_instance_valid(_shield_bottom_icon):
-			_shield_bottom_icon.visible = false
 		return
 
 	## 护盾颜色（缺属性时兜底默认青蓝色，与掉落物视觉一致）
 	var shield_color: Color = data.shield_color if "shield_color" in data else Color(0.3, 0.6, 1.0)
 	var shield_id: String = str(data.shield_id) if "shield_id" in data else ""
 
-	## 护盾类型变化时才重建配色与贴图（节流轮询下避免每0.5秒重建节点）
+	## 护盾类型变化时才重建配色（节流轮询下避免每0.5秒重建样式）
 	if shield_id != _shield_display_id:
 		_shield_display_id = shield_id
 		## 名称与耐久条颜色随护盾类型
 		_shield_name_label.add_theme_color_override("font_color", shield_color)
 		_shield_durability_bar.tint_over = shield_color
 		_shield_durability_bar.tint_under = Color(0.3, 0.3, 0.3, 0.5)
-		## 底部护盾图标底色=护盾颜色（白色细描边，与buff图标框风格统一）
-		if _shield_bottom_icon != null and is_instance_valid(_shield_bottom_icon):
-			var holder_style: StyleBoxFlat = StyleBoxFlat.new()
-			holder_style.bg_color = shield_color
-			holder_style.set_content_margin_all(0.0)
-			holder_style.corner_radius_top_left = 4
-			holder_style.corner_radius_top_right = 4
-			holder_style.corner_radius_bottom_left = 4
-			holder_style.corner_radius_bottom_right = 4
-			holder_style.border_width_left = 1
-			holder_style.border_width_right = 1
-			holder_style.border_width_top = 1
-			holder_style.border_width_bottom = 1
-			holder_style.border_color = Color(1, 1, 1, 0.4)
-			_shield_bottom_icon.add_theme_stylebox_override("panel", holder_style)
-			## 类型图标：IconLibrary按icon_<shield_id>.png契约加载；缺失时隐藏贴图露出色块
-			var icon_tex: Texture2D = IconLibraryLib.get_shield_icon(shield_id)
-			if _shield_bottom_icon_rect != null:
-				_shield_bottom_icon_rect.texture = icon_tex
-				_shield_bottom_icon_rect.visible = icon_tex != null
-
-	## 底部护盾图标显隐 + 层数角标（每次刷新都更新——叠层/耐久归零仍保持显示）
-	if _shield_bottom_icon != null and is_instance_valid(_shield_bottom_icon):
-		_shield_bottom_icon.visible = true
-		_update_shield_bottom_badge(stack)
 
 	## 名称+耐久数值与耐久条进度（每次刷新都更新——耐久是高频变化数据）
 	## 叠层显示：2层以上在名称后加×N；耐久为0时显示"回盾中"提示
@@ -1065,25 +964,6 @@ func _on_shield_vital_changed(_remaining_hp: float, _absorbed: float) -> void:
 ## 护盾破碎/回满信号回调（无参信号）
 func _on_shield_state_changed() -> void:
 	_refresh_shield_display()
-
-## ========== 弹道构型显示（底部构型组图标） ==========
-
-## 刷新弹道构型图标显隐（构型单槽位：装备后显示，替换后保持显示，未装备时隐藏）
-## 数据流：Player.get_shot_pattern() → 本方法写UI
-## 调用时机：_process节流轮询（四类三选一中只有词条会发 upgrades_changed，构型装备不发信号，
-##           与护盾回盾同款靠轮询同步；贴图固定为 icon_BC，故只需同步显隐）
-func _refresh_pattern_display() -> void:
-	if _pattern_bottom_icon == null or not is_instance_valid(_pattern_bottom_icon):
-		return
-	## 玩家未就绪（HUD先于玩家创建）：保持隐藏，找到玩家后的轮询会自动补上
-	if _player == null:
-		return
-	## 未装备时返回 null（刻意不用 get_final_shot_pattern 的兜底单发构型，
-	## 否则会把"未装备构型"误显示成已装备）
-	var pattern: Resource = null
-	if _player.has_method("get_shot_pattern"):
-		pattern = _player.get_shot_pattern()
-	_pattern_bottom_icon.visible = pattern != null
 
 ## 玩家死亡回调：当玩家死亡时调用
 func _on_player_killed() -> void:

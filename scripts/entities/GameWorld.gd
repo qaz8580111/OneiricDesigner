@@ -382,17 +382,19 @@ func _add_elite_drops() -> void:
 	health_drop.auto_adsorb = false
 	elite_enemy_data.drop_items.append(health_drop)
 
-	## 创建攻击增益道具（技能宝石）掉落（15%概率掉落，稀有；BUFF类型默认手动按E拾取，
-	## 拾取后打开三选一面板由玩家自选词条）
-	var buff_drop: DropItemClass = DropItemClass.new()
-	buff_drop.item_id = "elite_buff_attack"
-	buff_drop.item_name = "Power Boost"
-	buff_drop.item_type = DropItemClass.ItemType.BUFF
-	buff_drop.value = 5
-	buff_drop.drop_chance = 0.15
-	buff_drop.is_rare = true
-	buff_drop.auto_adsorb = false
-	elite_enemy_data.drop_items.append(buff_drop)
+	## 装备掉落（15%概率）：精英怪奖励由旧"攻击增益书"升级为一件随机装备
+	## 装备系统统一承载四大成长维度，稀有度按掉落权重随机（稀有及以上触发稀有表现）
+	var equip_drop: DropItemClass = DropItemClass.new()
+	equip_drop.item_id = "equipment_drop"
+	equip_drop.item_name = "装备"
+	equip_drop.item_type = DropItemClass.ItemType.EQUIPMENT
+	equip_drop.value = 0
+	equip_drop.drop_chance = 0.15
+	equip_drop.auto_adsorb = false
+	var equip: Resource = UpgradeManager.generate_equipment()
+	equip_drop.equipment_data = equip
+	equip_drop.is_rare = equip != null and int(equip.rarity) > 0
+	elite_enemy_data.drop_items.append(equip_drop)
 
 ## 查找玩家并连接相关信号
 func _find_player() -> void:

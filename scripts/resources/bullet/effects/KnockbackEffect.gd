@@ -50,7 +50,7 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 ## 设计意图：以真实帧间隔（毫秒时钟）逐帧推进，替代旧实现的固定1/60步长——
 ##           固定步长在低帧率下击退被拉长（30fps时0.2秒击退要播0.4秒）、高帧率下被压缩，
 ##           真实delta保证任何帧率下击退时长/手感一致；
-##           暂停帧（三选一/菜单）直接跳过且冻结时间基准——process_frame在暂停时仍会触发，
+##           暂停帧（菜单/面板）直接跳过且冻结时间基准——process_frame在暂停时仍会触发，
 ##           旧实现会在暂停期间把静止的敌人越推越远
 ## 注意事项：直接改写target.velocity会与目标自身AI移动短暂叠加，属可接受的简化取舍
 func _apply_knockback(target: Node2D, force: Vector2, dur: float) -> void:

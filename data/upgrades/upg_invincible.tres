@@ -10,6 +10,7 @@ description = "受击无敌时间 +15%"
 ; 稀有度：暂统一为普通（0），后续再按技能强度重新分级
 rarity = 0
 max_stacks = 5
+equip_slots = Array[int]([1, 5])
 stat_modifiers = {
 "invincible_mult": 0.15
 }

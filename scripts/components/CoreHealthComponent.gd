@@ -41,6 +41,10 @@ var _hp_regen: float = 0.0
 ## 每秒回血累积量（凑够1点才真正回复，避免每帧广播信号导致HUD高频刷新）
 var _hp_regen_accum: float = 0.0
 
+## 已应用的血量上限加成总量（全量重算模型：记录当前 max_hp 中来自 max_hp_bonus 的部分）
+## 用途：set_hp_bonus_total 据此计算差值，避免重复扩容/漏缩减，卸下装备时精准回退
+var _applied_hp_bonus: float = 0.0
+
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
@@ -262,8 +266,36 @@ func apply_stat_modifiers(invincible_mult: float, hp_regen: float) -> void:
 	## 立即刷新无敌帧时长（下次受击即按新时长生效）
 	_refresh_invincible_duration()
 
-## 扩展核心血量上限（升级词条/道具使用）
-## 数据流：UpgradeManager属性词条 → Player.apply_max_hp_bonus → 此方法 → 扩容+治疗
+## 设置血量上限加成的目标总量（全量重算模型专用，取代增量 expand/shrink）
+## 数据流：UpgradeManager.recompute_stats → Player._sync_upgrade_stats 读取 max_hp_bonus
+##         → 此方法按差值扩容/缩减，保证"卸下装备"后上限精准回退，不留脏数据
+## 参数：total - 期望的 max_hp_bonus 总加成值（>=0，单位点）
+## 返回：本次实际应用的上限变化量（正=扩容，负=缩减，0=无变化或失败）
+func set_hp_bonus_total(total: float) -> float:
+	## 死亡或数据缺失时不处理（死亡后调整上限无意义）
+	if _is_dead or core_health_data == null:
+		return 0.0
+	## 目标总量不能为负（加成类词条不会减血上限）
+	total = maxf(total, 0.0)
+	## 计算差值：目标 - 已应用（>0 需扩容，<0 需缩减，≈0 无需动作）
+	var delta: float = total - _applied_hp_bonus
+	if absf(delta) < 0.01:
+		return 0.0
+	## 按差值扩容：复用 expand_max_hp（含资源私有化保护与即时治疗）
+	if delta > 0.0:
+		if not expand_max_hp(delta):
+			return 0.0
+	else:
+		## 按差值缩减：复用 shrink_max_hp（含资源私有化保护与血量钳制）
+		if not shrink_max_hp(-delta):
+			return 0.0
+	## 记录新的已应用总量（expand/shrink 内部已广播 core_health_changed）
+	_applied_hp_bonus = total
+	return delta
+
+## 扩展核心血量上限（装备 max_hp_bonus 词条带来的上限提升）
+## 数据流：UpgradeManager.recompute_stats → Player._on_stats_recomputed
+##         → set_hp_bonus_total（差值判定）→ 此方法 → 扩容+治疗
 ## 关键保护：core_health_data可能是场景共享的.tres资源，
 ##          直接修改会污染所有实例（跨局残留），因此首次修改前先duplicate私有化
 ## 参数：bonus - 上限增加值
@@ -287,9 +319,9 @@ func expand_max_hp(bonus: float) -> bool:
 	emit_signal("core_health_changed", _current_hp, core_health_data.max_hp)
 	return true
 
-## 缩减核心血量上限（技能种类上限随机替换移除"梦境之心"词条时调用）
-## 数据流：UpgradeManager._remove_upgrade(max_hp_bonus词条) → Player.remove_max_hp_bonus
-##         → 此方法 → 上限缩减并把当前血量钳制到新上限
+## 缩减核心血量上限（卸下携带 max_hp_bonus 词条的装备时回退）
+## 数据流：UpgradeManager.recompute_stats → Player._on_stats_recomputed
+##         → set_hp_bonus_total（差值判定）→ 此方法 → 上限缩减并把当前血量钳制到新上限
 ## 关键保护：与expand_max_hp一致，首次修改前duplicate私有化，避免污染共享.tres
 ## 参数：reduction - 上限缩减值（正数）
 ## 返回：true表示缩减成功，false表示失败（死亡/数据空/非法增量）

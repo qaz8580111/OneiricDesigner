@@ -9,6 +9,7 @@ display_name = "梦境锋刃"
 description = "子弹伤害 +30%"
 rarity = 0
 max_stacks = 5
+equip_slots = Array[int]([0, 4, 5])
 stat_modifiers = {
 "damage_mult": 0.3
 }

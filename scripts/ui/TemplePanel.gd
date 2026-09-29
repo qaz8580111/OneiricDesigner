@@ -1,9 +1,9 @@
-## TemplePanel.gd - 神庙选项面板（紧凑底栏样式，与升级三选一同款横向排版）
+## TemplePanel.gd - 神庙选项面板（紧凑底栏样式，与商店同款横向排版）
 ## 职责：展示神庙的4个选项，玩家选定后发信号；支持返回键取消且不消耗神庙
 ## 设计意图：
-##   1. 与 LevelUpPanel 同风格：屏幕底部居中小面板，选项横向一行排开，无全屏蒙层
+##   1. 与 ShopPanel 同风格：屏幕底部居中小面板，选项横向一行排开，无全屏蒙层
 ##   2. 鼠标点击/数字键1-4/手柄LT·RT扳机左右+D-Pad备用+A选择；描述与碎片价格走tooltip
-##   3. 赌博式选项带"赌"角标，稳妥式带"稳"角标；融合技能显示"融"字+金色边框
+##   3. 赌博式选项带"赌"角标，稳妥式带"稳"角标
 ##   4. 碎片不足/前置条件不满足的选项置灰（disabled）但保留显示，不可选中确认
 ## 输入架构：选择输入全部经InputManager网关（TEMPLE_CHOICE上下文放行game_choice_prev/next=LT/RT、
 ##           ui_left/right/confirm/cancel）；
@@ -15,8 +15,8 @@ extends Control
 
 ## ========== 预加载资源 ==========
 
-## 卡片样式共享工具（与三选一/商店同款：粗边框+外发光+底色提亮的选中态）
-## 单一来源维护卡片视觉，改一处三个面板同时生效
+## 卡片样式共享工具（与商店同款：粗边框+外发光+底色提亮的选中态）
+## 单一来源维护卡片视觉，改一处两个面板同时生效
 const ChoiceCardStyleLib = preload("res://scripts/ui/ChoiceCardStyle.gd")
 
 ## ========== 信号定义 ==========
@@ -49,8 +49,6 @@ var _selected_index: int = -1
 const SELECT_TWEEN_TIME: float = 0.06
 ## 置灰（不可选）选项的固定灰态调制（样式框另由 ChoiceCardStyleLib.build_disabled_style() 提供）
 const DISABLED_MODULATE: Color = Color(0.55, 0.55, 0.55, 0.65)
-## 融合技能的金色边框/文字颜色
-const FUSE_GOLD: Color = Color(1.0, 0.85, 0.2, 1.0)
 
 ## ========== 生命周期方法 ==========
 
@@ -99,7 +97,7 @@ func _ready() -> void:
 	title.add_theme_color_override("font_color", Color(0.75, 0.6, 1.0))
 	_vbox.add_child(title)
 
-	## 选项水平容器（与升级三选一同款横向排版，4个选项一行排开不溢出）
+	## 选项水平容器（与商店同款横向排版，4个选项一行排开不溢出）
 	_hbox = HBoxContainer.new()
 	_hbox.add_theme_constant_override("separation", 6)
 	_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -174,14 +172,10 @@ func _create_option_button(option: Resource, index: int) -> Button:
 	var key_hint: String = str(index + 1)
 	var cost: int = option.get_cost(_player)
 	var cost_text: String = "  %d碎片" % cost if cost > 0 else ""
-	var is_fuse: bool = option.is_fuse_option()
 
-	## 融合技能：显示"融"字图标+金色边框；普通选项：赌/稳角标
-	if is_fuse:
-		btn.text = "[%s] 融 %s%s" % [key_hint, option.display_name, cost_text]
-	else:
-		var gamble_tag: String = "赌" if option.is_gamble else "稳"
-		btn.text = "[%s] %s %s%s" % [key_hint, gamble_tag, option.display_name, cost_text]
+	## 普通选项：赌/稳角标
+	var gamble_tag: String = "赌" if option.is_gamble else "稳"
+	btn.text = "[%s] %s %s%s" % [key_hint, gamble_tag, option.display_name, cost_text]
 
 	## 描述与碎片价格走tooltip（减小面板占用）
 	var tip: String = option.description
@@ -191,9 +185,9 @@ func _create_option_button(option: Resource, index: int) -> Button:
 	btn.custom_minimum_size = Vector2(150, 32)
 	btn.focus_mode = Control.FOCUS_NONE
 
-	## 按钮样式：由共享工具统一生成（强调色=选项主题色；融合技能用金色强调）
+	## 按钮样式：由共享工具统一生成（强调色=选项主题色）
 	## 先套"未选中"组（1px 细边框）；选中态由 _refresh_selection_visual 切换为粗边框+外发光
-	var accent: Color = FUSE_GOLD if is_fuse else option.option_color
+	var accent: Color = option.option_color
 	var styles: Dictionary = ChoiceCardStyleLib.build_card_styles(accent)
 	ChoiceCardStyleLib.apply_card_styles(btn, styles, false)
 	_button_styles.append(styles)
@@ -201,8 +195,8 @@ func _create_option_button(option: Resource, index: int) -> Button:
 	## 置灰样式：碎片不足/前置条件不满足时灰底+灰边框，配合 disabled=true 使用
 	btn.add_theme_stylebox_override("disabled", ChoiceCardStyleLib.build_disabled_style())
 
-	## 字体颜色跟随选项主题色（融合技能=金色）
-	btn.add_theme_color_override("font_color", FUSE_GOLD if is_fuse else option.option_color)
+	## 字体颜色跟随选项主题色
+	btn.add_theme_color_override("font_color", option.option_color)
 	btn.add_theme_color_override("font_hover_color", Color.WHITE)
 	btn.add_theme_color_override("font_disabled_color", Color(0.55, 0.55, 0.55, 0.7))
 	btn.add_theme_font_size_override("font_size", 13)
@@ -262,7 +256,7 @@ func _select_first_selectable() -> void:
 			return
 
 ## 刷新全部选项的选中态视觉（选中=粗边框+外发光+底色提亮+放大，其余=1px 细边框常态；置灰项固定灰态）
-## 具体样式由 ChoiceCardStyle 统一提供，三选一/商店/神庙三处表现完全一致
+## 具体样式由 ChoiceCardStyle 统一提供，商店/神庙两处表现完全一致
 func _refresh_selection_visual() -> void:
 	for i in range(_buttons.size()):
 		var btn: Button = _buttons[i]

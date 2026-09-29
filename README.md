@@ -1,19 +1,19 @@
 # OneiricDesigner - 梦境设计师
 
-基于 **Godot 4.6.3** 的 2D 弹幕射击 Roguelike 游戏，以直播场景为设计导向：轻量白模快速迭代、视觉反馈强烈、核心循环完整（碎片 → 升级三选一 → 难度攀升 → 死亡结算）。
+基于 **Godot 4.6.3** 的 2D 弹幕射击 Roguelike 游戏，以直播场景为设计导向：轻量白模快速迭代、视觉反馈强烈、核心循环完整（碎片/装备掉落 → 穿戴装备成长 → 难度攀升 → 死亡结算）。
 
 ## 核心玩法循环
 
 ```
-移动躲避 ──射击──> 击杀敌人 ──掉落──> 梦境碎片(经验)
+移动躲避 ──射击──> 击杀敌人 ──掉落──> 梦境碎片 / 装备
     ▲                                    │
     │                                    ▼
- 难度攀升 ◄──击败阶段Boss── 升级三选一(紧凑底栏)
+ 难度攀升 ◄──击败阶段Boss── 穿戴装备强化四维成长
     │                                    │
     └──────── 死亡结算(RunStats统计) ◄───┘
 ```
 
-- **升级三选一**：拾取类别型掉落（特效技能书 / 属性技能书 / 护盾 / 弹道构型）后弹出紧凑底栏面板，不暂停战斗
+- **装备成长**：敌人掉落装备进入背包，玩家在暂停菜单的「装备/背包」面板穿戴；装备统一承载**基础属性 / 子弹特效 / 护盾 / 主动技能（弹道构型）**四个成长维度，并以稀有度与随机词条（roll）区分强弱
 - **难度攀升**：难度与阶段强绑定，**击败当前阶段守门 Boss 是唯一的升级途径**，难度等级 == 阶段号（1~10）；每 5 级触发敌潮
 - **死亡结算**：黑屏淡出 → 结算面板展示本局统计 → 重开 / 回主菜单
 
@@ -21,17 +21,16 @@
 
 > 设置界面（`Settings.tscn`）可选 **普通 / 困难 / 专家** 三档，默认**普通**；
 > 只有手动选择其他难度并应用后，才会在**下一局新游戏**生效（对局中改设置不影响本局）。
-> 三档一律从**难度1 / 阶段1**开局（已取消"起始阶段"机制，档位差异全部由数值倍率与专家机制承担）。
+> 三档一律从**难度1 / 阶段1**开局（已取消"起始阶段"机制，档位差异全部由数值倍率承担）。
 
 | 档位 | 数值 | 机制 |
 |---|---|---|
 | **普通**（默认） | 基线，不叠加任何倍率 | 与既有逻辑完全一致 |
 | **困难** | 伤害 ×2、血量 ×2；移速 ×1.15、子弹飞行速度 ×1.15、攻速 ×1.1；掉率 ×0.6 | 同普通 |
-| **专家** | 与困难完全一致 | **新机制：移除三选一**——所有类别型掉落拾取后仅弹出"是/否"二次确认：<br>选「否」→ 取消拾取，物品**保留原地**；选「是」→ 按拾取物类别在其属性/特效/护盾/构型池内**随机加 1 级**，该类已满则随机替换其中一项 |
+| **专家** | 与困难完全一致 | 当前无专属机制（专家档与困难档数值、机制完全一致） |
 
 > 实现落点：模式枚举与倍率常量集中在 [DifficultyManager.gd](scripts/autoload/DifficultyManager.gd)（`DifficultyMode` / `HARD_*`），
-> 敌人属性缩放的唯一汇聚点是 `apply_to_enemy_data()`，掉率下调的唯一漏斗是 `DropItem.should_drop()`，
-> 专家机制的确认面板与随机升级逻辑在 [UpgradeManager.gd](scripts/autoload/UpgradeManager.gd) + [PickupConfirmPanel.gd](scripts/ui/PickupConfirmPanel.gd) + [PickUp.gd](scripts/entities/PickUp.gd)。
+> 敌人属性缩放的唯一汇聚点是 `apply_to_enemy_data()`，掉率下调的唯一漏斗是 `DropItem.should_drop()`。
 
 ## 项目结构
 
@@ -48,26 +47,31 @@ OneiricDesigner/
 │   │   └── GameWorld.tscn     # 游戏世界：实体容器 + 刷怪计时 + 背景层
 │   └── ui/
 │       ├── MainMenu.tscn      # 主菜单
-│       ├── GameHUD.tscn       # HUD：血量碎片/经验条/等级/难度显示
-│       ├── PauseMenu.tscn     # 暂停菜单（ESC，升级选卡时被屏蔽）
+│       ├── GameHUD.tscn       # HUD：血量/经验条/等级/难度 + 底部 6 装备槽展示
+│       ├── PauseMenu.tscn     # 暂停菜单（ESC）：含「查看状态」与「装备/背包」子面板
 │       ├── Settings.tscn      # 设置：音量/画质/语言/难度
-│       └── (LevelUp/GameOver 面板由脚本动态创建)
+│       └── (GameOver 等面板由脚本动态创建)
 ├── scripts/
 │   ├── autoload/              # 全局单例（注册顺序见下表）
 │   ├── entities/              # 游戏实体：Player/Enemy/Bullet/PickUp/GameWorld/Main/TrailGhost
-│   ├── components/            # 血量组件：PlayerHealthController/ShieldComponent/CoreHealthComponent
+│   ├── components/            # 组件：PlayerHealthController/ShieldComponent/CoreHealthComponent/EquipmentShieldComponent + EquipmentComponent（6 槽穿戴）/BackpackComponent（背包）
 │   ├── resources/             # 数据资源类（.tres 的脚本定义）
-│   │   ├── bullet/            # BulletData/BulletForm/BulletEffect + effects/ 16种特效
+│   │   ├── bullet/            # BulletData/BulletForm/BulletEffect/BulletShotPattern + effects/ 16种特效 + pattern/ 7种构型
 │   │   ├── enemy/             # EnemyData/DropItem
+│   │   ├── equipment/         # EquipmentData/EquipmentAffix/EquipmentActiveSkill/EquipmentGenerator + ShieldEquipmentData 及各护盾特效
 │   │   ├── player/            # CoreHealthData/ShieldData
-│   │   └── upgrade/           # UpgradeData
-│   └── ui/                    # UI 脚本：HUD/升级面板/结算面板/菜单/设置
+│   │   ├── shop/              # ShopProduct
+│   │   ├── temple/            # TempleOption 及四类神庙选项
+│   │   └── upgrade/           # UpgradeData（装备词条模板）
+│   └── ui/                    # UI 脚本：HUD/暂停菜单/装备背包面板/结算面板/神庙/商店/设置
 └── data/                      # 数据配置（.tres 驱动，改数据不改代码）
-    ├── bullet/                # 子弹配置（玩家默认/敌人各职业）+ form/外观 + effect/特效实例
+    ├── bullet/                # 子弹配置（玩家默认/敌人各职业）+ form/外观 + effect/特效实例 + pattern/构型
     ├── enemy/                 # 18 种敌人配置（哥布林/史莱姆/弓手/炮手/幽魂/石像等）
-    ├── items/                 # 掉落物配置（碎片/回血/BUFF，区分小怪与精英）
-    ├── upgrades/              # 21 个升级词条（UpgradeManager 启动时自动扫描）
+    ├── equipment/             # 装备模板（护盾类：基础/冰冻/中毒/反伤）
     ├── player/                # 玩家默认核心血量/护盾配置
+    ├── temple/                # 神庙选项配置（词条强化/特效强化/求购装备/随机护盾）
+    ├── themes/                # UI 主题（默认/霓虹）
+    ├── upgrades/              # 词条模板（EquipmentGenerator 生成装备时抽取；UpgradeManager 启动时自动扫描）
     └── localization/          # 多语言：zh_CN.po / en_US.po
 ```
 
@@ -81,7 +85,7 @@ OneiricDesigner/
 | `TranslationManager` | 多语言：内置字典翻译、配置持久化（user://settings.cfg） |
 | `AudioManager` | 音效：全程序化合成 21 种音效（零音频文件），16 路 round-robin 语音池 |
 | `RunStats` | 本局统计：击杀数/存活时间/碎片/等级等（纯被动收集器） |
-| `UpgradeManager` | 升级系统：扫描 data/upgrades/ 入池、加权三选一、应用词条 |
+| `UpgradeManager` | 装备成长中枢：扫描 data/upgrades/ 词条模板入池、`recompute_stats()` 全量重算玩家属性（BASE_STATS + 装备词条汇总） |
 | `DifficultyManager` | 难度系统：三档模式（普通/困难/专家）+ 难度等级==阶段号（击败阶段Boss才升级），每 5 级触发敌潮 |
 
 > 约定：单例直接按名称访问（`AudioManager.play(...)`），不通过 `Engine.has_singleton()`。
@@ -109,8 +113,9 @@ OneiricDesigner/
 
 - **BulletData**：伤害/速度/穿透数 + `form`（BulletForm 外观）+ `effects[]`（特效列表），玩家子弹持私有深拷贝，升级只改副本不动共享 .tres
 - **EnemyData**：血量/速度/AI 三态参数（游荡→追击→攻击的切换距离）、掉落表、子弹配置；难度缩放作用于深拷贝副本
-- **UpgradeData**：词条类型（属性增幅 / 解锁特效 / BUFF），.tres 放入 data/upgrades/ 即自动入池，无需改代码
-- **DropItem**：掉落概率 + 拾取类型（梦境碎片/回血自动吸附；武器/道具/BUFF 按 E 手动拾取）；`should_drop()` 是掉落概率判定的唯一漏斗（专家/困难档在此叠加掉率系数）
+- **UpgradeData**：装备词条模板（属性增幅 / 携带子弹特效），.tres 放入 data/upgrades/ 即自动入池，由 EquipmentGenerator 抽取生成装备
+- **EquipmentData**：装备模板（槽位 / 稀有度 + 基础属性词条 `affixes[]` + 子弹特效 `effects[]` + 护盾 / 主动技能），由 EquipmentGenerator 依模板与难度 roll 出随机词条
+- **DropItem**：掉落概率 + 拾取类型（梦境碎片/回血自动吸附；武器/道具/装备按 E 手动拾取，装备拾取后进入背包）；`should_drop()` 是掉落概率判定的唯一漏斗（困难/专家档在此叠加掉率系数）
 
 ### 碰撞层约定
 
@@ -129,10 +134,9 @@ OneiricDesigner/
 |------|------|
 | WASD / 方向键 / 左摇杆 | 移动 |
 | 鼠标左键 / 手柄 X | 射击 |
-| E / 空格 / Enter / 手柄 A | 交互（拾取非自动吸附道具） |
-| Enter / 手柄 A | 确认「是」（专家模式拾取二次确认面板） |
-| ESC / 手柄 B | 确认「否」（专家模式拾取二次确认面板，取消拾取但保留物品） |
-| ESC / START | 暂停（升级三选一 / 专家拾取确认时屏蔽） |
+| E / 空格 / Enter / 手柄 A | 交互（拾取非自动吸附的道具与装备） |
+| R / 鼠标右键 / 手柄 Y | 释放主动技能（装备携带的弹道构型，带冷却） |
+| ESC / START | 暂停（打开暂停菜单：查看状态 / 装备与背包 / 设置） |
 
 ## 性能设计（平滑度保障）
 
@@ -165,7 +169,7 @@ OneiricDesigner/
 - [x] 道具掉落与拾取系统 / 菜单导航 / 暂停功能
 
 ### 第二阶段：Roguelike 核心循环 ✅
-- [x] 经验碎片 → 升级三选一（21 词条）→ 难度攀升 → 死亡结算
+- [x] 经验碎片 / 装备掉落 → 穿戴装备强化四维成长 → 难度攀升 → 死亡结算
 - [x] 18 种敌人 / 精英怪机制 / 敌潮系统
 
 ### 第三阶段：视听包装 ✅
@@ -182,5 +186,5 @@ OneiricDesigner/
 
 - **引擎**：Godot 4.6.3
 - **语言**：GDScript 2.0
-- **架构**：数据驱动（.tres 配置）+ 组件化（血量/护盾组件）+ 策略模式（子弹特效）+ 单例管理（8 个 autoload）
+- **架构**：数据驱动（.tres 配置）+ 组件化（血量/护盾/装备/背包组件）+ 策略模式（子弹特效）+ 单例管理（8 个 autoload）
 - **默认分辨率**：1920x1280

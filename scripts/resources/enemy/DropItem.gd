@@ -11,14 +11,12 @@ extends Resource
 ## ========== 道具类型枚举 ==========
 
 enum ItemType {
-	DREAM_FRAGMENT,  ## 梦境碎片（自动吸附，积累后用于升级）
+	DREAM_FRAGMENT,  ## 梦境碎片（自动吸附，纯收集计数：HUD 显示 + 结算统计 + 商店支付）
 	HEALTH,          ## 回血道具（自动吸附，恢复玩家核心血量）
 	WEAPON,          ## 武器（需要手动拾取，切换武器类型）
 	ITEM,            ## 普通物品（需要手动拾取，用于合成或任务）
-	BUFF,            ## 特效技能书（需要手动按E拾取；拾取后打开"特效技能"三选一面板）
-	EQUIPMENT,       ## 装备护盾（需要手动按E拾取；拾取后打开护盾三选一面板，由玩家自选一件护盾）
-	ATTRIBUTE_SKILL, ## 属性技能书（需要手动按E拾取；拾取后打开"属性技能"三选一面板）
-	SHOT_PATTERN     ## 弹道构型书（需要手动按E拾取；拾取后打开"弹道构型"三选一面板）
+	EQUIPMENT        ## 装备（需要手动按E拾取；拾取后直接放入背包，由玩家在背包/装备面板中穿戴）
+	                 ## 四大成长维度（基础属性/特效/护盾/弹道构型）已聚合进装备，不设独立掉落类型
 }
 
 ## ========== 道具基础属性 ==========
@@ -44,16 +42,15 @@ enum ItemType {
 ## 是否自动吸附（默认false，根据类型自动判断）
 @export var auto_adsorb: bool = false
 
-## 装备数据引用（ItemType.EQUIPMENT 时使用，指向 ShieldEquipmentData 等装备资源）
-## 注意：改造后仅作"这是一件护盾装备"的标记——地面掉落阶段不再直接装备该数据，
-##       具体护盾由拾取后的护盾三选一（UpgradeManager.open_shield_choice）随机3选1决定
-## 扩展：未来新增武器/饰品等装备类型时，可增加对应的装备数据字段
-@export var shield_equipment: Resource = null
+## 装备数据引用（ItemType.EQUIPMENT 使用，指向 EquipmentData 装备实例）
+## 由掉落源（Enemy/Boss/精英）通过 UpgradeManager.generate_equipment() 生成后挂载；
+## 拾取时经 Player.add_equipment_to_backpack() 直接放入背包
+@export var equipment_data: Resource = null
 
 ## ========== 核心方法 ==========
 
 ## 获取是否自动吸附（考虑类型默认值）
-## 碎片和回血默认自动吸附，武器、物品、技能书/属性技能书/弹道构型书需要手动拾取（按E键）
+## 碎片和回血默认自动吸附，武器、物品、装备需要手动拾取（按E键）
 ## 返回：true表示自动吸附，false表示需要手动拾取
 func get_auto_adsorb() -> bool:
 	## 如果显式设置了auto_adsorb，使用设置值
@@ -64,9 +61,8 @@ func get_auto_adsorb() -> bool:
 		ItemType.DREAM_FRAGMENT, ItemType.HEALTH:
 			## 碎片和回血：自动吸附
 			return true
-		ItemType.WEAPON, ItemType.ITEM, ItemType.BUFF, ItemType.EQUIPMENT, \
-		ItemType.ATTRIBUTE_SKILL, ItemType.SHOT_PATTERN:
-			## 武器、物品、三类技能/构型书、装备：需要手动拾取
+		ItemType.WEAPON, ItemType.ITEM, ItemType.EQUIPMENT:
+			## 武器、物品、装备：需要手动拾取
 			return false
 	return false
 
@@ -89,35 +85,12 @@ func apply(target: Node2D) -> bool:
 			if target.has_method("heal"):
 				target.heal(value)
 				return true
-		ItemType.BUFF:
-			## 特效技能书：交给玩家 add_buff → UpgradeManager.open_level_up_choice
-			## 打开"特效技能三选一"面板由玩家自选词条（只含特效技能，不含属性技能）
-			if target.has_method("add_buff"):
-				target.add_buff(item_id, value)
-				return true
-		ItemType.ATTRIBUTE_SKILL:
-			## 属性技能书：交给玩家 request_attribute_skill_choice →
-			## UpgradeManager.open_attribute_skill_choice，打开"属性技能三选一"面板
-			## （只含属性技能，与特效技能掉落完全分离，体验同技能书）
-			if target.has_method("request_attribute_skill_choice"):
-				target.request_attribute_skill_choice()
-				return true
-		ItemType.SHOT_PATTERN:
-			## 弹道构型书：交给玩家 request_shot_pattern_choice →
-			## UpgradeManager.open_shot_pattern_choice，打开"弹道构型三选一"面板
-			## （只含弹道构型；选定后直接替换玩家当前弹道，不叠层）
-			if target.has_method("request_shot_pattern_choice"):
-				target.request_shot_pattern_choice()
-				return true
 		ItemType.EQUIPMENT:
-			## 装备护盾：交给玩家 request_shield_choice → UpgradeManager.open_shield_choice，
-			## 打开"护盾三选一"面板由玩家自选一件护盾（与技能书 add_buff 同款体验）。
-			## 说明：掉落物携带的 shield_equipment 仅作"这是一件护盾装备"的标记，
-			##       面板的3个候选由 UpgradeManager 从 data/equipment/ 随机抽取，
-			##       玩家选定后才真正调用 Player.equip_shield（叠层/替换逻辑不变）
-			if shield_equipment != null and target.has_method("request_shield_choice"):
-				target.request_shield_choice()
-				return true
+			## 装备：直接放入玩家背包（不弹面板），由玩家在背包/装备面板中自行穿戴
+			## 四大成长维度（属性/特效/护盾/弹道构型）已聚合进装备，故拾取即"获得一件成长载体"
+			## 返回 false（背包已满/组件缺失）时拾取物保留在原地，玩家可稍后重试
+			if equipment_data != null and target.has_method("add_equipment_to_backpack"):
+				return target.add_equipment_to_backpack(equipment_data)
 	
 	## 未知类型或目标无对应方法，应用失败
 	return false

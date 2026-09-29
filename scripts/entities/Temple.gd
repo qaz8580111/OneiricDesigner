@@ -144,9 +144,6 @@ func interact(player: Node) -> void:
 		return
 	if not GameManager.is_playing():
 		return
-	## 升级三选一面板排队中/正在选择：不允许进入（防止上下文栈与暂停状态交叉）
-	if UpgradeManager and UpgradeManager.is_choosing:
-		return
 
 	_interacted = true
 	_open_panel(player)

@@ -9,6 +9,7 @@ display_name = "急速扳机"
 description = "射击速度 +20%"
 rarity = 0
 max_stacks = 5
+equip_slots = Array[int]([0, 4, 5])
 stat_modifiers = {
 "fire_rate_mult": 0.2
 }

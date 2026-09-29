@@ -9,6 +9,7 @@ display_name = "潮汐回响"
 description = "装备护盾回盾速度 +20%（回盾延迟与回满耗时同步缩短）"
 rarity = 0
 max_stacks = 5
+equip_slots = Array[int]([2, 3])
 stat_modifiers = {
 "shield_regen_mult": 0.2
 }

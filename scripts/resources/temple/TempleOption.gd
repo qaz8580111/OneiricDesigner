@@ -52,13 +52,8 @@ func is_affordable(player: Node) -> bool:
 	return int(player.get("dream_fragment")) >= cost
 
 ## 判断该选项当前是否可选（TemplePanel 据此置灰不可选项：仍显示但不可确认）
-## 默认仅看支付能力；带额外前置条件的子类（如"融合技能"还需≥2个技能）应重写
+## 默认仅看支付能力；带额外前置条件的子类（如"求购装备"还需背包未满）应重写
 ## 参数：player - 玩家节点
 ## 返回：true=可选，false=置灰
 func can_select(player: Node) -> bool:
 	return is_affordable(player)
-
-## 是否为"融合技能"选项（TemplePanel 据此渲染金色边框与"融"字图标）
-## 返回：默认 false，融合技能子类重写为 true
-func is_fuse_option() -> bool:
-	return false

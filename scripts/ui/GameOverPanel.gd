@@ -200,7 +200,7 @@ func _unhandled_input(event: InputEvent) -> void:
 ## 设计意图：结算面板是死亡后唯一交互入口，必须支持手柄全操作；
 ## 复用InputManager网关保证与升级/神庙面板一致的输入过滤；
 ## LT/RT走InputManager的扳机轴越阈边沿检测（game_choice_prev/next，SETTINGS上下文放行），
-## 与升级三选一切换语义完全一致——同一套肌肉记忆覆盖所有选择面板
+## 与神庙/商店选择语义完全一致——同一套肌肉记忆覆盖所有选择面板
 func _process(_delta: float) -> void:
 	## 构建未完成时不响应
 	if not _is_ready:

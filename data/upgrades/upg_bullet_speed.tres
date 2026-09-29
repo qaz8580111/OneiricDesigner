@@ -9,6 +9,7 @@ display_name = "疾风弹道"
 description = "子弹飞行速度 +25%"
 rarity = 0
 max_stacks = 5
+equip_slots = Array[int]([0, 4, 5])
 stat_modifiers = {
 "bullet_speed_mult": 0.25
 }
