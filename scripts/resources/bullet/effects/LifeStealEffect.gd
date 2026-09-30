@@ -20,6 +20,10 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 func _on_stack_grown() -> void:
 	heal_per_hit += 1
 
+## 效果描述：每次命中回复的固定生命值
+func get_effect_description() -> String:
+	return "每次命中回复 %d 点生命" % heal_per_hit
+
 ## 应用吸血特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例；target - 被命中的目标（血珠起点，可空）

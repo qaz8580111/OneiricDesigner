@@ -29,6 +29,10 @@ func _on_stack_grown() -> void:
 	speed_reduction = maxf(speed_reduction - 0.04, 0.05)
 	freeze_duration += 0.4
 
+## 效果描述：冰冻减速（移速保留比例 → 减速幅度）+ 持续时间
+func get_effect_description() -> String:
+	return "命中后敌人移速降至 %.0f%%，持续 %.1f 秒" % [speed_reduction * 100.0, freeze_duration]
+
 ## 应用冰冻特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 发射该特效的子弹实例

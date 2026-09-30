@@ -27,6 +27,10 @@ func _on_stack_grown() -> void:
 	max_jumps += 1
 	jump_radius += 25.0
 
+## 效果描述：闪电链跳跃次数与跳跃范围
+func get_effect_description() -> String:
+	return "命中后闪电跳跃 %d 次（跳跃范围 %.0f 像素）" % [max_jumps, jump_radius]
+
 ## 应用闪电链特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例（提供伤害基准、阵营与场景树入口）；target - 首个被命中的目标

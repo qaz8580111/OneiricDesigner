@@ -1463,23 +1463,17 @@ func _spawn_charge_ghost(dir: Vector2, charge_speed: float, index: int) -> void:
 	tw.chain().tween_callback(ghost.queue_free)
 
 ## ---------- 技能通用：震屏效果 ----------
-## 对玩家相机施加短暂偏移抖动，强化打击感
-## 参数：intensity - 抖动幅度（像素），duration - 持续时间（秒）
+## 对玩家相机施加短暂抖动，强化打击感
+## 规则：震动唯一入口 CameraShake.shake(intensity,duration)，禁止本系统直接写 cam.offset
+## 参数：intensity - 目标峰值抖动幅度（像素），duration - 持续时间（秒）
 func _do_screen_shake(intensity: float, duration: float) -> void:
 	var cam: Camera2D = get_viewport().get_camera_2d()
-	if cam == null:
+	if cam == null or not cam.has_method("shake"):
 		return
-	var original_offset: Vector2 = cam.offset
-	var shake_tween: Tween = create_tween()
-	## 3次随机偏移抖动+回归
-	for i in range(3):
-		var shake_offset: Vector2 = Vector2(
-			RandomManager.randf_range(-intensity, intensity),
-			RandomManager.randf_range(-intensity, intensity)
-		)
-		shake_tween.tween_property(cam, "offset", original_offset + shake_offset, duration / 3.0)
-	## 回归原始偏移
-	shake_tween.tween_property(cam, "offset", original_offset, duration / 3.0)
+	## trauma²曲线反推：峰值偏移 = max_offset_px * trauma² → trauma = sqrt(peak/max_offset_px)
+	var max_offset_px: float = cam.get("max_offset_px") if "max_offset_px" in cam else 14.0
+	var trauma: float = clampf(sqrt(intensity / maxf(max_offset_px, 1.0)), 0.15, 0.9)
+	cam.shake(trauma, duration)
 
 ## ========== 伤害与死亡系统 ==========
 
@@ -1736,19 +1730,6 @@ func _generate_default_drops() -> Array:
 		d.value = 10 if not is_elite else 20
 		d.drop_chance = 1.0
 		d.is_rare = is_elite
-		d.auto_adsorb = true
-		drops.append(d)
-
-	## 小血包：5%概率普通怪，25%概率精英怪
-	var chance_health: float = 0.05 if not is_elite else 0.25
-	if randf() < chance_health:
-		var d: DropItemClass = DropItemClass.new()
-		d.item_id = "health_small"
-		d.item_name = "Small Health Pack"
-		d.item_type = DropItemClass.ItemType.HEALTH
-		d.value = 10 if not is_elite else 30
-		d.drop_chance = 1.0
-		d.is_rare = false
 		d.auto_adsorb = true
 		drops.append(d)
 

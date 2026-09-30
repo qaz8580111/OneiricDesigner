@@ -26,6 +26,14 @@ extends Resource
 ## 是否赌博式选项（true=赌博：结果随机可能好可能差；false=稳妥：小幅度固定强化）
 @export var is_gamble: bool = false
 
+## ========== 结果反馈（子类 apply() 写入，TemplePanel 展示） ==========
+
+## 本次选择的结果反馈文本（由子类 apply() 写入，如"强化成功！史诗武器 属性「攻击力 +12%」"）
+## 设计意图：强化/融合等结果随机的选项必须让玩家看到"哪件装备被强化/融合出了什么"，
+##          统一经此字段回传给 Temple，再由 TemplePanel 结果视图展示
+## 空字符串表示无具体反馈（展示端按默认文案兜底）
+var result_message: String = ""
+
 ## ========== 虚方法（子类按需重写） ==========
 
 ## 应用选项效果（玩家选定后由 Temple 调用）
@@ -52,8 +60,13 @@ func is_affordable(player: Node) -> bool:
 	return int(player.get("dream_fragment")) >= cost
 
 ## 判断该选项当前是否可选（TemplePanel 据此置灰不可选项：仍显示但不可确认）
-## 默认仅看支付能力；带额外前置条件的子类（如"求购装备"还需背包未满）应重写
+## 默认仅看支付能力；带额外前置条件的子类（如"强化装备"还需存在可强化项、"融合装备"还需背包同槽位≥3件）应重写
 ## 参数：player - 玩家节点
 ## 返回：true=可选，false=置灰
 func can_select(player: Node) -> bool:
 	return is_affordable(player)
+
+## 获取本次选择的结果反馈文本（Temple 在 apply() 之后读取并交给面板展示）
+## 返回：结果反馈文本；空字符串表示无具体反馈
+func get_result_message() -> String:
+	return result_message

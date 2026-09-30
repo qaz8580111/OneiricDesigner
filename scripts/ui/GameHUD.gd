@@ -91,6 +91,28 @@ const BUFF_ICON_GAP: float = 6.0
 ## 装备栏外框与组名主题色（金色，RPG 装备的通用视觉语言）
 const EQUIPMENT_ACCENT_COLOR: Color = Color(0.95, 0.8, 0.4)
 
+## ========== 底部主动技能栏（屏幕中间下方：N 个主动技能图标 + 冷却遮罩 + CD 倒计时） ==========
+## 设计意图：装备化后主动技能无数量上限（可同时持有多件带技能的装备），
+##   HUD 需与装备栏并列展示全部技能：选中项高亮边框、每技能独立冷却遮罩与剩余秒数；
+##   切换键位（键盘 Q/E、手柄 LT/RT）由 Player._update_active_skill 处理，HUD 只读状态被动刷新
+## 数据流：Player.get_active_skills()/get_active_skill_index()/get_active_skill_cooldown_ratio_at()
+##         → 本模块写 UI（equipment_changed 时重建控件，_process 每帧推进冷却表现）
+
+## 技能栏外框与组名主题色（青色，与装备金色区分）
+const SKILL_ACCENT_COLOR: Color = Color(0.5, 0.85, 1.0)
+
+## 技能栏外壳（PanelContainer；无技能时整体隐藏）
+var _skill_shell: PanelContainer = null
+## 技能栏内部图标行（N 个技能控件水平排列）
+var _skill_row: HBoxContainer = null
+## 技能控件引用（下标 = Player 主动技能下标，长度随技能数动态变化）
+var _skill_widgets: Array[VBoxContainer] = []     ## 技能控件（图标+名称）
+var _skill_panels: Array[Panel] = []              ## 技能底板（提供选中高亮边框）
+var _skill_icons: Array[TextureRect] = []         ## 技能图标
+var _skill_masks: Array[ColorRect] = []           ## 冷却遮罩（自上而下覆盖）
+var _skill_cd_labels: Array[Label] = []           ## 冷却剩余秒数（居中大字）
+var _skill_name_labels: Array[Label] = []         ## 技能名（图标下方小字）
+
 ## ========== 装备护盾显示（屏幕正下方状态行：名称 + 耐久条） ==========
 
 ## 护盾显示面板容器（名称耐久文字+耐久条，未装备护盾时整体隐藏）
@@ -192,6 +214,9 @@ func _ready() -> void:
 	## 设计意图：屏幕中间下方展示 6 个装备槽（武器/护甲/鞋子/盾牌/戒指/法宝），
 	## 让玩家一眼看到当前穿戴与主动技能冷却
 	_build_equipment_bar()
+	## ========== 底部主动技能栏初始化 ==========
+	## 与装备栏并列展示全部主动技能（数量随装备变化；无技能时整组隐藏）
+	_build_skill_bar()
 	## ========== 装备护盾显示初始化 ==========
 	## 护盾名称+耐久条（未装备时隐藏，装备后插入屏幕正下方状态行）
 	_build_shield_display()
@@ -396,6 +421,8 @@ func _find_player() -> bool:
 	_refresh_shield_display()
 	## 首次连接后立即刷新一次装备栏（兜底HUD在玩家已穿戴装备后才创建的情况）
 	_refresh_equipment_slots()
+	## 首次连接后立即刷新一次技能栏（兜底HUD在玩家已获得主动技能后才创建的情况）
+	_refresh_skill_bar()
 
 	return true
 
@@ -831,28 +858,217 @@ func _update_equipment_slot_visual(slot: int, data: Resource, shield_stack: int)
 	var rarity_text: String = data.get_rarity_text() if data.has_method("get_rarity_text") else ""
 	panel.tooltip_text = "%s [%s]" % [equip_name, rarity_text]
 
-## 刷新主动技能冷却遮罩（每帧调用；无主动技能时零开销）
-## 数据流：Player.get_active_skill_cooldown_ratio() → 遮罩高度（自上而下覆盖）
+## 刷新主动技能冷却表现（每帧调用；无主动技能时零开销）
+## 两块内容：
+##   1. 装备槽遮罩：在"首个携带主动技能的装备槽"上覆盖当前选中技能的冷却比例（沿用旧逻辑）
+##   2. 技能栏：逐技能驱动冷却遮罩 + CD 倒计时 + 选中高亮（多技能核心展示）
 func _refresh_active_skill_cooldown() -> void:
-	## 无携带主动技能的槽位时直接返回
-	if _active_skill_slot < 0 or _active_skill_slot >= _equip_slot_masks.size():
-		return
-	if _player == null or not _player.has_method("get_active_skill_cooldown_ratio"):
-		return
-	var mask: ColorRect = _equip_slot_masks[_active_skill_slot]
-	var ratio: float = float(_player.get_active_skill_cooldown_ratio())
-	## 冷却完毕（比例归零）：遮罩收起
-	if ratio <= 0.001:
-		mask.visible = false
-		return
-	## 冷却中：遮罩自上而下覆盖，高度 = 剩余冷却比例
-	mask.visible = true
-	mask.anchor_bottom = clampf(ratio, 0.0, 1.0)
-	mask.offset_bottom = 0.0
+	## ---------- 1. 装备槽遮罩（选中技能的冷却反馈） ----------
+	if _active_skill_slot >= 0 and _active_skill_slot < _equip_slot_masks.size() \
+			and _player != null and _player.has_method("get_active_skill_cooldown_ratio"):
+		var mask: ColorRect = _equip_slot_masks[_active_skill_slot]
+		var ratio: float = float(_player.get_active_skill_cooldown_ratio())
+		## 冷却完毕（比例归零）：遮罩收起
+		if ratio <= 0.001:
+			mask.visible = false
+		else:
+			## 冷却中：遮罩自上而下覆盖，高度 = 剩余冷却比例
+			mask.visible = true
+			mask.anchor_bottom = clampf(ratio, 0.0, 1.0)
+			mask.offset_bottom = 0.0
+	## ---------- 2. 技能栏逐技能冷却/倒计时/高亮 ----------
+	_update_skill_visuals()
 
 ## 装备变更信号回调（穿戴/替换/卸下装备时触发）
 func _on_equipment_changed() -> void:
 	_refresh_equipment_slots()
+	## 装备变化可能改变主动技能集合（数量/内容），需重建技能栏
+	_refresh_skill_bar()
+
+## ========== 底部主动技能栏 ==========
+
+## 构建技能栏外壳（与装备栏同处的底部居中容器，向右并列）
+## 调用时机：_ready 中紧随 _build_equipment_bar 之后（依赖 _bottom_icon_root 已创建）
+func _build_skill_bar() -> void:
+	## 底部居中容器缺失时不构建（防御：正常流程不会发生）
+	if _bottom_icon_root == null:
+		return
+	## 复用装备栏的图标分组外壳工厂：返回内部图标行，其父的父即外壳
+	_skill_row = _build_icon_group("主动技能", SKILL_ACCENT_COLOR)
+	_skill_shell = _skill_row.get_parent().get_parent() as PanelContainer
+	_bottom_icon_root.add_child(_skill_shell)
+	## 初始无技能：先整组隐藏，待 _refresh_skill_bar 按玩家实际技能数显隐
+	_skill_shell.visible = false
+	_refresh_skill_bar()
+
+## 刷新技能栏（按 Player 当前主动技能集合重建 N 个技能控件）
+## 调用时机：_ready 构建后 / _find_player 首次连接后 / equipment_changed 信号
+## 说明：技能数量与内容会随装备变化，故此处整体重建（技能数很少，重建成本可忽略）
+func _refresh_skill_bar() -> void:
+	if _skill_row == null or _skill_shell == null:
+		return
+	## 读取玩家当前主动技能集合（Player 未就绪时视为空）
+	var skills: Array = []
+	if _player != null and _player.has_method("get_active_skills"):
+		skills = _player.get_active_skills()
+	## 清空旧控件（remove_child 立即脱离容器，避免旧图标残留一帧；再 queue_free 延后释放）
+	for child in _skill_row.get_children():
+		_skill_row.remove_child(child)
+		child.queue_free()
+	_skill_widgets.clear()
+	_skill_panels.clear()
+	_skill_icons.clear()
+	_skill_masks.clear()
+	_skill_cd_labels.clear()
+	_skill_name_labels.clear()
+	## 逐个技能创建控件
+	for i in range(skills.size()):
+		_create_skill_widget(i, skills[i])
+	## 无技能时整组隐藏（避免空壳占据屏幕）
+	_skill_shell.visible = not skills.is_empty()
+	## 建好后立即同步一次选中高亮/冷却表现，避免重建到首帧之间闪空
+	_update_skill_visuals()
+
+## 创建单个技能控件（VBox[底板 Panel(图标+冷却遮罩+CD文字), 技能名 Label]）
+## 参数：index - 技能下标（与 Player._active_skills 对齐）；skill - EquipmentActiveSkill 资源
+func _create_skill_widget(index: int, skill: Resource) -> void:
+	## 外层：图标 + 技能名（垂直排列）
+	var widget: VBoxContainer = VBoxContainer.new()
+	widget.name = "SkillSlot_%d" % index
+	widget.add_theme_constant_override("separation", 2)
+	widget.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_skill_row.add_child(widget)
+
+	## 底板：提供选中高亮边框（样式由 _apply_skill_frame_style 统一写入）
+	var panel: Panel = Panel.new()
+	panel.name = "Frame"
+	panel.custom_minimum_size = Vector2(BUFF_ICON_SIZE, BUFF_ICON_SIZE)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	widget.add_child(panel)
+
+	## 技能图标（统一使用 IconLibrary 技能图；缺失时调用方无需回退，底板即占位）
+	var icon: TextureRect = TextureRect.new()
+	icon.name = "Icon"
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = 1
+	icon.offset_top = 1
+	icon.offset_right = -1
+	icon.offset_bottom = -1
+	icon.texture = IconLibraryLib.get_active_skill_icon()
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(icon)
+
+	## 冷却遮罩：默认隐藏，由 _update_skill_visuals() 按剩余冷却比例驱动（自上而下覆盖）
+	var mask: ColorRect = ColorRect.new()
+	mask.name = "CooldownMask"
+	mask.color = Color(0.05, 0.05, 0.1, 0.7)
+	mask.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mask.anchor_bottom = 0.0
+	mask.offset_bottom = 0.0
+	mask.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mask.visible = false
+	panel.add_child(mask)
+
+	## CD 倒计时文字：冷却中居中显示剩余秒数（如 "6.4"），可用时留空
+	var cd_label: Label = Label.new()
+	cd_label.name = "CDLabel"
+	cd_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cd_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	cd_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	cd_label.add_theme_font_size_override("font_size", 14)
+	cd_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
+	cd_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	cd_label.add_theme_constant_override("outline_size", 3)
+	cd_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cd_label.text = ""
+	panel.add_child(cd_label)
+
+	## 技能名（图标下方小字；技能未命名时回退"技能N"）
+	var name_label: Label = Label.new()
+	name_label.name = "SkillName"
+	var skill_name: String = str(skill.display_name) if "display_name" in skill else ""
+	if skill_name.is_empty():
+		skill_name = "技能%d" % (index + 1)
+	name_label.text = skill_name
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.add_theme_font_size_override("font_size", 10)
+	name_label.add_theme_color_override("font_color", Color(0.85, 0.92, 1.0, 0.95))
+	name_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	name_label.add_theme_constant_override("outline_size", 3)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	widget.add_child(name_label)
+
+	## 登记引用（下标与技能集合对齐，供每帧刷新直取）
+	_skill_widgets.append(widget)
+	_skill_panels.append(panel)
+	_skill_icons.append(icon)
+	_skill_masks.append(mask)
+	_skill_cd_labels.append(cd_label)
+	_skill_name_labels.append(name_label)
+
+## 每帧刷新技能栏视觉（选中高亮 + 冷却遮罩 + CD 倒计时）
+## 数据流：Player.get_active_skill_index()/get_active_skill_cooldown_ratio_at()/
+##         get_active_skill_cooldown_remaining_at() → 逐技能写 UI
+## 说明：控件数量与技能数不一致时（极少数竞态）先重建再刷新，保证下标可安全访问
+func _update_skill_visuals() -> void:
+	if _player == null or _skill_panels.is_empty():
+		return
+	## 竞态防护：技能数与控件数不符时重建一次
+	var skill_count: int = 0
+	if _player.has_method("get_active_skills"):
+		skill_count = _player.get_active_skills().size()
+	if skill_count != _skill_panels.size():
+		_refresh_skill_bar()
+		return
+	## 当前选中技能下标（用于高亮边框）
+	var selected: int = 0
+	if _player.has_method("get_active_skill_index"):
+		selected = int(_player.get_active_skill_index())
+
+	for i in range(_skill_panels.size()):
+		## 读取该技能冷却比例与剩余秒数（越界由 Player 侧钳制并返回 0）
+		var ratio: float = 0.0
+		var remain: float = 0.0
+		if _player.has_method("get_active_skill_cooldown_ratio_at"):
+			ratio = float(_player.get_active_skill_cooldown_ratio_at(i))
+		if _player.has_method("get_active_skill_cooldown_remaining_at"):
+			remain = float(_player.get_active_skill_cooldown_remaining_at(i))
+
+		## 冷却遮罩：归零收起，否则自上而下覆盖
+		var mask: ColorRect = _skill_masks[i]
+		if ratio <= 0.001:
+			mask.visible = false
+		else:
+			mask.visible = true
+			mask.anchor_bottom = clampf(ratio, 0.0, 1.0)
+			mask.offset_bottom = 0.0
+
+		## CD 倒计时文字：仅在冷却中显示剩余秒数
+		var cd_label: Label = _skill_cd_labels[i]
+		cd_label.text = "%.1f" % remain if remain > 0.05 else ""
+
+		## 选中高亮边框
+		_apply_skill_frame_style(_skill_panels[i], i == selected)
+
+## 应用技能底板样式（选中=金色粗边框，未选中=暗青细边框）
+## 参数：panel - 技能底板；is_selected - 是否为当前选中技能
+func _apply_skill_frame_style(panel: Panel, is_selected: bool) -> void:
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.1, 0.14, 0.85)
+	style.set_content_margin_all(0.0)
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	var border_w: int = 2 if is_selected else 1
+	style.border_width_left = border_w
+	style.border_width_right = border_w
+	style.border_width_top = border_w
+	style.border_width_bottom = border_w
+	style.border_color = Color(1.0, 0.85, 0.3) if is_selected else Color(0.4, 0.6, 0.8, 0.8)
+	panel.add_theme_stylebox_override("panel", style)
 
 ## ========== 装备护盾显示（类型图标 + 健康度） ==========
 

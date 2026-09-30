@@ -27,6 +27,10 @@ func _on_stack_grown() -> void:
 	explosion_radius += 15.0
 	damage_multiplier += 0.15
 
+## 效果描述：爆炸范围与伤害倍率
+func get_effect_description() -> String:
+	return "命中后爆炸：范围 %.0f 像素，造成 %.0f%% 子弹伤害" % [explosion_radius, damage_multiplier * 100.0]
+
 ## 应用爆炸特效（重写基类方法）
 ## 触发时机：ON_HIT或ON_DESTROY（由.tres中trigger_type决定，常用ON_DESTROY实现"死亡爆破"）
 ## 参数：bullet - 爆炸源子弹实例（提供伤害基准、阵营与物理空间）；target - 直击目标（可空）

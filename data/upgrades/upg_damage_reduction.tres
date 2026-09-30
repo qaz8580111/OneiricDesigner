@@ -4,13 +4,13 @@
 
 [resource type="UpgradeData" script_class="UpgradeData"]
 script = ExtResource("1")
-upgrade_id = "upg_hp_regen"
-display_name = "生命泉涌"
-description = "每秒恢复核心血 1 点"
+upgrade_id = "upg_damage_reduction"
+display_name = "不坏金身"
+description = "受到的所有伤害降低 10%"
 ; 稀有度：暂统一为普通（0），后续再按技能强度重新分级
 rarity = 0
 max_stacks = 5
-equip_slots = Array[int]([1, 2, 3, 4, 5])
+equip_slots = Array[int]([1])
 stat_modifiers = {
-"hp_regen": 1
+"damage_reduction": 0.1
 }

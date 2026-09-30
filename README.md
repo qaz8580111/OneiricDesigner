@@ -48,7 +48,7 @@ OneiricDesigner/
 │   └── ui/
 │       ├── MainMenu.tscn      # 主菜单
 │       ├── GameHUD.tscn       # HUD：血量/经验条/等级/难度 + 底部 6 装备槽展示
-│       ├── PauseMenu.tscn     # 暂停菜单（ESC）：含「查看状态」与「装备/背包」子面板
+│       ├── PauseMenu.tscn     # 暂停菜单（ESC）：「状态与装备」单屏左右分栏（左状态 / 右已装备+背包）
 │       ├── Settings.tscn      # 设置：音量/画质/语言/难度
 │       └── (GameOver 等面板由脚本动态创建)
 ├── scripts/
@@ -69,7 +69,7 @@ OneiricDesigner/
     ├── enemy/                 # 18 种敌人配置（哥布林/史莱姆/弓手/炮手/幽魂/石像等）
     ├── equipment/             # 装备模板（护盾类：基础/冰冻/中毒/反伤）
     ├── player/                # 玩家默认核心血量/护盾配置
-    ├── temple/                # 神庙选项配置（词条强化/特效强化/求购装备/随机护盾）
+    ├── temple/                # 神庙选项配置（强化装备/融合装备）
     ├── themes/                # UI 主题（默认/霓虹）
     ├── upgrades/              # 词条模板（EquipmentGenerator 生成装备时抽取；UpgradeManager 启动时自动扫描）
     └── localization/          # 多语言：zh_CN.po / en_US.po

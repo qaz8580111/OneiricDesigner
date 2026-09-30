@@ -35,6 +35,10 @@ func _on_stack_grown() -> void:
 	turn_speed = minf(turn_speed + 0.02, 0.4)
 	homing_range += 40.0
 
+## 效果描述：追踪范围与转向速度（转向速度按 0~1 系数换算为百分比）
+func get_effect_description() -> String:
+	return "子弹自动追踪 %.0f 像素内敌人（转向速度 %.0f%%）" % [homing_range, turn_speed * 100.0]
+
 ## 应用追踪特效（重写基类方法）
 ## 触发时机：ON_TRAVEL（飞行中每物理帧触发，性能敏感路径）
 ## 参数：bullet - 飞行中的子弹实例；target/context 对本特效无意义（始终为null/空）

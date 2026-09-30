@@ -51,6 +51,14 @@ func add_stack() -> void:
 func _on_stack_grown() -> void:
 	pass  ## 默认无成长（未重写的特效保持原行为）
 
+## 特效效果描述虚方法（扩展插槽）：子类重写以把"特效名"翻译成"具体效果"
+## 设计意图：装备面板/状态栏不再只显示特效名，而是直接说明它带来什么效果
+##          （如"迟滞力场"→"命中减缓敌人 55% 移速，持续 1.8 秒"）
+## 注意：叠层成长已由 add_stack() 放大过实例参数，子类描述直接读当前参数即为实际值
+func get_effect_description() -> String:
+	## 默认回落：显示名（空则回退 effect_id）
+	return display_name if display_name != "" else effect_id
+
 ## ========== 核心方法（扩展插槽） ==========
 
 ## 应用特效（扩展插槽）

@@ -111,6 +111,11 @@ var game_hud: Control = null
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
 func _ready() -> void:
+	## 启动即恢复玩家保存的显示设置（全屏/垂直同步）。
+	## 背景：Settings 界面只在玩家打开设置时才实例化，其 _apply_settings() 不会在启动时执行，
+	##       故必须在此处主动应用 user://settings.cfg，否则玩家"取消全屏"的选择会被
+	##       project.godot 的默认全屏（window/size/mode=3）覆盖
+	_apply_saved_display_setting()
 	## 设置此节点为PROCESS_MODE_ALWAYS（暂停状态下仍可更新，确保死亡动画正常运行）
 	## 注意：Main自身ALWAYS，但游戏世界容器必须显式设为PAUSABLE，
 	## 否则Player/Enemy/Camera2D会继承ALWAYS导致暂停无效（已发生的线上事故根因）
@@ -527,6 +532,24 @@ func _on_game_resumed() -> void:
 	pass
 
 ## ========== 帧更新方法 ==========
+
+## 启动时从 user://settings.cfg 读取并应用显示设置（全屏/垂直同步）
+## 与 _apply_saved_auto_shoot_setting 同源范式：不依赖 Settings 界面实例化即可生效
+## 说明：无配置文件（首次启动）时直接返回，保持 project.godot 的默认全屏，不覆盖
+func _apply_saved_display_setting() -> void:
+	var config = ConfigFile.new()
+	if config.load("user://settings.cfg") != OK:
+		return
+	## 全屏：缺省 true，与 project.godot 的 window/size/mode=3 口径一致
+	var fullscreen: bool = config.get_value("Settings", "fullscreen", true)
+	DisplayServer.window_set_mode(
+		DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else DisplayServer.WINDOW_MODE_WINDOWED
+	)
+	## 垂直同步：缺省 true
+	var vsync: bool = config.get_value("Settings", "vsync", true)
+	DisplayServer.window_set_vsync_mode(
+		DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED
+	)
 
 ## 从配置文件读取并应用保存的自动射击设置
 ## 参数：player_node - 玩家节点

@@ -9,7 +9,7 @@
 ##   1. 词条：汇总各装备 get_affix_totals() → UpgradeManager.set_equipment_bonus()（触发全量重算）
 ##   2. 特效：全量重建注入 Player 私有子弹副本（apply_equipment_effect / remove_bullet_effect）
 ##   3. 护盾：盾牌槽数据变化时驱动 Player.equip_shield()/unequip_equipped_shield()
-##   4. 主动技能：取第一个携带技能的装备 → Player.set_active_skill()
+##   4. 主动技能：收集全部携带技能的装备（按 skill_id 去重）→ Player.set_active_skills()
 ##
 ## 数据流：装备生成 → 入背包 → BackpackComponent 穿戴 → 本组件.equip() → _refresh() 下发四类来源
 ##         → UpgradeManager.stats_recomputed → Player._sync_upgrade_stats 同步到自身
@@ -181,21 +181,31 @@ func _refresh_shield() -> void:
 			_player.equip_shield(new_shield)
 		_applied_shield_data = new_shield
 
-## 下发主动技能：取第一件携带主动技能的装备（按槽位枚举顺序，武器优先）
-## 设计意图：主动技能同时只生效一个（单槽位语义，无叠层）；无装备携带时清空
+## 下发主动技能：收集全部携带主动技能的装备（按槽位顺序，武器优先），按 skill_id 去重
+## 设计意图：主动技能不再"同时只生效一个"——持有多件带技能的装备时全部下发，
+##           由 Player 用 Q/E 或手柄 LT/RT 在技能间切换，各技能独立冷却
+##           同一 skill_id 可能被多件装备 roll 到，去重避免 HUD 出现重复技能
 func _refresh_active_skill() -> void:
 	if _player == null:
 		return
-	var skill: Resource = null
+	var skills: Array[Resource] = []
+	var seen: Dictionary = {}
 	for slot in _slot_order():
 		var data: Resource = _equipped.get(slot, null)
 		if data == null:
 			continue
-		if data.has_active_skill():
-			skill = data.active_skill
-			break
-	if _player.has_method("set_active_skill"):
-		_player.set_active_skill(skill)
+		if not data.has_active_skill():
+			continue
+		var skill: Resource = data.active_skill
+		var sid: String = str(skill.skill_id) if "skill_id" in skill else ""
+		## skill_id 为空时用实例 id 兜底去重，避免把不同技能误判为同一个
+		var dedupe_key: String = sid if sid != "" else str(skill.get_instance_id())
+		if seen.has(dedupe_key):
+			continue
+		seen[dedupe_key] = true
+		skills.append(skill)
+	if _player.has_method("set_active_skills"):
+		_player.set_active_skills(skills)
 
 ## 获取槽位遍历顺序（武器→护甲→鞋子→盾牌→戒指→法宝）
 ## 返回：Array[int] 固定顺序的槽位数组（保证 UI/技能优先级稳定，不随字典插入顺序漂移）

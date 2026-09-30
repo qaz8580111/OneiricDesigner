@@ -28,6 +28,10 @@ func _on_stack_grown() -> void:
 	extra_count += 1
 	damage_mult += 0.05
 
+## 效果描述：额外子弹数量与伤害系数
+func get_effect_description() -> String:
+	return "生成时额外发射 %d 发随机弹（伤害 %.0f%%）" % [extra_count, damage_mult * 100.0]
+
 const BULLET_SCENE: PackedScene = preload("res://scenes/gameplay/Bullet.tscn")
 const BulletDataClass = preload("res://scripts/resources/bullet/BulletData.gd")
 
@@ -72,5 +76,7 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 		b.set_owner_group(owner_group)
 		## 登记到世界管理：加入子弹列表并连接命中/销毁信号（与SplitEffect相同的注册约定）
 		world._bullets.append(b)
-		b.hit.connect(world._on_bullet_hit.bind(b))
+		## hit 信号自带(bullet, target)两参，处理器 _on_bullet_hit 亦为两参，不可再 bind
+		b.hit.connect(world._on_bullet_hit)
+		## destroyed 信号无参，处理器 _on_bullet_destroyed(bullet) 需 bind 回子弹自身
 		b.destroyed.connect(world._on_bullet_destroyed.bind(b))

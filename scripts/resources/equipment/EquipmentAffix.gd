@@ -37,10 +37,21 @@ extends Resource
 func is_multiplier() -> bool:
 	return stat_key.ends_with("_mult")
 
+## 判断该词条是否按"百分比"口径展示
+## 约定：乘算键（_mult）与数值本身即比例的键（damage_reduction 减伤）统一按百分比显示，
+##       其余为固定加值（保留 1 位小数）；与状态面板/装备对比的显示口径保持一致
+## 返回：true=按百分比展示
+func is_percentage_display() -> bool:
+	return is_multiplier() or stat_key == "damage_reduction"
+
 ## 获取词条格式化显示文本（背包/装备面板 tooltip 用）
-## 返回：如 "移动速度 +8.5%" 或 "血量上限 +12.0"
+## 精度约定（与状态面板、装备对比保持完全一致）：
+##   1) 百分比口径词条四舍五入到「整数个百分点」，只显示整数，不出现小数点
+##   2) 固定加值词条保留 1 位小数（roll 出的强度差异若取整会丢失大量精度）
+## 返回：如 "移动速度 +9%" 或 "血量上限 +18.3"
 func get_display_text() -> String:
 	var label: String = display_name if display_name != "" else stat_key
-	if is_multiplier():
-		return "%s +%.1f%%" % [label, value * 100.0]
-	return "%s +%.1f" % [label, value]
+	if is_percentage_display():
+		return "%s +%d%%" % [label, int(round(value * 100.0))]
+	## 固定加值：先四舍五入到十分位再渲染，保证与面板/对比的取整口径一致（避免 printf 的进位差异）
+	return "%s +%.1f" % [label, round(value * 10.0) / 10.0]

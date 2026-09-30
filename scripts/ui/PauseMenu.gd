@@ -12,6 +12,9 @@ const IconLibraryLib = preload("res://scripts/ui/IconLibrary.gd")
 ## 说明：空槽位没有 EquipmentData 实例、拿不到 get_slot_text()，故此处保留一份槽位名常量
 const SLOT_TEXTS: Array[String] = ["武器", "护甲", "鞋子", "盾牌", "戒指", "法宝"]
 
+## 一键分解的二次确认时限（秒）：首次按下进入待确认，此时限内再按一次才真正执行
+const BULK_CONFIRM_TIME: int = 3
+
 ## 暂停菜单必须在暂停状态下仍能处理输入，需要 ALWAYS 模式
 func _enter_tree() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -38,11 +41,8 @@ signal quit_to_menu()
 ## 设置按钮（打开设置界面）
 @onready var settings_button: Button = $VBoxContainer/SettingsButton
 
-## 查看状态按钮（打开暂停菜单内的状态子面板）
-@onready var status_button: Button = $VBoxContainer/StatusButton
-
-## 装备背包按钮（打开暂停菜单内的装备/背包子面板）
-@onready var equipment_button: Button = $VBoxContainer/EquipmentButton
+## 状态与装备按钮（打开暂停菜单内的"状态 + 装备/背包"合并面板）
+@onready var player_panel_button: Button = $VBoxContainer/PlayerPanelButton
 
 ## 返回主菜单按钮
 @onready var quit_button: Button = $VBoxContainer/QuitButton
@@ -55,29 +55,21 @@ var MENU_NAVIGATOR_SCRIPT: Script = load("res://scripts/autoload/MenuController.
 ## 菜单导航器实例
 var _navigator: Node = null
 
-## ========== 查看状态子面板（暂停菜单内） ==========
+## ========== 状态与装备合并面板（暂停菜单内，单屏左右分栏） ==========
 
-## 状态子面板根容器（隐藏主菜单按钮后显示，返回后隐藏）
-var _status_panel: Control = null
+## 合并面板根容器（隐藏主菜单按钮后显示）
+var _player_panel: Control = null
 
-## 状态子面板标题标签
-var _status_title_label: Label = null
+## 合并面板标题标签
+var _player_panel_title_label: Label = null
 
-## 状态子面板行容器（属性/技能/护盾逐行展示）
+## 左栏"状态"栏标题标签（语言切换时需更新）
+var _status_header_label: Label = null
+
+## 状态行容器（核心血/属性/技能/护盾逐行展示）
 var _status_rows: VBoxContainer = null
 
-## 状态子面板返回按钮
-var _status_back_button: Button = null
-
-## ========== 装备/背包子面板（暂停菜单内） ==========
-
-## 装备/背包子面板根容器（隐藏主菜单按钮后显示）
-var _equipment_panel: Control = null
-
-## 装备/背包子面板标题标签
-var _equipment_title_label: Label = null
-
-## "已装备"栏标题标签（语言切换时需更新）
+## 右栏"已装备"栏标题标签（语言切换时需更新）
 var _equipment_slots_header: Label = null
 
 ## 已装备槽位列表容器（6 个槽位各一个按钮；已装备的可点击卸下）
@@ -89,28 +81,54 @@ var _equipment_backpack_box: VBoxContainer = null
 ## 背包容量提示标签（显示"背包 (n/容量)"，满时追加提示）
 var _equipment_capacity_label: Label = null
 
-## 装备/背包子面板底部操作提示标签
+## 装备碎片数值标签（按槽位索引与 SLOT_TEXTS 对齐，展示各槽位已累计的碎片数）
+var _fragment_value_labels: Array[Label] = []
+
+## "装备碎片"分组标题标签（语言切换时需更新）
+var _fragment_header_label: Label = null
+
+## 一键分解按钮（顺序与 _bulk_rarities 一一对应）
+var _bulk_buttons: Array[Button] = []
+
+## 一键分解按钮对应的稀有度（与 _bulk_buttons 一一对应）
+var _bulk_rarities: Array[int] = []
+
+## 待二次确认的稀有度（-1 表示当前无待确认操作）
+var _bulk_confirm_pending: int = -1
+
+## 二次确认剩余秒数（<=0 即自动取消，回到初始文案）
+var _bulk_confirm_left: int = 0
+
+## 二次确认倒计时定时器（每秒一跳；暂停菜单为 ALWAYS 模式，故暂停中仍计时）
+var _bulk_confirm_timer: Timer = null
+
+## 合并面板底部操作提示标签
 var _equipment_hint_label: Label = null
 
-## 装备/背包子面板返回按钮
-var _equipment_back_button: Button = null
+## 合并面板返回按钮
+var _player_panel_back_button: Button = null
+
+## ========== 装备对比弹窗（聚焦背包装备时，与同槽位已装备件对比差异） ==========
+
+## 对比弹窗根容器（浮层，默认隐藏；鼠标/手柄聚焦背包装备且同槽位有已装备件时显示）
+var _compare_panel: PanelContainer = null
+
+## 对比弹窗内容容器（每次显示时清空重建；仅放 Label，不含 Button，避免抢导航焦点）
+var _compare_rows: VBoxContainer = null
 
 ## ========== 生命周期方法 ==========
 
 ## _ready() - 节点进入场景树时调用一次，用于初始化
 func _ready() -> void:
-	## 构建状态子面板（先于文本刷新，保证标题/返回按钮引用就绪）
-	_build_status_panel()
-	## 构建装备/背包子面板（同样先于文本刷新）
-	_build_equipment_panel()
+	## 构建"状态 + 装备/背包"合并面板（先于文本刷新，保证各标签/返回按钮引用就绪）
+	_build_player_panel()
 	## 更新界面文本（支持多语言）
 	_update_text()
 	
 	## 连接按钮信号到处理方法
 	resume_button.pressed.connect(_on_resume_button_pressed)
 	settings_button.pressed.connect(_on_settings_button_pressed)
-	status_button.pressed.connect(_on_status_button_pressed)
-	equipment_button.pressed.connect(_on_equipment_button_pressed)
+	player_panel_button.pressed.connect(_on_player_panel_button_pressed)
 	quit_button.pressed.connect(_on_quit_button_pressed)
 	
 	## 监听语言变化信号（语言切换时更新界面文本）
@@ -142,31 +160,30 @@ func _update_text() -> void:
 	title_label.text = TranslationManager.t("PAUSED_TITLE")
 	resume_button.text = TranslationManager.t("BUTTON_RESUME")
 	settings_button.text = TranslationManager.t("BUTTON_SETTINGS")
-	status_button.text = TranslationManager.t("BUTTON_VIEW_STATUS")
-	equipment_button.text = TranslationManager.t("BUTTON_EQUIPMENT")
+	player_panel_button.text = TranslationManager.t("BUTTON_PLAYER_PANEL")
 	quit_button.text = TranslationManager.t("BUTTON_QUIT_TO_MENU")
-	## 状态子面板标题与返回按钮（构建后存在才更新，避免_ready早期空引用）
-	if _status_title_label != null:
-		_status_title_label.text = TranslationManager.t("STATUS_TITLE")
-	if _status_back_button != null:
-		_status_back_button.text = TranslationManager.t("BUTTON_BACK")
-	## 装备/背包子面板固定文本（列表内文本由数据驱动，在刷新时生成）
-	if _equipment_title_label != null:
-		_equipment_title_label.text = TranslationManager.t("EQUIPMENT_TITLE")
+	## 合并面板固定文本（左右栏标题/底部提示/返回按钮；列表内文本由数据驱动，在刷新时生成）
+	if _player_panel_title_label != null:
+		_player_panel_title_label.text = TranslationManager.t("PLAYER_PANEL_TITLE")
+	if _status_header_label != null:
+		_status_header_label.text = TranslationManager.t("STATUS_TITLE")
 	if _equipment_slots_header != null:
 		_equipment_slots_header.text = TranslationManager.t("EQUIPMENT_SLOTS")
+	if _fragment_header_label != null:
+		_fragment_header_label.text = TranslationManager.t("EQUIPMENT_FRAGMENTS")
 	if _equipment_hint_label != null:
 		_equipment_hint_label.text = TranslationManager.t("EQUIPMENT_HINT")
-	if _equipment_back_button != null:
-		_equipment_back_button.text = TranslationManager.t("BUTTON_BACK")
+	if _player_panel_back_button != null:
+		_player_panel_back_button.text = TranslationManager.t("BUTTON_BACK")
 
 ## ========== 信号回调方法 ==========
 
 ## 语言变化回调：重新更新界面文本
 func _on_language_changed(_lang: String) -> void:
 	_update_text()
-	## 装备面板可见时同步重建列表（列表文本由数据生成，非固定 key，需刷新才随语言变化）
-	if _equipment_panel != null and _equipment_panel.visible:
+	## 合并面板可见时同步重建两侧内容（列表文本由数据生成，非固定 key，需刷新才随语言变化）
+	if _player_panel != null and _player_panel.visible:
+		_refresh_status_list()
 		_refresh_equipment_panel()
 
 ## 继续游戏按钮点击回调：发出继续游戏信号
@@ -184,104 +201,288 @@ func _on_quit_button_pressed() -> void:
 	print("Quitting to menu...")
 	quit_to_menu.emit()
 
-## ========== 查看状态子面板 ==========
+## ========== 状态与装备合并面板 ==========
 
-## 查看状态按钮点击回调：打开状态子面板
-func _on_status_button_pressed() -> void:
+## 状态与装备按钮点击回调：打开合并面板
+func _on_player_panel_button_pressed() -> void:
 	if AudioManager:
 		AudioManager.play("ui_click", 0.7)
-	_open_status_panel()
+	_open_player_panel()
 
-## 状态子面板返回按钮点击回调：关闭状态子面板，回到暂停主菜单
-func _on_status_back_pressed() -> void:
+## 合并面板返回按钮点击回调：关闭合并面板，回到暂停主菜单
+func _on_player_panel_back_pressed() -> void:
 	if AudioManager:
 		AudioManager.play("ui_click", 0.7)
-	_close_status_panel()
+	_close_player_panel()
 
-## 导航器取消分发：子面板打开时先返回主菜单，否则（暂停主菜单）继续游戏
-## 分发顺序：装备面板 → 状态面板 → 继续游戏（同时最多只有一个子面板可见）
+## 导航器取消分发：合并面板打开时先返回主菜单，否则（暂停主菜单）继续游戏
 func _on_navigator_cancel() -> void:
-	if _equipment_panel != null and _equipment_panel.visible:
-		_close_equipment_panel()
-	elif _status_panel != null and _status_panel.visible:
-		_close_status_panel()
+	if _player_panel != null and _player_panel.visible:
+		_close_player_panel()
 	else:
 		_on_resume_button_pressed()
 
-## 构建状态子面板（纯代码UI，隐藏在主菜单之后，点击查看状态时显示）
-## 结构：StatusPanel(Control) → StatusTitle + StatusScroll(ScrollContainer→StatusRows) + StatusBackButton
-func _build_status_panel() -> void:
-	_status_panel = Control.new()
-	_status_panel.name = "StatusPanel"
-	_status_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_status_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_status_panel.visible = false
-	add_child(_status_panel)
+## 构建"状态 + 装备/背包"合并面板（纯代码UI，隐藏在主菜单之后，点击状态与装备按钮时显示）
+## 结构：PlayerPanel(Control) → Title + Body(HBox[状态列, 装备列]) + Hint + BackButton
+##       左栏"状态"=核心血/属性/技能/护盾；右栏"装备"=已装备6槽 + 背包列表（同一滚动区内上下排列）
+func _build_player_panel() -> void:
+	_player_panel = Control.new()
+	_player_panel.name = "PlayerPanel"
+	_player_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_player_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_player_panel.visible = false
+	add_child(_player_panel)
 
 	## 标题（顶部居中）
-	_status_title_label = Label.new()
-	_status_title_label.name = "StatusTitle"
-	_status_title_label.anchor_left = 0.0
-	_status_title_label.anchor_right = 1.0
-	_status_title_label.offset_top = 40.0
-	_status_title_label.offset_bottom = 90.0
-	_status_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_status_title_label.add_theme_font_size_override("font_size", 30)
-	_status_title_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	_status_title_label.add_theme_constant_override("outline_size", 4)
-	_status_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_status_panel.add_child(_status_title_label)
+	_player_panel_title_label = Label.new()
+	_player_panel_title_label.name = "PlayerPanelTitle"
+	_player_panel_title_label.anchor_left = 0.0
+	_player_panel_title_label.anchor_right = 1.0
+	_player_panel_title_label.offset_top = 40.0
+	_player_panel_title_label.offset_bottom = 90.0
+	_player_panel_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_player_panel_title_label.add_theme_font_size_override("font_size", 30)
+	_player_panel_title_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_player_panel_title_label.add_theme_constant_override("outline_size", 4)
+	_player_panel_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_player_panel.add_child(_player_panel_title_label)
 
-	## 滚动容器（中部，行数多时可滚动，避免溢出屏幕）
-	var scroll := ScrollContainer.new()
-	scroll.name = "StatusScroll"
-	scroll.anchor_left = 0.5
-	scroll.anchor_right = 0.5
-	scroll.anchor_top = 0.5
-	scroll.anchor_bottom = 0.5
-	scroll.offset_left = -520.0
-	scroll.offset_right = 520.0
-	scroll.offset_top = -420.0
-	scroll.offset_bottom = 380.0
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_status_panel.add_child(scroll)
+	## 两栏主体（左栏=状态，右栏=装备/背包；viewport 1920x1280 下取 1240x750 居中）
+	var body := HBoxContainer.new()
+	body.name = "PlayerPanelBody"
+	body.anchor_left = 0.5
+	body.anchor_right = 0.5
+	body.anchor_top = 0.5
+	body.anchor_bottom = 0.5
+	body.offset_left = -620.0
+	body.offset_right = 620.0
+	body.offset_top = -410.0
+	body.offset_bottom = 340.0
+	body.add_theme_constant_override("separation", 28)
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_player_panel.add_child(body)
+
+	## ---------------------- 左栏：状态 ----------------------
+	var left := VBoxContainer.new()
+	left.name = "StatusColumn"
+	left.custom_minimum_size = Vector2(500.0, 0.0)
+	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left.add_theme_constant_override("separation", 8)
+	body.add_child(left)
+
+	_status_header_label = Label.new()
+	_status_header_label.add_theme_font_size_override("font_size", 20)
+	_status_header_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
+	_status_header_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_status_header_label.add_theme_constant_override("outline_size", 3)
+	left.add_child(_status_header_label)
+
+	var status_scroll := ScrollContainer.new()
+	status_scroll.name = "StatusScroll"
+	status_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	status_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left.add_child(status_scroll)
 
 	_status_rows = VBoxContainer.new()
 	_status_rows.name = "StatusRows"
 	_status_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_status_rows.add_theme_constant_override("separation", 8)
-	scroll.add_child(_status_rows)
+	status_scroll.add_child(_status_rows)
+
+	## ---------------------- 右栏：已装备 + 背包 ----------------------
+	## 说明：两段共用同一个 ScrollContainer（而非嵌套两个滚动容器），避免滚轮事件互相抢占
+	var right := VBoxContainer.new()
+	right.name = "EquipmentColumn"
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.add_theme_constant_override("separation", 8)
+	body.add_child(right)
+
+	var right_scroll := ScrollContainer.new()
+	right_scroll.name = "EquipmentScroll"
+	right_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	right.add_child(right_scroll)
+
+	var right_box := VBoxContainer.new()
+	right_box.name = "EquipmentStack"
+	right_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_box.add_theme_constant_override("separation", 8)
+	right_scroll.add_child(right_box)
+
+	## 右栏最上段：装备碎片（按 6 槽位展示分解累计的碎片数）
+	## 设计意图：碎片是「分解装备」的产物、也是「合成装备」的消耗，放在装备栏顶部可与下方背包
+	##           形成"分解 → 碎片增长"的即时反馈闭环，玩家无需再切到商店页签查看存量
+	var fragment_header := Label.new()  # 分组标题（样式与其它分组标题一致）
+	fragment_header.text = TranslationManager.t("EQUIPMENT_FRAGMENTS")
+	fragment_header.add_theme_font_size_override("font_size", 20)
+	fragment_header.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
+	fragment_header.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	fragment_header.add_theme_constant_override("outline_size", 3)
+	right_box.add_child(fragment_header)
+	_fragment_header_label = fragment_header
+
+	## 碎片数值网格：3 列 × 2 行，恰好放下 6 个槽位（顺序与 EquipmentData.Slot / SLOT_TEXTS 对齐）
+	var fragment_grid := GridContainer.new()
+	fragment_grid.name = "EquipmentFragmentGrid"
+	fragment_grid.columns = 3
+	fragment_grid.add_theme_constant_override("h_separation", 16)
+	fragment_grid.add_theme_constant_override("v_separation", 6)
+	right_box.add_child(fragment_grid)
+
+	_fragment_value_labels.clear()
+	for slot in range(SLOT_TEXTS.size()):
+		var frag_label := Label.new()
+		frag_label.add_theme_font_size_override("font_size", 15)
+		frag_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9))
+		fragment_grid.add_child(frag_label)
+		_fragment_value_labels.append(frag_label)
+
+	## 右栏上段：已装备 6 槽位
+	_equipment_slots_header = Label.new()
+	_equipment_slots_header.add_theme_font_size_override("font_size", 20)
+	_equipment_slots_header.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
+	_equipment_slots_header.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_equipment_slots_header.add_theme_constant_override("outline_size", 3)
+	right_box.add_child(_equipment_slots_header)
+
+	_equipment_slots_box = VBoxContainer.new()
+	_equipment_slots_box.name = "EquipmentSlotsBox"
+	_equipment_slots_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_equipment_slots_box.add_theme_constant_override("separation", 8)
+	right_box.add_child(_equipment_slots_box)
+
+	## 右栏下段：背包头部行（容量提示 + 一键分解按钮）+ 背包列表
+	## 设计说明：一键分解原在商店面板，操作对象却是背包内容，语义与场景都不匹配；
+	##           移到背包头部行后「看背包 → 一键清理」在同一屏完成，无需再进商店
+	var backpack_header := HBoxContainer.new()
+	backpack_header.name = "EquipmentBackpackHeader"
+	backpack_header.add_theme_constant_override("separation", 8)
+	right_box.add_child(backpack_header)
+
+	_equipment_capacity_label = Label.new()
+	_equipment_capacity_label.add_theme_font_size_override("font_size", 20)
+	_equipment_capacity_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
+	_equipment_capacity_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_equipment_capacity_label.add_theme_constant_override("outline_size", 3)
+	_equipment_capacity_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	backpack_header.add_child(_equipment_capacity_label)
+
+	## 一键分解按钮：普通 / 稀有各一个（带二次确认，避免误触清空背包）
+	_bulk_buttons.clear()
+	_bulk_rarities.clear()
+	for rarity in [EquipmentData.Rarity.COMMON, EquipmentData.Rarity.RARE]:
+		var bulk_btn := Button.new()
+		bulk_btn.custom_minimum_size = Vector2(132.0, 34.0)
+		bulk_btn.add_theme_font_size_override("font_size", 13)
+		bulk_btn.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+		bulk_btn.add_theme_constant_override("outline_size", 2)
+		bulk_btn.pressed.connect(_on_bulk_dismantle_pressed.bind(rarity))
+		backpack_header.add_child(bulk_btn)
+		_bulk_buttons.append(bulk_btn)
+		_bulk_rarities.append(rarity)
+
+	## 二次确认倒计时定时器：1 秒一跳，到期自动取消待确认状态
+	_bulk_confirm_timer = Timer.new()
+	_bulk_confirm_timer.name = "BulkConfirmTimer"
+	_bulk_confirm_timer.wait_time = 1.0
+	_bulk_confirm_timer.one_shot = false
+	_bulk_confirm_timer.autostart = false
+	_bulk_confirm_timer.timeout.connect(_on_bulk_confirm_tick)
+	add_child(_bulk_confirm_timer)
+
+	_equipment_backpack_box = VBoxContainer.new()
+	_equipment_backpack_box.name = "EquipmentBackpackBox"
+	_equipment_backpack_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_equipment_backpack_box.add_theme_constant_override("separation", 8)
+	right_box.add_child(_equipment_backpack_box)
+
+	## 底部操作提示（返回按钮上方，居中）
+	_equipment_hint_label = Label.new()
+	_equipment_hint_label.anchor_left = 0.0
+	_equipment_hint_label.anchor_right = 1.0
+	_equipment_hint_label.anchor_top = 1.0
+	_equipment_hint_label.anchor_bottom = 1.0
+	_equipment_hint_label.offset_top = -112.0
+	_equipment_hint_label.offset_bottom = -80.0
+	_equipment_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_equipment_hint_label.add_theme_font_size_override("font_size", 14)
+	_equipment_hint_label.add_theme_color_override("font_color", Color(0.75, 0.75, 0.8))
+	_equipment_hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_player_panel.add_child(_equipment_hint_label)
 
 	## 返回按钮（底部居中）
-	_status_back_button = Button.new()
-	_status_back_button.name = "StatusBackButton"
-	_status_back_button.anchor_left = 0.5
-	_status_back_button.anchor_right = 0.5
-	_status_back_button.anchor_top = 1.0
-	_status_back_button.anchor_bottom = 1.0
-	_status_back_button.offset_left = -120.0
-	_status_back_button.offset_right = 120.0
-	_status_back_button.offset_top = -70.0
-	_status_back_button.offset_bottom = -30.0
-	_status_back_button.pressed.connect(_on_status_back_pressed)
-	_status_panel.add_child(_status_back_button)
+	_player_panel_back_button = Button.new()
+	_player_panel_back_button.name = "PlayerPanelBackButton"
+	_player_panel_back_button.anchor_left = 0.5
+	_player_panel_back_button.anchor_right = 0.5
+	_player_panel_back_button.anchor_top = 1.0
+	_player_panel_back_button.anchor_bottom = 1.0
+	_player_panel_back_button.offset_left = -120.0
+	_player_panel_back_button.offset_right = 120.0
+	_player_panel_back_button.offset_top = -70.0
+	_player_panel_back_button.offset_bottom = -30.0
+	_player_panel_back_button.pressed.connect(_on_player_panel_back_pressed)
+	_player_panel.add_child(_player_panel_back_button)
 
-## 打开状态子面板：隐藏主菜单按钮、刷新状态列表、重建导航焦点
-func _open_status_panel() -> void:
-	if _status_panel == null:
+	## 装备对比弹窗（浮层）：默认隐藏，聚焦背包装备且同槽位已有已装备件时显示
+	## 位置：屏幕左侧竖向居中（覆盖状态栏区域，属于临时浮层；不聚焦装备时自动隐藏）
+	_compare_panel = PanelContainer.new()
+	_compare_panel.name = "EquipmentComparePanel"
+	_compare_panel.anchor_left = 0.0
+	_compare_panel.anchor_right = 0.0
+	_compare_panel.anchor_top = 0.5
+	_compare_panel.anchor_bottom = 0.5
+	_compare_panel.offset_left = 40.0
+	_compare_panel.offset_right = 700.0
+	_compare_panel.offset_top = -320.0
+	_compare_panel.offset_bottom = 320.0
+	## 鼠标穿透：弹窗只是展示层，不能抢占底层按钮的悬停/点击（否则会"挡住"装备列表）
+	_compare_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_compare_panel.visible = false
+	## 深底 + 金色描边 + 圆角，与暂停菜单整体风格一致
+	var compare_style := StyleBoxFlat.new()
+	compare_style.bg_color = Color(0.06, 0.06, 0.10, 0.94)
+	compare_style.border_color = Color(0.9, 0.8, 0.4, 0.9)
+	compare_style.set_border_width_all(2)
+	compare_style.set_corner_radius_all(8)
+	compare_style.set_content_margin_all(16)
+	_compare_panel.add_theme_stylebox_override("panel", compare_style)
+	_player_panel.add_child(_compare_panel)
+
+	var compare_scroll := ScrollContainer.new()
+	compare_scroll.name = "EquipmentCompareScroll"
+	compare_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	compare_scroll.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_compare_panel.add_child(compare_scroll)
+
+	_compare_rows = VBoxContainer.new()
+	_compare_rows.name = "EquipmentCompareRows"
+	_compare_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_compare_rows.add_theme_constant_override("separation", 6)
+	compare_scroll.add_child(_compare_rows)
+
+## 打开合并面板：隐藏主菜单按钮、刷新状态与装备两侧内容、重建导航焦点
+func _open_player_panel() -> void:
+	if _player_panel == null:
 		return
 	$VBoxContainer.visible = false
-	_status_panel.visible = true
+	_player_panel.visible = true
+	_hide_equip_compare()
 	_refresh_status_list()
-	## 焦点列表刷新：隐藏的主菜单按钮不再可聚焦，仅状态面板返回按钮可导航
+	_refresh_equipment_panel()
+	## 焦点列表刷新：隐藏的主菜单按钮不再可聚焦，仅面板内可交互控件参与导航
 	if _navigator != null and _navigator.has_method("refresh_controls"):
 		_navigator.refresh_controls()
 
-## 关闭状态子面板：显示主菜单按钮、重建导航焦点
-func _close_status_panel() -> void:
-	if _status_panel == null:
+## 关闭合并面板：显示主菜单按钮、重建导航焦点
+func _close_player_panel() -> void:
+	if _player_panel == null:
 		return
-	_status_panel.visible = false
+	_hide_equip_compare()
+	## 关闭面板即撤销未完成的二次确认，避免下次打开时残留"再按一次确认"状态
+	_clear_bulk_confirm()
+	_player_panel.visible = false
 	$VBoxContainer.visible = true
 	if _navigator != null and _navigator.has_method("refresh_controls"):
 		_navigator.refresh_controls()
@@ -292,10 +493,13 @@ func _close_status_panel() -> void:
 func _refresh_status_list() -> void:
 	if _status_rows == null:
 		return
-	## 清空旧行：用 free() 立即销毁而非 queue_free()，避免本帧内旧行残留导致
-	## 重新打开状态面板时出现一帧"新旧行重叠"的视觉闪烁
+	## 清空旧行：先 remove_child 立即脱离容器（等价于 free() 的"本帧即消失"，
+	## 避免旧行残留到下一帧造成重叠闪烁），再 queue_free() 延后到帧末真正释放。
+	## 注意：不能直接 child.free()——若该行正处在按钮 pressed 回调中（信号发射方被 Godot 锁定），
+	## free() 会报 "Object is locked and can't be freed" 并中止本函数，导致列表被清空却不重建
 	for child in _status_rows.get_children():
-		child.free()
+		_status_rows.remove_child(child)
+		child.queue_free()
 
 	## 核心血组（玩家基础生存值：当前/上限）
 	## 设计意图：核心血上限会被装备词条提升，但此前面板只列词条、不列结果值，
@@ -308,9 +512,14 @@ func _refresh_status_list() -> void:
 	if not _add_equipped_affix_rows():
 		_add_status_empty()
 
-	## 技能组（聚合全部已装备装备携带的子弹特效）
-	_add_status_header(TranslationManager.t("STATUS_SKILL"))
+	## 被动技能组（装备携带的子弹特效，随射击自动生效）
+	_add_status_header(TranslationManager.t("STATUS_PASSIVE_SKILL"))
 	if not _add_equipped_effect_rows():
+		_add_status_empty()
+
+	## 主动技能组（装备携带的主动技能，按键释放 + 冷却）
+	_add_status_header(TranslationManager.t("STATUS_ACTIVE_SKILL"))
+	if not _add_equipped_active_skill_rows():
 		_add_status_empty()
 
 	## 护盾组（当前装备护盾）
@@ -343,28 +552,53 @@ func _get_equipment_component() -> Node:
 		return player.get_equipment_component()
 	return null
 
-## 添加"全部已装备装备的基础属性词条"行
-## 数据流：EquipmentComponent.get_all_equipped() → 各 EquipmentData.affixes → 逐条成行
+## 添加"全部已装备装备的基础属性词条"累计行
+## 数据流：EquipmentComponent.get_all_equipped() → 各 EquipmentData.affixes →
+##         按 stat_key 合并求和 → 每个属性仅一行累计值（不再按装备拆分、不显示来源装备名）
+## 设计意图：玩家关心的是"我当前的总加成是多少"，而非"这加成来自哪件装备"；
+##          同属性分散成多行既占空间又难比较，故此处做聚合展示（对应"只显示叠加累计的效果"）
 ## 返回：true=至少添加了一行（供调用方决定是否显示空提示）
 func _add_equipped_affix_rows() -> bool:
 	var comp: Node = _get_equipment_component()
 	if comp == null or not comp.has_method("get_all_equipped"):
 		return false
-	var added: bool = false
+
+	## 第一步：遍历全部已装备装备，按 stat_key 累加数值，
+	##        同时记录该键的图标/稀有度颜色（图标取提供该键装备中稀有度最高者）
+	var totals: Dictionary = {}
+	var icon_texts: Dictionary = {}
+	var rarity_ranks: Dictionary = {}
 	for data in comp.get_all_equipped():
 		if data == null:
 			continue
-		## 每件装备的图标/颜色随其稀有度；名字用装备名，等级位显示所属槽位
+		var rarity: int = int(data.rarity)
 		var icon_tex: Texture2D = IconLibraryLib.get_equipment_icon(data)
-		for affix in data.affixes:
-			if affix == null:
+		for affix: EquipmentAffix in data.affixes:
+			if affix == null or affix.stat_key.is_empty():
 				continue
-			_add_status_row(icon_tex, data.get_rarity_color(), affix.get_display_text(),
-				String(data.get_slot_text()), String(data.display_name))
-			added = true
+			var key: String = affix.stat_key
+			totals[key] = float(totals.get(key, 0.0)) + affix.value
+			## 图标/颜色跟随"最高稀有度"的贡献装备，让强势装备的词条更醒目
+			if not rarity_ranks.has(key) or rarity > int(rarity_ranks[key]):
+				rarity_ranks[key] = rarity
+				icon_texts[key] = icon_tex
+
+	## 第二步：每个属性键输出一行累计效果（需求：不显示词条名称，只显示效果）
+	var added: bool = false
+	for key in totals.keys():
+		var stat_key: String = String(key)
+		var color: Color = Color(0.9, 0.9, 0.9)
+		match int(rarity_ranks.get(stat_key, 0)):
+			1:
+				color = Color(0.4, 0.7, 1.0)
+			2:
+				color = Color(0.8, 0.4, 1.0)
+		_add_status_row(icon_texts.get(stat_key), color, "",
+			"", _describe_stat(stat_key, float(totals[stat_key])))
+		added = true
 	return added
 
-## 添加"全部已装备装备携带的子弹特效"行
+## 添加"全部已装备装备携带的被动技能（子弹特效）"行
 ## 数据流：EquipmentComponent.get_all_equipped() → 各 EquipmentData.bullet_effects → 逐条成行
 ## 返回：true=至少添加了一行（供调用方决定是否显示空提示）
 func _add_equipped_effect_rows() -> bool:
@@ -378,13 +612,44 @@ func _add_equipped_effect_rows() -> bool:
 		for effect in data.bullet_effects:
 			if effect == null:
 				continue
-			## 特效无独立图标：沿用所属装备图标；名字取特效名（空则回退 effect_id）
-			var effect_name: String = str(effect.display_name) if "display_name" in effect else ""
-			if effect_name.is_empty() and "effect_id" in effect:
-				effect_name = str(effect.effect_id)
+			## 特效无独立图标：沿用所属装备图标
+			## 需求：不显示技能名称，只显示效果——由特效自身把已叠层放大的参数翻译成效果说明
+			var effect_desc: String = effect.get_effect_description() if effect.has_method("get_effect_description") else ""
 			_add_status_row(IconLibraryLib.get_equipment_icon(data), data.get_rarity_color(),
-				effect_name, "Lv.%d" % int(effect.stack_count), String(data.display_name))
+				"", "", effect_desc)
 			added = true
+	return added
+
+## 添加"全部已装备装备携带的主动技能"行
+## 数据流：EquipmentComponent.get_all_equipped() → 各 EquipmentData.active_skill → 按 skill_id 去重成行
+## 展示：所属槽位 + 冷却时长（需求：不显示技能名称，只显示效果；运行时冷却倒计时由主界面 HUD 技能栏承担）
+## 返回：true=至少添加了一行（供调用方决定是否显示空提示）
+func _add_equipped_active_skill_rows() -> bool:
+	var comp: Node = _get_equipment_component()
+	if comp == null or not comp.has_method("get_all_equipped"):
+		return false
+	## 按 skill_id 去重（与 EquipmentComponent._refresh_active_skill 口径一致），
+	## 避免同一主动技能因 skill_id 相同时被重复列出
+	var seen: Dictionary = {}
+	var added: bool = false
+	for data in comp.get_all_equipped():
+		if data == null or not data.has_method("has_active_skill") or not data.has_active_skill():
+			continue
+		var skill: Resource = data.active_skill
+		var sid: String = str(skill.skill_id) if "skill_id" in skill else ""
+		## skill_id 为空时用实例 id 兜底去重
+		var dedupe_key: String = sid if sid != "" else str(skill.get_instance_id())
+		if seen.has(dedupe_key):
+			continue
+		seen[dedupe_key] = true
+		## 需求：不显示技能名称，仅保留"所属槽位 + 冷却时长"作为效果信息
+		## 补充整轮伤害倍率：主动技能的核心强度来源，玩家需要能看到它才判断得出强弱
+		var cd: float = float(skill.cooldown) if "cooldown" in skill else 0.0
+		var dmg_mult: float = float(skill.damage_multiplier) if "damage_multiplier" in skill else 1.0
+		var slot_text: String = data.get_slot_text() if data.has_method("get_slot_text") else ""
+		_add_status_row(IconLibraryLib.get_equipment_icon(data), data.get_rarity_color(),
+			"", slot_text, "CD %.1fs，伤害×%.1f" % [cd, dmg_mult])
+		added = true
 	return added
 
 ## 添加核心血行（显示玩家核心血"当前/上限"，数据源 Player.get_survival_state()）
@@ -438,7 +703,8 @@ func _add_shield_row() -> void:
 		desc += " · 特效护盾"
 	_add_status_row(icon_tex, shield_color, shield_name, "×%d" % stack, desc)
 
-## 添加一行（图标 + 名称[等级] 描述），用PanelContainer做底框增强可读性
+## 添加一行（图标 + 名称[等级] 效果），用PanelContainer做底框增强可读性
+## 说明：item_name 为空 = "只显示效果"行（属性/被动技能/主动技能组），此时省略名称位
 func _add_status_row(icon_tex: Texture2D, color: Color, item_name: String, level_text: String, desc: String) -> void:
 	var shell := PanelContainer.new()
 	shell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -461,7 +727,13 @@ func _add_status_row(icon_tex: Texture2D, color: Color, item_name: String, level
 	hbox.add_child(_make_status_icon(icon_tex, color))
 
 	var label := Label.new()
-	label.text = "%s  [%s]  %s" % [item_name, level_text, desc]
+	## 拼接文本：名称为空时省略名称位（"只显示效果"行）；等级位为空时省略方括号
+	if item_name.is_empty():
+		label.text = desc if level_text.is_empty() else "[%s]  %s" % [level_text, desc]
+	elif level_text.is_empty():
+		label.text = "%s  %s" % [item_name, desc]
+	else:
+		label.text = "%s  [%s]  %s" % [item_name, level_text, desc]
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_font_size_override("font_size", 16)
@@ -503,19 +775,7 @@ func _make_status_icon(icon_tex: Texture2D, color: Color) -> Control:
 		panel.add_child(rect)
 	return panel
 
-## ========== 装备/背包子面板 ==========
-
-## 装备背包按钮点击回调：打开装备/背包子面板
-func _on_equipment_button_pressed() -> void:
-	if AudioManager:
-		AudioManager.play("ui_click", 0.7)
-	_open_equipment_panel()
-
-## 装备/背包子面板返回按钮点击回调：关闭子面板，回到暂停主菜单
-func _on_equipment_back_pressed() -> void:
-	if AudioManager:
-		AudioManager.play("ui_click", 0.7)
-	_close_equipment_panel()
+## ========== 装备/背包：槽位与背包操作 ==========
 
 ## 已装备槽位按钮点击回调：把该槽位装备卸下并放回背包
 ## 参数：slot - 槽位（EquipmentData.Slot）
@@ -527,6 +787,8 @@ func _on_equip_slot_pressed(slot: int) -> void:
 	if player != null and player.has_method("unequip_equipment_slot"):
 		player.unequip_equipment_slot(slot)
 	_refresh_equipment_panel()
+	## 左栏"状态"随装备变化（词条/特效/护盾均来自已装备），需一并重建
+	_refresh_status_list()
 	## 列表重建后按钮对象已换新，需让导航器重新收集可聚焦控件
 	if _navigator != null and _navigator.has_method("refresh_controls"):
 		_navigator.refresh_controls()
@@ -540,8 +802,136 @@ func _on_backpack_item_pressed(index: int) -> void:
 	if player != null and player.has_method("equip_equipment_from_backpack"):
 		player.equip_equipment_from_backpack(index)
 	_refresh_equipment_panel()
+	## 左栏"状态"随装备变化（词条/特效/护盾均来自已装备），需一并重建
+	_refresh_status_list()
 	if _navigator != null and _navigator.has_method("refresh_controls"):
 		_navigator.refresh_controls()
+
+## 背包"分解"按钮点击回调：分解该件装备（产出梦境碎片 + 同槽位装备碎片）
+## 参数：index - 背包物品下标（0-based，构建按钮时捕获）
+func _on_backpack_dismantle_pressed(index: int) -> void:
+	if AudioManager:
+		AudioManager.play("ui_click", 0.7)
+	var player: Node = _get_player()
+	if player != null and player.has_method("get_backpack"):
+		var backpack: Node = player.get_backpack()
+		if backpack != null and backpack.has_method("dismantle_at"):
+			backpack.dismantle_at(index)
+	## 分解只影响背包，不影响已装备 → 仅重建装备面板，不刷新状态栏
+	_refresh_equipment_panel()
+	if _navigator != null and _navigator.has_method("refresh_controls"):
+		_navigator.refresh_controls()
+
+## 背包"丢弃"按钮点击回调：直接丢弃该件装备（无任何产出）
+## 参数：index - 背包物品下标（0-based）
+func _on_backpack_drop_pressed(index: int) -> void:
+	if AudioManager:
+		AudioManager.play("ui_click", 0.7)
+	var player: Node = _get_player()
+	if player != null and player.has_method("get_backpack"):
+		var backpack: Node = player.get_backpack()
+		if backpack != null and backpack.has_method("drop_at"):
+			backpack.drop_at(index)
+	_refresh_equipment_panel()
+	if _navigator != null and _navigator.has_method("refresh_controls"):
+		_navigator.refresh_controls()
+
+## ========== 装备碎片展示（右栏顶部，随背包/分解实时刷新） ==========
+
+## 刷新装备碎片数值：读取 Player 各槽位已累计的碎片数
+## 数据源：Player.get_equipment_fragment(slot)（索引与 EquipmentData.Slot / SLOT_TEXTS 对齐）
+func _refresh_fragment_row() -> void:
+	if _fragment_value_labels.is_empty():
+		return
+	var player: Node = _get_player()
+	for slot in range(_fragment_value_labels.size()):
+		var amount: int = 0
+		if player != null and player.has_method("get_equipment_fragment"):
+			amount = int(player.get_equipment_fragment(slot))
+		var slot_name: String = SLOT_TEXTS[slot] if slot < SLOT_TEXTS.size() else "?"
+		_fragment_value_labels[slot].text = "%s %d" % [slot_name, amount]
+
+## ========== 一键分解（背包头部行，带二次确认门槛） ==========
+
+## 一键分解按钮点击回调：首次按下进入待确认，倒计时内再按一次才真正执行
+## 参数：rarity - 目标稀有度（EquipmentData.Rarity）
+func _on_bulk_dismantle_pressed(rarity: int) -> void:
+	if AudioManager:
+		AudioManager.play("ui_click", 0.7)
+	## 二次确认：目标与当前待确认不一致时只"武装"确认态，不执行
+	if _bulk_confirm_pending != rarity:
+		_arm_bulk_confirm(rarity)
+		return
+	_clear_bulk_confirm()
+	_execute_bulk_dismantle(rarity)
+
+## 进入二次确认状态：记录目标稀有度并启动倒计时
+func _arm_bulk_confirm(rarity: int) -> void:
+	_bulk_confirm_pending = rarity
+	_bulk_confirm_left = BULK_CONFIRM_TIME
+	if _bulk_confirm_timer != null:
+		_bulk_confirm_timer.start()
+	_update_bulk_buttons()
+
+## 倒计时每秒一跳：递减剩余秒数，归零则自动取消待确认
+func _on_bulk_confirm_tick() -> void:
+	if _bulk_confirm_pending < 0:
+		return
+	_bulk_confirm_left -= 1
+	if _bulk_confirm_left <= 0:
+		_clear_bulk_confirm()
+	else:
+		_update_bulk_buttons()
+
+## 取消待确认状态（停止计时并还原按钮文案/可用状态）
+func _clear_bulk_confirm() -> void:
+	if _bulk_confirm_timer != null:
+		_bulk_confirm_timer.stop()
+	_bulk_confirm_pending = -1
+	_bulk_confirm_left = 0
+	_update_bulk_buttons()
+
+## 执行批量分解：委托背包组件按稀有度分解（回收规则与单件"分解"按钮完全一致）
+## 参数：rarity - 目标稀有度
+func _execute_bulk_dismantle(rarity: int) -> void:
+	var player: Node = _get_player()
+	if player == null or not player.has_method("get_backpack"):
+		return
+	var backpack: Node = player.get_backpack()
+	if backpack == null or not backpack.has_method("dismantle_by_rarity"):
+		return
+	var summary: Dictionary = backpack.dismantle_by_rarity(rarity)
+	if int(summary.get("count", 0)) <= 0:
+		return
+	if AudioManager:
+		AudioManager.play("upgrade_pick", 0.9)
+	## 批量分解只影响背包与碎片存量、不动已装备 → 仅重建装备面板，无需刷新状态栏
+	_refresh_equipment_panel()
+	if _navigator != null and _navigator.has_method("refresh_controls"):
+		_navigator.refresh_controls()
+
+## 刷新一键分解按钮：文案带可分解件数、无可分解件时置灰；待确认时切换为确认提示
+func _update_bulk_buttons() -> void:
+	if _bulk_buttons.is_empty():
+		return
+	var backpack: Node = null
+	var player: Node = _get_player()
+	if player != null and player.has_method("get_backpack"):
+		backpack = player.get_backpack()
+	for i in range(_bulk_buttons.size()):
+		var rarity: int = _bulk_rarities[i]
+		var btn: Button = _bulk_buttons[i]
+		## 待确认态：显示"再按一次确认 (剩余秒数)"，保持可点击
+		if _bulk_confirm_pending == rarity and _bulk_confirm_left > 0:
+			btn.text = TranslationManager.t("EQUIPMENT_BULK_CONFIRM") % _bulk_confirm_left
+			btn.disabled = false
+			continue
+		var count: int = 0
+		if backpack != null and backpack.has_method("count_by_rarity"):
+			count = int(backpack.count_by_rarity(rarity))
+		var key: String = "EQUIPMENT_BULK_COMMON" if rarity == EquipmentData.Rarity.COMMON else "EQUIPMENT_BULK_RARE"
+		btn.text = "%s (%d)" % [TranslationManager.t(key), count]
+		btn.disabled = count <= 0
 
 ## 获取玩家节点（装备/背包面板的数据源入口）
 ## 返回：玩家节点；场景中不存在时返回 null（面板显示空内容而不报错）
@@ -551,151 +941,23 @@ func _get_player() -> Node:
 		return players[0]
 	return null
 
-## 构建装备/背包子面板（纯代码UI，隐藏在主菜单之后）
-## 结构：EquipmentPanel(Control) → Title + Body(HBox[已装备列, 背包列]) + Hint + BackButton
-func _build_equipment_panel() -> void:
-	_equipment_panel = Control.new()
-	_equipment_panel.name = "EquipmentPanel"
-	_equipment_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_equipment_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_equipment_panel.visible = false
-	add_child(_equipment_panel)
-
-	## 标题（顶部居中）
-	_equipment_title_label = Label.new()
-	_equipment_title_label.name = "EquipmentTitle"
-	_equipment_title_label.anchor_left = 0.0
-	_equipment_title_label.anchor_right = 1.0
-	_equipment_title_label.offset_top = 40.0
-	_equipment_title_label.offset_bottom = 90.0
-	_equipment_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_equipment_title_label.add_theme_font_size_override("font_size", 30)
-	_equipment_title_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	_equipment_title_label.add_theme_constant_override("outline_size", 4)
-	_equipment_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_equipment_panel.add_child(_equipment_title_label)
-
-	## 两栏主体（左栏已装备较窄、右栏背包自适应更宽）
-	var body := HBoxContainer.new()
-	body.name = "EquipmentBody"
-	body.anchor_left = 0.5
-	body.anchor_right = 0.5
-	body.anchor_top = 0.5
-	body.anchor_bottom = 0.5
-	body.offset_left = -520.0
-	body.offset_right = 520.0
-	body.offset_top = -410.0
-	body.offset_bottom = 340.0
-	body.add_theme_constant_override("separation", 24)
-	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_equipment_panel.add_child(body)
-
-	## 左栏：已装备 6 槽位
-	var left := VBoxContainer.new()
-	left.name = "EquipmentSlotsColumn"
-	left.custom_minimum_size = Vector2(430.0, 0.0)
-	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left.add_theme_constant_override("separation", 8)
-	body.add_child(left)
-
-	_equipment_slots_header = Label.new()
-	_equipment_slots_header.add_theme_font_size_override("font_size", 20)
-	_equipment_slots_header.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
-	_equipment_slots_header.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	_equipment_slots_header.add_theme_constant_override("outline_size", 3)
-	left.add_child(_equipment_slots_header)
-
-	var slots_scroll := ScrollContainer.new()
-	slots_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	slots_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	left.add_child(slots_scroll)
-
-	_equipment_slots_box = VBoxContainer.new()
-	_equipment_slots_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_equipment_slots_box.add_theme_constant_override("separation", 8)
-	slots_scroll.add_child(_equipment_slots_box)
-
-	## 右栏：背包列表（容量提示 + 可滚动装备按钮列表）
-	var right := VBoxContainer.new()
-	right.name = "EquipmentBackpackColumn"
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 8)
-	body.add_child(right)
-
-	_equipment_capacity_label = Label.new()
-	_equipment_capacity_label.add_theme_font_size_override("font_size", 20)
-	_equipment_capacity_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
-	_equipment_capacity_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	_equipment_capacity_label.add_theme_constant_override("outline_size", 3)
-	right.add_child(_equipment_capacity_label)
-
-	var bag_scroll := ScrollContainer.new()
-	bag_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	bag_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	right.add_child(bag_scroll)
-
-	_equipment_backpack_box = VBoxContainer.new()
-	_equipment_backpack_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_equipment_backpack_box.add_theme_constant_override("separation", 8)
-	bag_scroll.add_child(_equipment_backpack_box)
-
-	## 底部操作提示（返回按钮上方，居中）
-	_equipment_hint_label = Label.new()
-	_equipment_hint_label.anchor_left = 0.0
-	_equipment_hint_label.anchor_right = 1.0
-	_equipment_hint_label.anchor_top = 1.0
-	_equipment_hint_label.anchor_bottom = 1.0
-	_equipment_hint_label.offset_top = -112.0
-	_equipment_hint_label.offset_bottom = -80.0
-	_equipment_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_equipment_hint_label.add_theme_font_size_override("font_size", 14)
-	_equipment_hint_label.add_theme_color_override("font_color", Color(0.75, 0.75, 0.8))
-	_equipment_hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_equipment_panel.add_child(_equipment_hint_label)
-
-	## 返回按钮（底部居中）
-	_equipment_back_button = Button.new()
-	_equipment_back_button.name = "EquipmentBackButton"
-	_equipment_back_button.anchor_left = 0.5
-	_equipment_back_button.anchor_right = 0.5
-	_equipment_back_button.anchor_top = 1.0
-	_equipment_back_button.anchor_bottom = 1.0
-	_equipment_back_button.offset_left = -120.0
-	_equipment_back_button.offset_right = 120.0
-	_equipment_back_button.offset_top = -70.0
-	_equipment_back_button.offset_bottom = -30.0
-	_equipment_back_button.pressed.connect(_on_equipment_back_pressed)
-	_equipment_panel.add_child(_equipment_back_button)
-
-## 打开装备/背包子面板：隐藏主菜单按钮、重建列表、刷新导航焦点
-func _open_equipment_panel() -> void:
-	if _equipment_panel == null:
-		return
-	$VBoxContainer.visible = false
-	_equipment_panel.visible = true
-	_refresh_equipment_panel()
-	if _navigator != null and _navigator.has_method("refresh_controls"):
-		_navigator.refresh_controls()
-
-## 关闭装备/背包子面板：显示主菜单按钮、重建导航焦点
-func _close_equipment_panel() -> void:
-	if _equipment_panel == null:
-		return
-	_equipment_panel.visible = false
-	$VBoxContainer.visible = true
-	if _navigator != null and _navigator.has_method("refresh_controls"):
-		_navigator.refresh_controls()
-
-## 刷新装备/背包子面板：重建 6 个槽位按钮与背包列表按钮
+## 刷新装备/背包区：重建 6 个槽位按钮与背包列表按钮
 ## 数据源：Player.get_equipment_component()（已装备） / Player.get_backpack()（背包）
 func _refresh_equipment_panel() -> void:
 	if _equipment_slots_box == null or _equipment_backpack_box == null:
 		return
-	## 清空旧内容：free() 立即销毁，避免重开面板时出现一帧新旧重叠
+	## 列表即将重建，原聚焦的按钮会被销毁 → 先收起对比弹窗，避免残留旧数据的浮层
+	_hide_equip_compare()
+	## 清空旧内容：先 remove_child 立即脱离容器（本帧即消失，避免新旧重叠），再 queue_free() 帧末释放。
+	## 关键：穿戴/卸下是由被点击的那个按钮自己 emit 的 pressed 触发的，此时该按钮被 Godot 锁定，
+	## 对它调用 free() 会报 "Object is locked and can't be freed" 并中止本函数 → 列表被清空却不重建，
+	## 表现为"装备/卸下后整个列表消失，必须退出再进面板才恢复"。故必须用 remove_child + queue_free
 	for child in _equipment_slots_box.get_children():
-		child.free()
+		_equipment_slots_box.remove_child(child)
+		child.queue_free()
 	for child in _equipment_backpack_box.get_children():
-		child.free()
+		_equipment_backpack_box.remove_child(child)
+		child.queue_free()
 
 	var equipment: Node = null
 	var backpack: Node = null
@@ -714,6 +976,9 @@ func _refresh_equipment_panel() -> void:
 		var btn: Button = _make_equipment_button(_build_slot_button_text(slot, data), data)
 		btn.disabled = data == null
 		btn.pressed.connect(_on_equip_slot_pressed.bind(slot))
+		## 聚焦已装备槽位：收起对比弹窗（对比只在"背包装备 vs 已装备"时有意义）
+		btn.focus_entered.connect(_on_equipment_button_focused.bind(data, false))
+		btn.mouse_entered.connect(_on_equipment_button_focused.bind(data, false))
 		_equipment_slots_box.add_child(btn)
 
 	## 右栏：背包装备（点击穿戴）
@@ -727,9 +992,29 @@ func _refresh_equipment_panel() -> void:
 			var item: EquipmentData = items[i]
 			if item == null:
 				continue
+			## 每件背包装备占一行：主按钮（点击穿戴）+ 分解按钮 + 丢弃按钮
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 4)
+
 			var bag_btn: Button = _make_equipment_button(_build_backpack_button_text(item), item)
+			bag_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			bag_btn.pressed.connect(_on_backpack_item_pressed.bind(i))
-			_equipment_backpack_box.add_child(bag_btn)
+			## 聚焦/悬停背包装备：若同槽位已有已装备件则弹出对比弹窗
+			bag_btn.focus_entered.connect(_on_equipment_button_focused.bind(item, true))
+			bag_btn.mouse_entered.connect(_on_equipment_button_focused.bind(item, true))
+			row.add_child(bag_btn)
+
+			## 分解按钮：产出梦境碎片 + 同槽位装备碎片
+			var dismantle_btn: Button = _make_row_action_button(TranslationManager.t("EQUIPMENT_DISMANTLE"))
+			dismantle_btn.pressed.connect(_on_backpack_dismantle_pressed.bind(i))
+			row.add_child(dismantle_btn)
+
+			## 丢弃按钮：直接消失、无产出
+			var drop_btn: Button = _make_row_action_button(TranslationManager.t("EQUIPMENT_DROP"))
+			drop_btn.pressed.connect(_on_backpack_drop_pressed.bind(i))
+			row.add_child(drop_btn)
+
+			_equipment_backpack_box.add_child(row)
 	if count == 0:
 		_equipment_backpack_box.add_child(_make_equipment_plain_label(TranslationManager.t("EQUIPMENT_EMPTY")))
 
@@ -739,6 +1024,10 @@ func _refresh_equipment_panel() -> void:
 		if backpack != null and backpack.is_full():
 			cap_text += "  ·  " + TranslationManager.t("EQUIPMENT_FULL")
 		_equipment_capacity_label.text = cap_text
+
+	## 碎片存量展示 + 一键分解按钮（件数/可用状态）需随背包内容变化同步刷新
+	_refresh_fragment_row()
+	_update_bulk_buttons()
 
 ## 创建一个装备条目按钮（左侧图标 + 左对齐多行文本；有装备时按稀有度着色）
 ## 参数：text - 多行按钮文本；data - 对应装备（为 null 表示空槽，不配图标/配色）
@@ -752,8 +1041,21 @@ func _make_equipment_button(text: String, data: EquipmentData) -> Button:
 	btn.add_theme_constant_override("outline_size", 2)
 	if data != null:
 		btn.icon = IconLibraryLib.get_equipment_icon(data)
-		btn.icon_max_width = 48
-		btn.add_theme_color_override("font_color", data.get_rarity_color())
+		## 注意：icon_max_width 在 Godot 4 中是 Button 的「主题常量」而非属性，
+		## 必须用 add_theme_constant_override 设置；直接 btn.icon_max_width = 48 会抛运行时报错，
+		## 导致本函数中止返回 null，进而使背包/已装备条目按钮全部创建失败（面板空白）
+		btn.add_theme_constant_override("icon_max_width", 48)
+		## 稀有度着色必须覆盖「全部状态色」：Button 的 font_color 只作用于普通态，
+		## 悬停/聚焦/按下态分别走主题默认的 font_hover_color / font_focus_color /
+		## font_pressed_color / font_hover_pressed_color（Godot 默认主题为近白色）。
+		## 若只设 font_color，按钮一旦被导航器聚焦（打开面板即聚焦首个可聚焦控件）或鼠标悬停，
+		## 文字就会由稀有度色变成白色——这正是「背包装备有色、已装备槽位却显示为白色」的原因
+		var rarity_color: Color = data.get_rarity_color()
+		btn.add_theme_color_override("font_color", rarity_color)
+		btn.add_theme_color_override("font_hover_color", rarity_color)
+		btn.add_theme_color_override("font_pressed_color", rarity_color)
+		btn.add_theme_color_override("font_focus_color", rarity_color)
+		btn.add_theme_color_override("font_hover_pressed_color", rarity_color)
 	return btn
 
 ## 创建一个面板内的普通文本标签（空提示等）
@@ -764,6 +1066,17 @@ func _make_equipment_plain_label(text: String) -> Label:
 	label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	return label
 
+## 创建背包行内的小操作按钮（分解 / 丢弃）
+## 参数：text - 按钮文字
+func _make_row_action_button(text: String) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.custom_minimum_size = Vector2(56.0, 56.0)
+	btn.add_theme_font_size_override("font_size", 13)
+	btn.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	btn.add_theme_constant_override("outline_size", 2)
+	return btn
+
 ## 拼接"已装备槽位"按钮文本（多行：槽位名 + 装备名[稀有度] / 词条 / 特效 / 护盾 / 主动技）
 ## 参数：slot - 槽位；data - 该槽位装备（null 表示空槽）
 func _build_slot_button_text(slot: int, data: EquipmentData) -> String:
@@ -773,6 +1086,14 @@ func _build_slot_button_text(slot: int, data: EquipmentData) -> String:
 
 	var lines: Array[String] = []
 	lines.append("%s · %s  [%s]" % [slot_name, data.display_name, data.get_rarity_text()])
+	_append_equipment_detail_lines(lines, data)
+	return "\n".join(PackedStringArray(lines))
+
+## 追加装备内容明细行（属性词条 / 特效词条 / 护盾 / 主动技能），供槽位按钮与背包按钮共用
+## 设计意图：背包不再显示"属性×N / 特效×N"这类数量简报，而是像已装备槽位一样逐条列出实际词条
+func _append_equipment_detail_lines(lines: Array[String], data: EquipmentData) -> void:
+	if data == null:
+		return
 	## 基础属性词条（每条一行，展示键名+数值）
 	for affix: EquipmentAffix in data.affixes:
 		if affix != null:
@@ -793,16 +1114,16 @@ func _build_slot_button_text(slot: int, data: EquipmentData) -> String:
 			int(data.shield_data.max_hp),
 			int(data.shield_data.absorb_per_hit),
 		])
-	## 主动技能（名称 + 冷却）
+	## 主动技能（名称 + 冷却 + 整轮伤害倍率）
 	if data.has_active_skill():
-		lines.append("  %s：%s (CD %.1fs)" % [
+		lines.append("  %s：%s (CD %.1fs，伤害×%.1f)" % [
 			TranslationManager.t("EQUIPMENT_ACTIVE"),
 			data.active_skill.display_name,
 			float(data.active_skill.cooldown),
+			float(data.active_skill.damage_multiplier),
 		])
-	return "\n".join(PackedStringArray(lines))
 
-## 拼接"背包物品"按钮文本（装备名[稀有度] + 内容简报 + 首条词条明细）
+## 拼接"背包物品"按钮文本（装备名[稀有度] + 逐条词条明细）
 ## 参数：data - 背包装备实例
 func _build_backpack_button_text(data: EquipmentData) -> String:
 	if data == null:
@@ -810,19 +1131,312 @@ func _build_backpack_button_text(data: EquipmentData) -> String:
 
 	var lines: Array[String] = []
 	lines.append("%s  [%s]" % [data.display_name, data.get_rarity_text()])
-	## 内容简报（词条数/特效数/是否带护盾/是否带主动技），让玩家一眼分辨价值
-	var parts: Array[String] = []
-	if data.affixes.size() > 0:
-		parts.append("%s×%d" % [TranslationManager.t("STATUS_ATTR"), data.affixes.size()])
-	if data.bullet_effects.size() > 0:
-		parts.append("%s×%d" % [TranslationManager.t("EQUIPMENT_EFFECT"), data.bullet_effects.size()])
-	if data.shield_data != null:
-		parts.append(TranslationManager.t("EQUIPMENT_SHIELD_LABEL"))
-	if data.has_active_skill():
-		parts.append(TranslationManager.t("EQUIPMENT_ACTIVE"))
-	if parts.size() > 0:
-		lines.append("  " + " · ".join(PackedStringArray(parts)))
-	## 首条词条明细（背包内即可看到最关键的一条属性）
-	if data.affixes.size() > 0 and data.affixes[0] != null:
-		lines.append("  " + data.affixes[0].get_display_text())
+	## 直接逐条展示属性词条、特效词条、护盾、主动技（不再用"属性×N/特效×N"简报）
+	_append_equipment_detail_lines(lines, data)
 	return "\n".join(PackedStringArray(lines))
+
+## ========== 装备对比弹窗：展示"背包装备 vs 同槽位已装备件"的差异 ==========
+
+## 装备条目获得焦点/鼠标悬停回调：仅背包装备需要对比，已装备槽位只收起弹窗
+## 参数：data - 该条目对应的装备（可能为 null，如空槽）；from_backpack - true=背包条目
+func _on_equipment_button_focused(data: EquipmentData, from_backpack: bool) -> void:
+	if not from_backpack or data == null:
+		_hide_equip_compare()
+		return
+	_show_equip_compare(data)
+
+## 收起对比弹窗（不清内容，下次显示时整体重建；弹窗隐藏后不占用视觉）
+func _hide_equip_compare() -> void:
+	if _compare_panel != null:
+		_compare_panel.visible = false
+
+## 显示对比弹窗：把背包装备与"其槽位当前已装备件"逐维度对比
+## 参数：candidate - 玩家聚焦/悬停的背包装备（待装候选）
+## 说明：该槽位无已装备件时不做对比（按需求"如果存在已装备的"才弹窗），直接收起
+func _show_equip_compare(candidate: EquipmentData) -> void:
+	if _compare_panel == null or _compare_rows == null or candidate == null:
+		return
+	var equipped: EquipmentData = _get_equipped_for_slot(candidate.slot)
+	if equipped == null:
+		_hide_equip_compare()
+		return
+
+	## 清空旧内容（同样用 remove_child + queue_free，规避信号期释放限制）
+	for child in _compare_rows.get_children():
+		_compare_rows.remove_child(child)
+		child.queue_free()
+
+	## 标题：槽位 · 装备对比
+	_add_compare_text("%s · %s" % [
+		candidate.get_slot_text(),
+		TranslationManager.t("EQUIPMENT_COMPARE"),
+	], 18, Color(0.9, 0.85, 0.4))
+
+	## 两侧名称行（各自按稀有度着色，一眼分辨品质）
+	_add_compare_text("%s：%s" % [
+		TranslationManager.t("EQUIPMENT_COMPARE_CURRENT"),
+		equipped.display_name,
+	], 16, equipped.get_rarity_color())
+	_add_compare_text("%s：%s" % [
+		TranslationManager.t("EQUIPMENT_COMPARE_CANDIDATE"),
+		candidate.display_name,
+	], 16, candidate.get_rarity_color())
+
+	## 基础属性段（词条按 stat_key 取并集，逐键显示 旧 → 新 与差值）
+	_add_compare_text(TranslationManager.t("STATUS_ATTR"), 16, Color(0.9, 0.85, 0.4))
+	var has_diff: bool = _add_affix_diff_rows(equipped, candidate)
+
+	## 特效段（两边特效名清单，按数量差着色）
+	_add_compare_text(TranslationManager.t("STATUS_SKILL"), 16, Color(0.9, 0.85, 0.4))
+	if _add_effect_diff_rows(equipped, candidate):
+		has_diff = true
+
+	## 护盾行（任一侧携带护盾蓝图时显示，按最大耐久差着色）
+	if (equipped.shield_data != null) or (candidate.shield_data != null):
+		var old_hp: float = equipped.shield_data.max_hp if equipped.shield_data != null else 0.0
+		var new_hp: float = candidate.shield_data.max_hp if candidate.shield_data != null else 0.0
+		_add_compare_text("%s：%s → %s" % [
+			TranslationManager.t("EQUIPMENT_SHIELD_LABEL"),
+			_shield_text(equipped),
+			_shield_text(candidate),
+		], 14, _diff_color(new_hp - old_hp))
+		has_diff = true
+
+	## 主动技能行（按 skill_id 逐条对比：新增=绿 / 被替换=红 / 同名=白）
+	if _add_active_skill_diff_rows(equipped, candidate):
+		has_diff = true
+
+	## 全维度无差异时给一句"暂无"，避免弹窗里只有标题和名字
+	if not has_diff:
+		_add_compare_text(TranslationManager.t("STATUS_NONE"), 14, Color(0.7, 0.7, 0.7))
+
+	_compare_panel.visible = true
+
+## 取指定槽位当前已装备件
+## 参数：slot - 槽位（EquipmentData.Slot）
+## 返回：已装备的 EquipmentData；该槽位为空/玩家不可用时返回 null
+func _get_equipped_for_slot(slot: int) -> EquipmentData:
+	var player: Node = _get_player()
+	if player != null and player.has_method("get_equipment_component"):
+		var equipment: Node = player.get_equipment_component()
+		if equipment != null and equipment.has_method("get_equipped"):
+			return equipment.get_equipped(slot)
+	return null
+
+## 向对比弹窗追加一行文本（自动换行、黑描边、鼠标穿透）
+func _add_compare_text(text: String, font_size: int, color: Color) -> void:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	label.add_theme_constant_override("outline_size", 2)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_compare_rows.add_child(label)
+
+## 追加"基础属性"对比行：两件装备的词条按 stat_key 取并集，逐键显示 旧 → 新（差值）
+## 返回：true=至少输出了一行差异（无词条时为 false）
+func _add_affix_diff_rows(equipped: EquipmentData, candidate: EquipmentData) -> bool:
+	var equipped_totals: Dictionary = equipped.get_affix_totals()
+	var candidate_totals: Dictionary = candidate.get_affix_totals()
+	## 键集合：先列"当前已装备"的键，再补"待装"独有的键（阅读顺序更自然）
+	var keys: Array[String] = []
+	for key in equipped_totals.keys():
+		keys.append(String(key))
+	for key in candidate_totals.keys():
+		var k: String = String(key)
+		if not keys.has(k):
+			keys.append(k)
+	if keys.is_empty():
+		return false
+
+	for key: String in keys:
+		var old_value: float = float(equipped_totals.get(key, 0.0))
+		var new_value: float = float(candidate_totals.get(key, 0.0))
+		## 先各自按"显示精度"四舍五入成整数显示单位（百分比键 → 整数个百分点；固定加值键 → 十分位），
+		## 再用"取精后的新值 − 取精后的旧值"作为差值，保证弹窗里
+		## 「显示差值 == 显示新值 − 显示旧值」；全程在整数口径下相减可彻底消除浮点误差，
+		## 若对原始浮点差值单独取整，会因两侧取整方向不同而出现 "8% → 9% 却显示 (+2%)" 这类 ±1 误差
+		var old_units: int = _stat_display_units(key, old_value)
+		var new_units: int = _stat_display_units(key, new_value)
+		var diff_units: int = new_units - old_units
+		_add_compare_text("%s  %s → %s  (%s)" % [
+			_affix_display_name(equipped, candidate, key),
+			_fmt_stat_units(key, old_units) + _stat_unit(key),
+			_fmt_stat_units(key, new_units) + _stat_unit(key),
+			_fmt_stat_units(key, diff_units) + _stat_unit(key),
+		], 14, _diff_color(float(diff_units)))
+	return true
+
+## 追加"特效(被动技能)"对比行：按 effect_id 逐条对比
+## 返回：true=至少输出一行（两侧都无特效时为 false）
+func _add_effect_diff_rows(equipped: EquipmentData, candidate: EquipmentData) -> bool:
+	return _add_id_diff_rows(
+		_effect_map(equipped), _effect_map(candidate), TranslationManager.t("EQUIPMENT_EFFECT"))
+
+## 追加"主动技能"对比行：按 skill_id 逐条对比（单技能装备也走同一套并集逻辑）
+## 返回：true=至少输出一行（两侧都无主动技时为 false）
+func _add_active_skill_diff_rows(equipped: EquipmentData, candidate: EquipmentData) -> bool:
+	return _add_id_diff_rows(
+		_active_skill_map(equipped), _active_skill_map(candidate), TranslationManager.t("EQUIPMENT_ACTIVE"))
+
+## 通用"逐条对比"：把两侧 {id: 展示文本} 取并集，逐条输出 旧 → 新
+## 着色规则（对应需求"技能也按红绿区分增减，效果一致则白"）：
+##   待装新增=绿；当前有而待装无（被替换掉）=红；两侧同名=白
+## 参数：current_map/candidate_map - 当前已装备/待装的 {id: 文本}；label - 行首标签（如"特效""主动技能"）
+## 返回：true=至少输出一行
+func _add_id_diff_rows(current_map: Dictionary, candidate_map: Dictionary, label: String) -> bool:
+	if current_map.is_empty() and candidate_map.is_empty():
+		return false
+
+	## 键集合：先列"当前已装备"的键，再补"待装"独有的键（阅读顺序更自然）
+	var ids: Array[String] = []
+	for id in current_map.keys():
+		ids.append(String(id))
+	for id in candidate_map.keys():
+		var k: String = String(id)
+		if not ids.has(k):
+			ids.append(k)
+
+	for id: String in ids:
+		var has_current: bool = current_map.has(id)
+		var has_candidate: bool = candidate_map.has(id)
+		var color: Color = Color(0.7, 0.7, 0.7)
+		if has_candidate and not has_current:
+			## 待装多出的条目：新增 → 绿色
+			color = Color(0.4, 1.0, 0.5)
+		elif has_current and not has_candidate:
+			## 当前有而待装没有：被替换掉 → 红色
+			color = Color(1.0, 0.45, 0.45)
+		## 两侧同名：只显示白色（含层数差异，同名前后的层数变化由文本本身体现）
+		var current_text: String = String(current_map[id]) if has_current else TranslationManager.t("STATUS_NONE")
+		var candidate_text: String = String(candidate_map[id]) if has_candidate else TranslationManager.t("STATUS_NONE")
+		_add_compare_text("%s  %s → %s" % [label, current_text, candidate_text], 14, color)
+	return true
+
+## 提取"effect_id → 展示文本(特效名 + 层数标记)"映射（供逐条对比使用）
+## 参数：data - 装备（可为 null）
+## 返回：字典；无特效时为空字典
+func _effect_map(data: EquipmentData) -> Dictionary:
+	var out: Dictionary = {}
+	if data == null:
+		return out
+	for effect: BulletEffect in data.bullet_effects:
+		if effect == null:
+			continue
+		var eid: String = String(effect.effect_id)
+		var name: String = effect.display_name if effect.display_name != "" else eid
+		if effect.stack_count > 1:
+			name += " Lv.%d" % effect.stack_count
+		out[eid] = name
+	return out
+
+## 取某属性键在两件装备上的显示名（优先取待装侧的名称，便于玩家对应新装备词条）
+## 参数：equipped - 当前已装备；candidate - 待装装备；key - 属性键
+## 返回：词条显示名；两侧都查不到时回退为键名本身
+func _affix_display_name(equipped: EquipmentData, candidate: EquipmentData, key: String) -> String:
+	for data: EquipmentData in [candidate, equipped]:
+		if data == null:
+			continue
+		for affix: EquipmentAffix in data.affixes:
+			if affix != null and affix.stat_key == key:
+				return affix.display_name if affix.display_name != "" else key
+	return key
+
+## 属性词条"具体效果"描述模板（键 → 模板，{v} 为该属性按显示口径换算后的带符号数值）
+## 设计意图：状态栏不再只显示"词条名 + 裸数值"，而是直接说明它到底带来什么效果
+## 说明：百分比口径键（_mult 乘算键，以及数值本身就是比例的 damage_reduction）已 ×100 换算为百分比，
+##       模板里直接补 "%" 即可
+const STAT_DESC_TEMPLATES := {
+	"max_hp_bonus": "生命上限 {v}",
+	"hp_regen": "每秒回血 {v} 点",
+	"damage_mult": "子弹伤害 {v}%",
+	"fire_rate_mult": "射速 {v}%",
+	"bullet_speed_mult": "子弹飞行速度 {v}%",
+	"shield_regen_mult": "护盾回复速度 {v}%",
+	"shield_max_mult": "护盾上限 {v}%",
+	"move_speed_mult": "移动速度 {v}%",
+	"invincible_mult": "受击无敌时间 {v}%",
+	"damage_reduction": "受到伤害降低 {v}%",
+}
+
+## 把属性词条翻译成"具体效果"描述（未收录的键回退为"带符号数值 + 单位"的通用展示）
+## 参数：stat_key - 属性键；value - 该属性累计值（原始口径，乘算键为系数）
+func _describe_stat(stat_key: String, value: float) -> String:
+	var template: String = String(STAT_DESC_TEMPLATES.get(stat_key, ""))
+	if template.is_empty():
+		return _fmt_stat(stat_key, value)
+	## 模板里已自带 "%" 等单位，故此处只填"数值部分"（不含单位）
+	return template.replace("{v}", _fmt_stat_units(stat_key, _stat_display_units(stat_key, value)))
+
+## 判断属性键是否按"百分比"口径展示
+## 约定：_mult 结尾为乘算倍率；damage_reduction 虽为加算比例，但数值本身就是"比例"，
+##       展示时同样需 ×100 并补 "%"（否则会显示成 +0.1 而非 +10%）
+## 参数：stat_key - 属性键
+## 返回：true=按百分比展示
+func _is_percent_stat(stat_key: String) -> bool:
+	return stat_key.ends_with("_mult") or stat_key == "damage_reduction"
+
+## 属性键的单位后缀（百分比口径键为 "%"，加算键无单位）
+func _stat_unit(stat_key: String) -> String:
+	return "%" if _is_percent_stat(stat_key) else ""
+
+## 属性值按显示口径缩放（百分比键 ×100 转百分比，加算键原样）
+func _stat_scaled(stat_key: String, value: float) -> float:
+	return value * 100.0 if _is_percent_stat(stat_key) else value
+
+## 把属性值换算成"显示整数单位"：百分比键 → 整数个百分点；固定加值键 → 十分位整数（值 ×10）
+## 设计意图：展示与差值一律在整数口径下完成，彻底规避浮点误差，
+##           也避免"先取整再相减"与"先相减再取整"导致的两侧方向不一致
+## 参数：stat_key - 属性键；value - 原始口径数值（乘算键为系数）
+## 返回：显示单位整数值（如 8 表示 +8%；124 表示 +12.4）
+func _stat_display_units(stat_key: String, value: float) -> int:
+	var scaled: float = _stat_scaled(stat_key, value)
+	if _is_percent_stat(stat_key):
+		return int(round(scaled))
+	return int(round(scaled * 10.0))
+
+## 把"显示整数单位"渲染为带正负号的文本（非负补 "+"）
+## 精度约定：百分比键只显示整数（由 _stat_unit 补 "%" 得到 "+8%"）；
+##           固定加值键保留 1 位小数（如 "+12.4"），与装备词条展示口径一致
+## 参数：stat_key - 属性键；units - _stat_display_units 计算出的显示单位整数
+func _fmt_stat_units(stat_key: String, units: int) -> String:
+	if _is_percent_stat(stat_key):
+		return ("+" if units >= 0 else "") + str(units)
+	## 固定加值：由十分位整数还原出 1 位小数（整数取精、浮点仅用于渲染，不会有尾数误差）
+	var sign_prefix: String = "-" if units < 0 else "+"
+	return "%s%.1f" % [sign_prefix, float(absi(units)) / 10.0]
+
+## 格式化属性值（带正负号 + 单位），如 "+9%" / "+12.4"
+func _fmt_stat(stat_key: String, value: float) -> String:
+	return _fmt_stat_units(stat_key, _stat_display_units(stat_key, value)) + _stat_unit(stat_key)
+
+## 按差值正负取色（提升=绿 / 下降=红 / 持平=灰）
+func _diff_color(diff: float) -> Color:
+	if diff > 0.001:
+		return Color(0.4, 1.0, 0.5)
+	if diff < -0.001:
+		return Color(1.0, 0.45, 0.45)
+	return Color(0.7, 0.7, 0.7)
+
+## 护盾蓝图文本（"最大耐久 / 单次吸收"；无护盾时为"暂无"）
+func _shield_text(data: EquipmentData) -> String:
+	if data == null or data.shield_data == null:
+		return TranslationManager.t("STATUS_NONE")
+	return "%d / %d" % [int(data.shield_data.max_hp), int(data.shield_data.absorb_per_hit)]
+
+## 提取"主动技能 skill_id → 展示文本(名称 + 冷却 + 整轮伤害倍率)"映射（供逐条对比使用）
+## 说明：单件装备至多一个主动技，映射至多一个条目；skill_id 为空时退化为按名称归并
+func _active_skill_map(data: EquipmentData) -> Dictionary:
+	var out: Dictionary = {}
+	if data == null or not data.has_active_skill():
+		return out
+	var skill: EquipmentActiveSkill = data.active_skill
+	## skill_id 为空时退化为按名称归并，保证仍有稳定的对比键
+	var sid: String = String(skill.skill_id)
+	if sid.is_empty():
+		sid = String(skill.display_name)
+	out[sid] = "%s (CD %.1fs，伤害×%.1f)" % [
+		skill.display_name, float(skill.cooldown), float(skill.damage_multiplier)]
+	return out

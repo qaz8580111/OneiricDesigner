@@ -472,16 +472,6 @@ func _build_boss_data(world: Node2D, stage: int, is_final: bool) -> EnemyDataCla
 	frag.is_rare = true
 	frag.auto_adsorb = true
 	boss_data.drop_items.append(frag)
-	## 大血包（高概率，Boss 战后补给）
-	var heal: DropItemClass = DropItemClass.new()
-	heal.item_id = "boss_health"
-	heal.item_name = "Large Health Pack"
-	heal.item_type = DropItemClass.ItemType.HEALTH
-	heal.value = 60 if is_final else 30
-	heal.drop_chance = 0.8
-	heal.is_rare = false
-	heal.auto_adsorb = true
-	boss_data.drop_items.append(heal)
 	## 装备掉落（关底必掉，守门 50%；保底一件稀有装备作为 Boss 奖励）
 	## 装备系统统一承载四大成长维度，故 Boss 奖励由旧"增益道具"改为一件稀有装备
 	var equip_drop: DropItemClass = DropItemClass.new()
@@ -549,8 +539,11 @@ func _on_boss_killed(boss: Node, is_final: bool) -> void:
 	## 爆炸音效强化（Enemy._die 已播 enemy_die，切面叠加爆炸声强调击杀反馈）
 	if AudioManager:
 		AudioManager.play("hit_explosion", 1.0)
-	## 本场 Boss 战完结：清理引用与屏幕血条
+	## 本场 Boss 战完结：清理引用与屏幕血条 + 复位濒死狂暴标记
+	## 注意：_boss_enraged 必须随 Boss 死亡复位，否则下一只 Boss 若在同位置进入濒死
+	##       也不会再触发狂暴（_on_boss_damaged 中 `if not _boss_enraged` 恒为 false）
 	_current_boss = null
+	_boss_enraged = false
 	_hide_boss_hud()
 
 	if is_final:
@@ -1093,29 +1086,42 @@ func _on_boss_entry_time_stop_tick() -> void:
 	if _time_stop_remaining <= 0:
 		Engine.time_scale = 1.0
 		get_tree().process_frame.disconnect(_time_stop_callback)
+		## 关键修复：time_scale=0 期间物理步进 delta=0，开启 physics_interpolation 时
+		## 插值分数可能出现无效值 → 层0实体（玩家/敌人）渲染变换异常而"瞬间消失"
+		## （逻辑/碰撞/受击仍在运行，故玩家仍会被攻击掉血）。恢复时强制重置插值与相机平滑。
+		_reset_interpolation_after_time_stop()
 
-## Boss登场震屏效果：Camera2D offset 抖动（关底Boss强度加倍）
+## 时停恢复后的插值/平滑复位（防 time_scale=0 导致的实体渲染变换异常）
+func _reset_interpolation_after_time_stop() -> void:
+	## 1. 玩家与全部敌人：重置物理插值（下一物理帧从当前变换重新起算）
+	for node in get_tree().get_nodes_in_group("player"):
+		if node.has_method("reset_physics_interpolation"):
+			node.reset_physics_interpolation()
+	for node in get_tree().get_nodes_in_group("enemy"):
+		if node.has_method("reset_physics_interpolation"):
+			node.reset_physics_interpolation()
+	## 2. 相机：重置平滑，避免瞬时拉扯
+	var world: Node2D = _get_world()
+	if world != null:
+		var cam: Camera2D = world.get_viewport().get_camera_2d()
+		if cam != null and cam.has_method("reset_smoothing"):
+			cam.reset_smoothing()
+
+## Boss登场震屏效果（关底Boss强度加倍）
 ## 参数：world - 游戏世界（用于取 Camera2D），is_final - 是否关底Boss
+## 规则：震动唯一入口 CameraShake.shake(intensity,duration)，禁止本系统直接写 cam.offset
 func _do_boss_entry_shake(world: Node2D, is_final: bool) -> void:
 	var cam: Camera2D = world.get_viewport().get_camera_2d()
-	if cam == null:
+	if cam == null or not cam.has_method("shake"):
 		return
 
-	var original_offset: Vector2 = cam.offset
 	var duration: float = 0.4
-	## 关底Boss震屏强度加倍
-	var intensity: float = 6.0 if is_final else 3.0
-
-	var shake_tween: Tween = create_tween()
-	## 3次随机偏移抖动+回归
-	for i in range(3):
-		var shake_offset: Vector2 = Vector2(
-			RandomManager.randf_range(-intensity, intensity),
-			RandomManager.randf_range(-intensity, intensity)
-		)
-		shake_tween.tween_property(cam, "offset", original_offset + shake_offset, duration / 3.0)
-	## 回归原始偏移
-	shake_tween.tween_property(cam, "offset", original_offset, duration / 3.0)
+	## 关底Boss震屏强度加倍（目标峰值偏移像素）
+	var peak_px: float = 6.0 if is_final else 3.0
+	## trauma²曲线反推：峰值偏移 = max_offset_px * trauma² → trauma = sqrt(peak/max_offset_px)
+	var max_offset_px: float = cam.get("max_offset_px") if "max_offset_px" in cam else 14.0
+	var intensity: float = clampf(sqrt(peak_px / maxf(max_offset_px, 1.0)), 0.15, 0.9)
+	cam.shake(intensity, duration)
 
 ## Boss濒死狂暴：HP<20%时攻速+50% + 屏幕红边闪烁 + 专属音效
 ## 设计意图：让Boss在即将死亡时给玩家最后一击的紧张感，观众也跟着屏息
@@ -1142,6 +1148,15 @@ func _do_boss_enrage(boss: Node) -> void:
 		layer.layer = 100  ## 顶层显示
 		get_tree().current_scene.add_child(layer)
 
+		## 闪烁动画载体：CanvasLayer 本身没有 modulate 属性，无法直接对其做透明度补间
+		## （直接 tween layer.modulate 会报 "property does not exist" 并中断动画）
+		## 因此插入一个全屏 Control 作为载体，四条边挂在其下、统一由它控制透明度
+		var flash_root: Control = Control.new()
+		flash_root.name = "FlashRoot"
+		flash_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		flash_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		layer.add_child(flash_root)
+
 		## 四条边：anchor配置(左/右/上/下) + offset配置(左/右/上/下)
 		## 上：anchor(0,1,1,1) offset(0,0,0,-border) → 位于顶部，高度=border
 		## 下：anchor(0,1,1,1) offset(0,0,-border,0) → 位于底部，高度=border
@@ -1160,7 +1175,9 @@ func _do_boss_enrage(boss: Node) -> void:
 
 		for cfg in rect_configs:
 			var rect: ColorRect = ColorRect.new()
-			rect.color = Color(1.0, 0.15, 0.15, 0.0)
+			## 颜色 alpha 必须为 1，可见度由 flash_root.modulate:a 统一控制
+			## （alpha=0 时 color.a × modulate.a 恒为 0，红边不可见）
+			rect.color = Color(1.0, 0.15, 0.15, 1.0)
 			rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			rect.anchor_left = cfg["anchor_l"]
 			rect.anchor_right = cfg["anchor_r"]
@@ -1170,14 +1187,14 @@ func _do_boss_enrage(boss: Node) -> void:
 			rect.offset_right = cfg["offset_r"]
 			rect.offset_top = cfg["offset_t"]
 			rect.offset_bottom = cfg["offset_b"]
-			layer.add_child(rect)
+			flash_root.add_child(rect)
 
-		## 红边闪烁动画：连续闪烁3次后淡出销毁
-		var tw: Tween = layer.create_tween()
+		## 红边闪烁动画：连续闪烁3次后淡出销毁（载体为 flash_root，非 CanvasLayer）
+		var tw: Tween = flash_root.create_tween()
 		tw.set_trans(Tween.TRANS_SINE)
 		for i in range(3):
-			tw.tween_property(layer, "modulate:a", 0.8, 0.1)
-			tw.tween_property(layer, "modulate:a", 0.0, 0.15)
+			tw.tween_property(flash_root, "modulate:a", 0.8, 0.1)
+			tw.tween_property(flash_root, "modulate:a", 0.0, 0.15)
 		tw.tween_interval(0.3)
 		tw.tween_callback(layer.queue_free)
 

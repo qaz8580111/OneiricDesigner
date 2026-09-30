@@ -24,6 +24,10 @@ var core_damage_bonus: int = 0
 func _on_stack_grown() -> void:
 	core_damage_bonus += 4
 
+## 效果描述：破甲系数（无视护盾比例）+ 额外核心伤害
+func get_effect_description() -> String:
+	return "%.0f%% 子弹伤害无视护盾，额外核心伤害 +%d" % [ignore_shield * 100.0, core_damage_bonus]
+
 ## 应用破甲特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例（用于取伤害基准与定位）；target - 被命中的目标节点

@@ -24,6 +24,9 @@ const BulletShotPatternClass = preload("res://scripts/resources/bullet/BulletSho
 ## 装备随机生成器（纯工具类）：掉落/商店/神庙生成装备实例的统一入口
 const EquipmentGeneratorClass = preload("res://scripts/resources/equipment/EquipmentGenerator.gd")
 
+## 装备数据类（用于访问 Slot/Rarity 枚举，走 preload 避免全局类缓存刷新问题）
+const EquipmentDataClass = preload("res://scripts/resources/equipment/EquipmentData.gd")
+
 ## 护盾装备池目录（数据驱动扫描，装备生成时作为盾牌槽护盾蓝图来源）
 const SHIELD_POOL_DIR: String = "res://data/equipment"
 
@@ -48,11 +51,32 @@ const TEMPLE_BOOST_BASE_COST: int = 400
 ## 神庙强化每次消耗的增量（第二次500、第三次600……每次+100）
 const TEMPLE_BOOST_COST_STEP: int = 100
 
-## 神庙"求购装备"固定消耗的梦境碎片数（比随机强化贵，但直接获得一件完整新装备入背包）
-const PURCHASE_EQUIPMENT_COST: int = 500
-
-## 神庙"强化装备属性"每次强化的数值增幅比例（在现有词条数值基础上 ×(1+该比例)）
+## 神庙"强化装备"每次强化的数值增幅比例（在现有词条数值基础上 ×(1+该比例)）
 const EQUIPMENT_BOOST_RATIO: float = 0.2
+
+## ========== 神庙"融合装备"概率配置 ==========
+
+## 融合"更好"结果概率：产出优于三件材料中任意一件
+const FUSE_BETTER_CHANCE: float = 0.30
+
+## 融合"更差或持平"结果概率：产出不如材料或与之相当
+const FUSE_WORSE_CHANCE: float = 0.30
+
+## 融合稀有度提升的基准概率（仅"更好"结果分支内再 roll）
+const FUSE_RARITY_UPGRADE_BASE: float = 0.10
+
+## 融合稀有度提升概率上限（基准 + 三件材料稀有度权重之和后的封顶）
+const FUSE_RARITY_UPGRADE_MAX: float = 0.60
+
+## 材料稀有度对"提升概率"的权重贡献（下标=EquipmentData.Rarity：普通/稀有/史诗）
+## 设计意图：材料越稀有，融合越容易突破稀有度——稀有度权重越高概率越大
+const FUSE_RARITY_WEIGHT_BY_RARITY: Array = [0.02, 0.06, 0.12]
+
+## 融合"更好"结果的词条数值额外增幅（在保底生成基础上 ×(1+该比例)）
+const FUSE_BETTER_BOOST_RATIO: float = 0.10
+
+## 神庙"融合装备"每次消耗的梦境碎片（在消耗 3 件材料之外的额外成本）
+const FUSE_DREAM_COST: int = 200
 
 ## ========== 信号定义 ==========
 
@@ -248,6 +272,13 @@ func generate_equipment(slot: int = -1, rarity: int = -1) -> Resource:
 	var final_rarity: int = rarity if rarity >= 0 else EquipmentGeneratorClass.roll_rarity(EQUIPMENT_RARITY_WEIGHTS)
 	return EquipmentGeneratorClass.generate(final_slot, final_rarity, _build_equipment_pools())
 
+## 生成一件"稀有度保底"的装备（商店碎片合成专用）
+## 参数：slot - 指定槽位（EquipmentData.Slot）；rarity_floor - 稀有度下限（EquipmentData.Rarity）
+## 返回：词条总数不低于 rarity_floor 的 EquipmentData（池不足时可能仍达不到，属数据边界）
+## 设计意图：合成是"消耗玩家资源"的行为，复用掉落生成器后再补足词条，保证回报不低于稀有
+func generate_equipment_with_floor(slot: int, rarity_floor: int) -> Resource:
+	return EquipmentGeneratorClass.generate_with_floor(slot, rarity_floor, _build_equipment_pools())
+
 ## 组装装备生成所需的模板池字典（从既有池派生，零新增数据目录）
 ## 返回：池字典，键约定与 EquipmentGenerator.generate 的 pools 参数一致：
 ##       "affix_templates"  - 属性词条模板（旧词条中含 stat_modifiers 者，读 equip_slots 决定槽位）
@@ -320,74 +351,279 @@ func _get_equipment_component() -> Node:
 		return comp as Node
 	return null
 
-## 收集全部已穿戴装备的 (装备实例, 词条) 对
-## 返回：字典数组，元素结构 {owner: EquipmentData, affix: EquipmentAffix}
-func _collect_equipped_affix_pairs() -> Array:
-	var pairs: Array = []
+## 获取玩家的背包组件（BackpackComponent；融合材料与产出入包用）
+## 返回：组件节点；玩家无该组件时返回 null
+func _get_backpack() -> Node:
+	var player: Node2D = _get_player()
+	if player == null or not player.has_method("get_backpack"):
+		return null
+	var bp: Variant = player.get_backpack()
+	if bp is Node:
+		return bp as Node
+	return null
+
+## 收集全部已穿戴装备上的可强化项（"强化装备"选项的强化目标池）
+## 返回：字典数组，元素结构 { owner: EquipmentData, kind: String, ref: Resource }
+##       kind ∈ {"affix"属性词条, "effect"被动特效, "skill"主动技能, "shield"护盾蓝图}
+## 设计意图：把"属性/被动/主动/护盾"四类强化目标统一成同构候选，
+##          随机抽一项即可实现"随机强化某件装备的某一类数值"
+func _collect_enhance_candidates() -> Array:
+	var candidates: Array = []
 	var comp: Node = _get_equipment_component()
 	if comp == null or not comp.has_method("get_all_equipped"):
-		return pairs
+		return candidates
 	for data in comp.get_all_equipped():
 		if data == null:
 			continue
+		## 属性词条
 		var affixes: Variant = data.get("affixes")
 		if affixes is Array:
 			for affix in affixes:
 				if affix != null:
-					pairs.append({"owner": data, "affix": affix})
-	return pairs
-
-## 收集全部已穿戴装备的 (装备实例, 特效) 对
-## 返回：字典数组，元素结构 {owner: EquipmentData, effect: BulletEffect}
-func _collect_equipped_effect_pairs() -> Array:
-	var pairs: Array = []
-	var comp: Node = _get_equipment_component()
-	if comp == null or not comp.has_method("get_all_equipped"):
-		return pairs
-	for data in comp.get_all_equipped():
-		if data == null:
-			continue
+					candidates.append({"owner": data, "kind": "affix", "ref": affix})
+		## 被动特效
 		var effects: Variant = data.get("bullet_effects")
 		if effects is Array:
 			for effect in effects:
 				if effect != null:
-					pairs.append({"owner": data, "effect": effect})
-	return pairs
+					candidates.append({"owner": data, "kind": "effect", "ref": effect})
+		## 主动技能（仅武器/戒指/法宝可能携带）
+		if data.has_method("has_active_skill") and data.has_active_skill():
+			candidates.append({"owner": data, "kind": "skill", "ref": data.active_skill})
+		## 护盾蓝图（仅盾牌槽携带）
+		var shield: Variant = data.get("shield_data")
+		if shield != null:
+			candidates.append({"owner": data, "kind": "shield", "ref": shield})
+	return candidates
 
-## 是否有可强化的装备词条（"强化装备属性"选项预检查/置灰用）
-## 返回：true=至少有一件已穿戴装备携带词条
-func has_boostable_equipment_affix() -> bool:
-	return not _collect_equipped_affix_pairs().is_empty()
+## 是否存在可强化的已穿戴装备（"强化装备"选项预检查/置灰用）
+## 返回：true=至少有一件已穿戴装备携带可强化项（属性/被动/主动/护盾任一）
+func has_enhanceable_equipped() -> bool:
+	return not _collect_enhance_candidates().is_empty()
 
-## 是否有可强化的装备特效（"强化装备特效"选项预检查/置灰用）
-## 返回：true=至少有一件已穿戴装备携带特效
-func has_boostable_equipment_effect() -> bool:
-	return not _collect_equipped_effect_pairs().is_empty()
+## 随机强化一件已穿戴装备上的某一类数值（属性/被动/主动/护盾任选其一）
+## 返回：结果字典 { "success": bool, "message": String }；message 为给玩家的反馈文案
+## 强化口径：
+##   属性词条 → value ×(1+EQUIPMENT_BOOST_RATIO)
+##   被动特效 → add_stack() 叠层 +1（子类 _on_stack_grown 放大参数）
+##   主动技能 → cooldown ×(1-EQUIPMENT_BOOST_RATIO)，下限 1.0 秒
+##   护盾蓝图 → 走 Player.boost_shield_stack(1) 叠层 +1（改蓝图会因同引用短路不生效）
+## 前三类强化后调 _reequip_owner 原地重穿，触发 EquipmentComponent._refresh() 全量重算
+func enhance_random_equipped_equipment() -> Dictionary:
+	var candidates: Array = _collect_enhance_candidates()
+	if candidates.is_empty():
+		return {"success": false, "message": "没有可强化的已装备装备"}
+	var pick: Dictionary = candidates[RandomManager.randi_range(0, candidates.size() - 1)]
+	var owner: Resource = pick["owner"]
+	var kind: String = String(pick["kind"])
+	var ref: Variant = pick["ref"]
+	## 装备前缀文案（稀有度 + 槽位，如"史诗武器"），让玩家知道是哪件装备被强化
+	var prefix: String = _equipment_prefix(owner)
+	match kind:
+		"affix":
+			var affix: Resource = ref
+			affix.value = float(affix.value) * (1.0 + EQUIPMENT_BOOST_RATIO)
+			_reequip_owner(owner)
+			var affix_text: String = String(affix.get_display_text()) if affix.has_method("get_display_text") else ""
+			return {"success": true, "message": "强化成功！\n%s\n属性「%s」" % [prefix, affix_text]}
+		"effect":
+			var effect: Resource = ref
+			if effect.has_method("add_stack"):
+				effect.add_stack()
+			_reequip_owner(owner)
+			var effect_text: String = String(effect.get_effect_description()) if effect.has_method("get_effect_description") else ""
+			var stacks: int = int(effect.stack_count) if "stack_count" in effect else 1
+			return {"success": true, "message": "强化成功！\n%s\n被动「%s」（%d 层）" % [prefix, effect_text, stacks]}
+		"skill":
+			var skill: Resource = ref
+			skill.cooldown = maxf(float(skill.cooldown) * (1.0 - EQUIPMENT_BOOST_RATIO), 1.0)
+			_reequip_owner(owner)
+			return {"success": true, "message": "强化成功！\n%s\n主动「%s」冷却缩短至 %.1f 秒" % [prefix, String(skill.display_name), float(skill.cooldown)]}
+		"shield":
+			## 护盾强化必须走 Player.boost_shield_stack：
+			## EquipmentComponent._refresh_shield() 对同一 shield_data 引用做短路，改蓝图数值不会生效
+			var player: Node2D = _get_player()
+			if player == null or not player.has_method("boost_shield_stack"):
+				return {"success": false, "message": "护盾强化失败"}
+			if not bool(player.boost_shield_stack(1)):
+				return {"success": false, "message": "护盾强化失败"}
+			return {"success": true, "message": "强化成功！\n%s\n护盾叠层 +1" % prefix}
+	return {"success": false, "message": "强化失败"}
 
-## 随机强化一件已穿戴装备的一条词条（数值 ×(1+EQUIPMENT_BOOST_RATIO)）
-## 流程：随机取一条词条 → 放大其 value → 原地重新 equip 触发 EquipmentComponent._refresh() 全量重算
-## 返回：是否强化成功（无已穿戴词条时返回 false，神庙保留不消失）
-func boost_random_equipment_affix() -> bool:
-	var pairs: Array = _collect_equipped_affix_pairs()
-	if pairs.is_empty():
+## 拼装备前缀文案（稀有度 + 槽位，如"史诗武器"）
+## 参数：data - EquipmentData
+## 返回：前缀文本
+func _equipment_prefix(data: Resource) -> String:
+	if data == null:
+		return "装备"
+	var rarity_text: String = String(data.get_rarity_text()) if data.has_method("get_rarity_text") else ""
+	var slot_text: String = String(data.get_slot_text()) if data.has_method("get_slot_text") else ""
+	return rarity_text + slot_text
+
+## 组织装备简要明细文案（词条/被动/主动/护盾，供融合结果反馈展示）
+## 参数：data - EquipmentData
+## 返回：多行明细文本（无内容为空串）
+func _equipment_summary(data: Resource) -> String:
+	if data == null:
+		return ""
+	var lines: Array = []
+	for affix in data.affixes:
+		if affix != null and affix.has_method("get_display_text"):
+			lines.append("· " + String(affix.get_display_text()))
+	for effect in data.bullet_effects:
+		if effect == null:
+			continue
+		var desc: String = String(effect.get_effect_description()) if effect.has_method("get_effect_description") else ""
+		lines.append("· 被动 " + desc)
+	if data.has_method("has_active_skill") and data.has_active_skill():
+		lines.append("· 主动 " + String(data.active_skill.display_name))
+	if data.get("shield_data") != null:
+		lines.append("· 护盾 " + String(data.shield_data.display_name))
+	return "\n".join(lines)
+
+## 组织「获得装备」反馈文案（前缀 + 明细），供商店合成等产出统一展示
+## 参数：data - 产出的装备数据
+## 返回：形如 "获得「史诗武器」\n· 攻击力 +12%\n· 被动 穿透"；data 为空返回空串
+func build_obtain_message(data: Resource) -> String:
+	if data == null:
+		return ""
+	var head: String = "获得「%s」" % _equipment_prefix(data)
+	var summary: String = _equipment_summary(data)
+	return head if summary == "" else head + "\n" + summary
+
+## ========== 神庙"融合装备"（背包同槽位 3 件材料 → 随机产出） ==========
+
+## 是否可进行融合（"融合装备"选项预检查/置灰用）
+## 规则：背包中存在某槽位装备 ≥3 件
+func can_fuse_equipment() -> bool:
+	return not _collect_fuse_materials().is_empty()
+
+## 获取神庙"融合装备"每次消耗的梦境碎片数（面板价格展示与置灰判定共用）
+func get_fuse_cost() -> int:
+	return FUSE_DREAM_COST
+
+## 尝试扣除神庙"融合装备"消耗的梦境碎片
+## 参数：player - 玩家节点
+## 返回：true=扣费成功；false=玩家无效或碎片不足（不扣费）
+func consume_fuse_cost(player: Node) -> bool:
+	if player == null or not player.has_method("spend_dream_fragment"):
 		return false
-	var pair: Dictionary = pairs[RandomManager.randi_range(0, pairs.size() - 1)]
-	var affix: Resource = pair["affix"]
-	affix.value = float(affix.value) * (1.0 + EQUIPMENT_BOOST_RATIO)
-	return _reequip_owner(pair["owner"])
+	return bool(player.spend_dream_fragment(FUSE_DREAM_COST))
 
-## 随机强化一件已穿戴装备的一个特效（叠层 +1，触发 _on_stack_grown 参数放大）
-## 流程：随机取一个特效 → add_stack() → 原地重新 equip 触发 _refresh() 全量重建特效
-## 返回：是否强化成功（无已穿戴特效时返回 false，神庙保留不消失）
-func boost_random_equipment_effect() -> bool:
-	var pairs: Array = _collect_equipped_effect_pairs()
-	if pairs.is_empty():
-		return false
-	var pair: Dictionary = pairs[RandomManager.randi_range(0, pairs.size() - 1)]
-	var effect: Resource = pair["effect"]
-	if effect.has_method("add_stack"):
-		effect.add_stack()
-	return _reequip_owner(pair["owner"])
+## 收集本次融合材料：取"件数最多且≥3"的槽位，再取该槽位稀有度最低的 3 件
+## 返回：{ "slot": int, "materials": Array }；不满足条件时返回空字典
+## 设计意图：材料全部取自背包（装备系统唯一成长载体），材料消耗即成本；
+##          另需消耗梦境碎片（FUSE_DREAM_COST），由调用方先行扣除
+func _collect_fuse_materials() -> Dictionary:
+	var backpack: Node = _get_backpack()
+	if backpack == null or not backpack.has_method("get_items"):
+		return {}
+	var items: Array = backpack.get_items()
+	## 按槽位分组（记录背包下标，便于按稀有度排序后取最低 3 件）
+	var groups: Dictionary = {}
+	for i in range(items.size()):
+		var data: Resource = items[i]
+		if data == null:
+			continue
+		var slot: int = int(data.slot)
+		if not groups.has(slot):
+			groups[slot] = []
+		(groups[slot] as Array).append(i)
+	## 选"件数最多且≥3"的槽位；并列时取槽位序号小者，保证结果稳定可预期
+	var best_slot: int = -1
+	var best_count: int = 0
+	for slot in groups.keys():
+		var count: int = (groups[slot] as Array).size()
+		if count < 3:
+			continue
+		if count > best_count or (count == best_count and (best_slot < 0 or int(slot) < best_slot)):
+			best_slot = int(slot)
+			best_count = count
+	if best_slot < 0:
+		return {}
+	## 该槽位按稀有度升序排列（同稀有度保持原背包顺序），取最低 3 件为材料
+	var idxs: Array = groups[best_slot]
+	idxs.sort_custom(func(a: int, b: int) -> bool:
+		return int(items[a].rarity) < int(items[b].rarity)
+	)
+	var materials: Array = []
+	for k in range(3):
+		materials.append(items[idxs[k]])
+	return {"slot": best_slot, "materials": materials}
+
+## 执行融合：消耗 3 件同槽位最低稀有度材料，随机产出一件融合装备
+## 返回：结果字典 { "success": bool, "message": String }
+## 概率模型：
+##   30% → "更好"（词条总数不低于材料最高稀有度对应的保底，数值再放大，并 roll 稀有度提升）
+##   30% → "更差或持平"（无保底常规生成，可能低于材料）
+##   40% → "融合失败"（无产出）
+## 材料无论成败全部消耗（success=操作是否执行，不代表"是否产出装备"）
+func fuse_equipment() -> Dictionary:
+	var info: Dictionary = _collect_fuse_materials()
+	if info.is_empty():
+		return {"success": false, "message": "没有可融合的装备"}
+	var slot: int = int(info["slot"])
+	var materials: Array = info["materials"]
+	var backpack: Node = _get_backpack()
+	if backpack == null or not backpack.has_method("remove_item"):
+		return {"success": false, "message": "融合失败：背包不可用"}
+
+	## 材料最高稀有度：用于"更好"结果的保底下限与稀有度提升判定
+	var best_rarity: int = 0
+	for m in materials:
+		best_rarity = maxi(best_rarity, int(m.rarity))
+
+	## 先消耗全部材料（成败一致：融合失败也消耗 3 件）
+	for m in materials:
+		backpack.remove_item(m)
+
+	## roll 融合结果
+	var roll: float = RandomManager.randf()
+	if roll < FUSE_BETTER_CHANCE:
+		var eq: Resource = _fuse_make_better(slot, best_rarity, materials)
+		## 极端异常（池为空等）无产出时按失败处理，避免向玩家展示空结果
+		if eq == null:
+			return {"success": true, "message": "融合失败……三件材料已消耗"}
+		## 材料已消耗 3 件，背包必有空位；入包失败仅作兜底提示，不影响操作成功
+		if not bool(backpack.add_item(eq)):
+			return {"success": true, "message": "融合大成功！结果优于材料\n（背包空间不足，产出已遗失）"}
+		return {"success": true, "message": "融合大成功！结果优于材料\n获得「%s」\n%s" % [_equipment_prefix(eq), _equipment_summary(eq)]}
+	if roll < FUSE_BETTER_CHANCE + FUSE_WORSE_CHANCE:
+		var eq2: Resource = _fuse_make_worse_or_same(slot)
+		if eq2 == null:
+			return {"success": true, "message": "融合失败……三件材料已消耗"}
+		if not bool(backpack.add_item(eq2)):
+			return {"success": true, "message": "融合完成，结果平平\n（背包空间不足，产出已遗失）"}
+		return {"success": true, "message": "融合完成，结果平平\n获得「%s」\n%s" % [_equipment_prefix(eq2), _equipment_summary(eq2)]}
+	return {"success": true, "message": "融合失败……三件材料已消耗"}
+
+## 生成"更好"的融合结果：以材料最高稀有度为保底生成，再整体放大词条数值
+## 稀有度提升：仅在本分支内再 roll，概率 = 基准 + 三件材料稀有度权重之和（封顶 FUSE_RARITY_UPGRADE_MAX）
+## 参数：slot - 目标槽位；best_rarity - 材料最高稀有度；materials - 三件材料
+## 返回：EquipmentData；生成失败返回 null
+func _fuse_make_better(slot: int, best_rarity: int, materials: Array) -> Resource:
+	var upgrade_chance: float = FUSE_RARITY_UPGRADE_BASE
+	for m in materials:
+		var r: int = clampi(int(m.rarity), 0, FUSE_RARITY_WEIGHT_BY_RARITY.size() - 1)
+		upgrade_chance += float(FUSE_RARITY_WEIGHT_BY_RARITY[r])
+	upgrade_chance = minf(upgrade_chance, FUSE_RARITY_UPGRADE_MAX)
+	var floor_rarity: int = best_rarity
+	if RandomManager.chance(upgrade_chance):
+		floor_rarity = mini(best_rarity + 1, EquipmentDataClass.Rarity.EPIC)
+	var eq: Resource = generate_equipment_with_floor(slot, floor_rarity)
+	if eq == null:
+		return null
+	## 在保底生成基础上再整体放大词条数值，确保"比材料好一点"
+	for affix in eq.affixes:
+		if affix != null:
+			affix.value = float(affix.value) * (1.0 + FUSE_BETTER_BOOST_RATIO)
+	return eq
+
+## 生成"更差或持平"的融合结果：无保底常规生成（可能低于材料）
+## 参数：slot - 目标槽位
+## 返回：EquipmentData；生成失败返回 null
+func _fuse_make_worse_or_same(slot: int) -> Resource:
+	return generate_equipment(slot)
 
 ## 原地刷新一件已穿戴装备（重新 equip 触发 EquipmentComponent._refresh 全量重算/特效重建）
 ## 说明：装备是同一对象引用，_refresh 会按当前装备数据重新下发词条/特效/护盾/主动技能

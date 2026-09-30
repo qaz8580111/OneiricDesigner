@@ -27,6 +27,10 @@ func _on_stack_grown() -> void:
 	bounce_count += 1
 	bounce_radius += 30.0
 
+## 效果描述：弹射次数与弹射查找半径
+func get_effect_description() -> String:
+	return "命中后弹射 %d 次（范围 %.0f 像素）" % [bounce_count, bounce_radius]
+
 ## 应用弹射特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例（弹射计数存其meta）；target - 刚被命中的目标（弹射起点）

@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/temple/FuseEquipmentTempleOption.gd" id="1"]
+
+[resource type="FuseEquipmentTempleOption" script_class="FuseEquipmentTempleOption"]
+script = ExtResource("1")
+option_id = "fuse_equipment"
+display_name = "融合装备"
+description = "消耗背包中同槽位最低稀有度 3 件装备 + 200 梦境碎片融合，随机产出：30%更好 / 30%持平或更差 / 40%失败。材料稀有度越高越易提升稀有度。"
+option_color = Color(1.0, 0.55, 0.9, 1)
+is_gamble = true

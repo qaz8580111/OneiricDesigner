@@ -44,14 +44,10 @@ const DROP_ICON_MAP: Dictionary = {
 	"fragment_medium": "icon_fragments_big",
 	"elite_fragment": "icon_fragments_big",
 	"boss_fragment": "icon_fragments_big",
-	## 血包：普通小血包/精英大血包/Boss大血包（回复量不同，图标大小区分）
-	"health_small": "icon_blood_small",
-	"elite_health": "icon_blood_big",
-	"boss_health": "icon_blood_big",
-	## 装备掉落：四大成长维度统一聚合为装备后，地面掉落物用"基础护盾"图标占位
+	## 装备掉落：四大成长维度统一聚合为装备后，地面掉落物统一使用"技能"图标（icon_skill）
 	## 设计意图：掉落物只需告知玩家"这是一件装备"（不暴露具体槽位/稀有度，保留惊喜感），
 	##           具体词条/特效/护盾/主动技能由拾取入包后在背包/装备面板中查看
-	"equipment_drop": "icon_shield_basic",
+	"equipment_drop": "icon_skill",
 }
 
 ## 装备槽位 → 兜底代表图标文件名（不含扩展名）
@@ -80,13 +76,22 @@ static var _miss_cache: Dictionary = {}
 ## 获取升级词条图标（装备/背包面板与状态面板的词条图标共用）
 ## 参数：upgrade_id - 词条唯一标识（如 "upg_damage"）；rarity - 稀有度枚举值（决定子目录）
 ## 返回：图标纹理；图标缺失或 id 为空时返回 null（调用方自行回退文字显示）
+## 加载策略：先按稀有度目录找；该目录缺失（磁盘上尚未做"蓝色稀有/紫色史诗"分目录）时，
+##           回退到"白色普通"目录，保证 RARE/EPIC 装备的词条图标不会因缺目录而全部空白
 static func get_upgrade_icon(upgrade_id: String, rarity: int) -> Texture2D:
 	## 空id直接失败（新词条未配id时不炸）
 	if upgrade_id.is_empty():
 		return null
 	## 按稀有度映射子目录（未知稀有度回退普通目录，保证总有合法路径）
-	var folder: String = RARITY_FOLDERS.get(rarity, "白色普通")
-	return _load_icon("%s/%s/icon_%s.png" % [BASE_PATH, folder, upgrade_id])
+	var folder: String = RARITY_FOLDERS.get(rarity, RARITY_FOLDERS[0])
+	var tex: Texture2D = _load_icon("%s/%s/icon_%s.png" % [BASE_PATH, folder, upgrade_id])
+	if tex != null:
+		return tex
+	## 稀有度目录 miss：回退白色普通目录（仅当当前目录非普通目录时才多查一次）
+	var common_folder: String = RARITY_FOLDERS[0]
+	if folder != common_folder:
+		return _load_icon("%s/%s/icon_%s.png" % [BASE_PATH, common_folder, upgrade_id])
+	return null
 
 ## 获取护盾装备图标（HUD护盾栏 / 暂停菜单装备展示用，不再用于地面掉落物）
 ## 参数：shield_id - 护盾唯一标识（如 "shield_basic"）
@@ -121,15 +126,17 @@ static func get_effect_icon(effect_id: String, rarity: int) -> Texture2D:
 ## 获取装备槽位兜底图标（装备自身/词条/护盾都解析不出图标时的最后一级回退）
 ## 参数：slot - 槽位枚举值（EquipmentData.Slot）；rarity - 稀有度枚举值（决定首选子目录）
 ## 返回：图标纹理；SLOT_ICON_FILES 未登记的槽位返回 null
-## 加载策略：先按稀有度目录找，找不到再兜底到"灰色护盾"/"敌人掉落"目录
-##           （原因：盾牌代表图标 icon_shield_basic 只存在于后两个目录，不在稀有度目录）
+## 加载策略：依次尝试 稀有度目录 → 白色普通 → 灰色护盾 → 敌人掉落
+##           （原因：稀有度分目录多数不存在、盾牌代表图标 icon_shield_basic 只在后两个目录，
+##            追加"白色普通"可覆盖 RARE/EPIC 装备槽位兜底图标，避免空槽/高稀有度装备无图）
 static func get_slot_icon(slot: int, rarity: int = 0) -> Texture2D:
 	var file_name: String = SLOT_ICON_FILES.get(slot, "")
 	if file_name.is_empty():
 		return null
-	## 候选目录顺序：稀有度目录 → 灰色护盾 → 敌人掉落
+	## 候选目录顺序：稀有度目录 → 白色普通 → 灰色护盾 → 敌人掉落
 	var folders: Array[String] = [
 		String(RARITY_FOLDERS.get(rarity, RARITY_FOLDERS[0])),
+		String(RARITY_FOLDERS[0]),
 		SHIELD_FOLDER,
 		DROP_FOLDER,
 	]
@@ -138,6 +145,12 @@ static func get_slot_icon(slot: int, rarity: int = 0) -> Texture2D:
 		if tex != null:
 			return tex
 	return null
+
+## 获取主动技能图标（主界面 HUD 技能栏 / 状态面板主动技能行）
+## 返回：技能图标纹理；图标缺失时返回 null（调用方回退占位色块/文字）
+## 说明：主动技能暂无专属图标目录，统一复用"敌人掉落"目录下的 icon_skill.png 作为技能标识图
+static func get_active_skill_icon() -> Texture2D:
+	return _load_icon("%s/%s/icon_skill.png" % [BASE_PATH, DROP_FOLDER])
 
 ## 获取一件装备的展示图标（装备/背包面板统一入口）
 ## 参数：data - EquipmentData 实例

@@ -24,6 +24,10 @@ func _on_stack_grown() -> void:
 	pierce_count += 1
 	damage_decay = minf(damage_decay + 0.02, 0.98)
 
+## 效果描述：穿透人数与每次穿透后的伤害保留比例
+func get_effect_description() -> String:
+	return "子弹可穿透 %d 个敌人（每穿透一次伤害保留 %.0f%%）" % [pierce_count, damage_decay * 100.0]
+
 ## 应用穿透特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例（穿透计数/保活标记写入其meta与成员）；target - 被穿透的敌人（未直接使用）

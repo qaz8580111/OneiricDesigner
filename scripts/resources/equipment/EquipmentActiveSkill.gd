@@ -23,5 +23,10 @@ extends Resource
 ## 冷却时间（秒）：释放后需等待该时长才能再次释放
 @export var cooldown: float = 8.0
 
+## 整轮伤害倍率：释放时把玩家当前子弹伤害基数放大该倍数，再由构型分摊到各发
+## 说明：构型系统本身"整轮总伤守恒"（只改弹道形状），本倍率才是主动技能的强度来源；
+##      由 EquipmentGenerator 按稀有度写入（普通2.5/稀有3.5/史诗5.0），1.0 = 不放大
+@export var damage_multiplier: float = 1.0
+
 ## 释放时使用的弹道构型（直接复用现有 7 个构型策略资源）
 @export var shot_pattern: BulletShotPattern = null

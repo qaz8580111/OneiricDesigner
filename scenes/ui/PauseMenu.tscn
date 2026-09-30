@@ -11,9 +11,8 @@
 ;   └── VBoxContainer - 垂直布局容器
 ;       ├── Title (Label) - 标题（Paused）
 ;       ├── ResumeButton (Button) - 继续游戏按钮
+;       ├── PlayerPanelButton (Button) - 状态与装备按钮（打开单屏左右分栏的合并面板）
 ;       ├── SettingsButton (Button) - 设置按钮
-;       ├── StatusButton (Button) - 查看状态按钮（打开状态子面板）
-;       ├── EquipmentButton (Button) - 装备背包按钮（打开装备/背包子面板）
 ;       └── QuitButton (Button) - 返回主菜单按钮
 ;
 ; 使用方式：游戏暂停时作为UIStack的子节点动态加载到CanvasLayer中
@@ -82,23 +81,17 @@ theme_type_variation = &"HeaderMedium"
 layout_mode = 2
 text = "Resume Game"
 
+; PlayerPanelButton (Button) - 状态与装备按钮
+; 打开暂停菜单内的"状态 + 装备/背包"合并面板：左栏状态、右栏已装备与背包
+[node name="PlayerPanelButton" type="Button" parent="VBoxContainer"]
+layout_mode = 2
+text = "Status & Equipment"
+
 ; SettingsButton (Button) - 设置按钮
 ; 打开设置界面
 [node name="SettingsButton" type="Button" parent="VBoxContainer"]
 layout_mode = 2
 text = "Settings"
-
-; StatusButton (Button) - 查看状态按钮
-; 打开暂停菜单内的状态子面板，展示当前属性/技能/护盾
-[node name="StatusButton" type="Button" parent="VBoxContainer"]
-layout_mode = 2
-text = "View Status"
-
-; EquipmentButton (Button) - 装备背包按钮
-; 打开暂停菜单内的装备/背包子面板，展示6个装备槽并可穿戴/卸下背包装备
-[node name="EquipmentButton" type="Button" parent="VBoxContainer"]
-layout_mode = 2
-text = "Equipment"
 
 ; QuitButton (Button) - 返回主菜单按钮
 ; 退出当前游戏，返回主菜单

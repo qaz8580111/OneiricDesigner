@@ -23,6 +23,10 @@ extends "res://scripts/resources/bullet/BulletEffect.gd"
 func _on_stack_grown() -> void:
 	knockback_force += 80.0
 
+## 效果描述：击退力度与持续时间
+func get_effect_description() -> String:
+	return "命中后将敌人击退（力度 %.0f，持续 %.1f 秒）" % [knockback_force, knockback_duration]
+
 ## 应用击退特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例（取其飞行方向作为击退方向）；target - 被击退的目标节点

@@ -62,7 +62,9 @@ var sfx_volume: float = DEFAULT_SFX_VOLUME
 var resolution_index: int = 1
 
 ## 视频设置：是否全屏
-var fullscreen: bool = false
+## 默认 true：与 project.godot 的 window/size/mode=3（启动即全屏）保持口径一致，
+## 否则首次启动全屏、进设置却显示未勾选，玩家一按"应用"就被切回窗口模式
+var fullscreen: bool = true
 
 ## 视频设置：是否开启垂直同步
 var vsync: bool = true
@@ -512,9 +514,9 @@ func _reset_to_defaults() -> void:
 	master_volume = DEFAULT_MASTER_VOLUME
 	music_volume = DEFAULT_MUSIC_VOLUME
 	sfx_volume = DEFAULT_SFX_VOLUME
-	## ---- 视频默认值（默认分辨率=1 → 1920x1280 项目默认） ----
+	## ---- 视频默认值（默认分辨率=1 → 1920x1280 项目默认；默认全屏，与启动模式一致） ----
 	resolution_index = 1
-	fullscreen = false
+	fullscreen = true
 	vsync = true
 	## ---- 语言默认值 ----
 	language_index = 0
@@ -715,7 +717,7 @@ func _load_settings() -> void:
 		sfx_volume       = config.get_value("Settings", "sfx_volume",      DEFAULT_SFX_VOLUME)
 		## ---- 视频设置 ----
 		resolution_index = config.get_value("Settings", "resolution_index",  1)  # 默认1920x1280
-		fullscreen       = config.get_value("Settings", "fullscreen",        false)
+		fullscreen       = config.get_value("Settings", "fullscreen",        true)
 		vsync            = config.get_value("Settings", "vsync",             true)
 		## ---- 语言设置：翻译code → 数组索引 ----
 		var lang: String = config.get_value("Settings", "language",          "zh_CN")

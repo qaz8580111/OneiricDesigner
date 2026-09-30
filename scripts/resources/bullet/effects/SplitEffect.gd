@@ -38,6 +38,10 @@ func _on_stack_grown() -> void:
 	split_count += 1
 	damage_multiplier += 0.05
 
+## 效果描述：分裂子弹数量与伤害系数
+func get_effect_description() -> String:
+	return "子弹销毁时分裂出 %d 发子弹（伤害 %.0f%%）" % [split_count, damage_multiplier * 100.0]
+
 ## 应用分裂特效（重写基类方法）
 ## 触发时机：ON_DESTROY（子弹销毁时，通常在命中致死或超时销毁瞬间）
 ## 参数：bullet - 即将销毁的宿主子弹实例（提供方向/伤害/速度基准与阵营）；target/context 未使用
@@ -72,7 +76,22 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 	var orig_damage: int = bullet_data.get_final_damage()
 	var orig_group: String = bullet._owner_group if "_owner_group" in bullet else ""
 	
-	for i in range(split_count):
+	## 延迟到物理帧外生成分裂弹：
+	## apply() 常在 Bullet._on_body_entered 回调链（物理查询 flush 期间）被触发，
+	## 此刻向场景树 add_child(Area2D) 会报
+	## "Can't change this state while flushing queries"（area_set_shape_disabled）。
+	## 宿主弹随后即 queue_free，故先把所需数值全部读入局部变量再整体延后一帧
+	_spawn_split_bullets.call_deferred(world, bullet.global_position, start_angle, angle_step, split_count, orig_speed, orig_damage, orig_group)
+
+## 延迟生成分裂弹（在物理帧外执行，规避 flush 期间 add_child 报错）
+## 参数：world - 宿主弹所属世界；pos - 分裂原点（宿主弹销毁位置）；
+##       start_angle/angle_step - 已算好的扇形角度参数；count - 分裂数量；
+##       orig_speed/orig_damage - 宿主弹基准数值；orig_group - 阵营
+func _spawn_split_bullets(world: Node2D, pos: Vector2, start_angle: float, angle_step: float, count: int, orig_speed: float, orig_damage: int, orig_group: String) -> void:
+	## 世界可能已随场景切换被释放，延迟执行前须做存活校验
+	if not is_instance_valid(world) or count <= 0:
+		return
+	for i in range(count):
 		## 计算分裂子弹方向
 		var angle: float = start_angle + angle_step * i
 		var dir: Vector2 = Vector2(cos(angle), sin(angle)).normalized()
@@ -80,7 +99,7 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 		## 创建分裂子弹
 		var split_bullet: Area2D = BULLET_SCENE.instantiate()
 		world.add_child(split_bullet)
-		split_bullet.global_position = bullet.global_position
+		split_bullet.global_position = pos
 		## 重置物理插值：add_child后传送必须重置，避免从原点滑移（插值开启时）
 		if split_bullet.has_method("reset_physics_interpolation"):
 			split_bullet.reset_physics_interpolation()
@@ -97,8 +116,9 @@ func apply(bullet: Node2D, target: Node2D = null, context: Dictionary = {}) -> v
 		split_bullet.set_direction(dir)
 		split_bullet.set_owner_group(orig_group)
 		
-		## 连接信号（正常销毁）
-		split_bullet.hit.connect(world._on_bullet_hit.bind(split_bullet))
+		## hit 信号自带(bullet, target)两参，处理器 _on_bullet_hit 亦为两参，不可再 bind
+		split_bullet.hit.connect(world._on_bullet_hit)
+		## destroyed 信号无参，处理器 _on_bullet_destroyed(bullet) 需 bind 回子弹自身
 		split_bullet.destroyed.connect(world._on_bullet_destroyed.bind(split_bullet))
 		
 		## 添加到世界子弹列表

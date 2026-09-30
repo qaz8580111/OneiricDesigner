@@ -30,6 +30,10 @@ func _on_stack_grown() -> void:
 	damage_per_second += 6
 	duration += 0.5
 
+## 效果描述：燃烧持续伤害（每秒伤害 + 持续时间）
+func get_effect_description() -> String:
+	return "命中点燃敌人：每秒 %d 点伤害，持续 %.1f 秒" % [damage_per_second, duration]
+
 ## 应用燃烧特效（重写基类方法）
 ## 触发时机：ON_HIT（命中敌人时）
 ## 参数：bullet - 命中的子弹实例；target - 被命中的目标节点；context - 额外上下文（本特效未使用）

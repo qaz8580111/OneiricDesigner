@@ -140,7 +140,11 @@ func _return_to_pool() -> void:
 	var belongs_to_pool_scene: bool = tree != null and tree.current_scene == _pool_scene
 	if is_inside_tree():
 		## 从播放父节点摘下但不销毁；池节点暂存于"游离"状态，下次activate时重新挂回
-		remove_child(self)
+		## 注意：必须对"父节点"调用 remove_child。写成 self.remove_child(self) 会因参数
+		## 不是自身子节点而抛 "Condition p_child->data.parent != this" 报错，且摘除失败
+		var parent: Node = get_parent()
+		if parent != null:
+			parent.remove_child(self)
 	## 池所属场景已切换则不回收（节点会随旧场景释放，避免新场景持旧引用）
 	if belongs_to_pool_scene:
 		_pool.append(self)

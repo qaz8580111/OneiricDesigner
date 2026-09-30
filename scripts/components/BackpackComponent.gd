@@ -19,6 +19,10 @@ extends Node
 ## 背包内容变化信号（供 HUD / 背包面板刷新显示）
 signal backpack_changed()
 
+## 装备被"丢弃"信号（直接消失、无产出；供 HUD 提示等使用）
+## 参数：index - 被丢弃装备的原始下标
+signal item_dropped(index: int)
+
 ## ========== 成员变量 ==========
 
 ## 归属玩家（由 setup 注入；用于转发查询）
@@ -106,6 +110,88 @@ func clear() -> void:
 		return
 	_items.clear()
 	backpack_changed.emit()
+
+## ========== 公开接口：丢弃 / 分解 ==========
+
+## 丢弃指定下标的装备（直接消失、无任何产出）
+## 参数：index - 物品下标（0-based）
+## 返回：true=丢弃成功；false=下标越界
+func drop_at(index: int) -> bool:
+	if index < 0 or index >= _items.size():
+		return false
+	_items.remove_at(index)
+	item_dropped.emit(index)
+	backpack_changed.emit()
+	return true
+
+## 分解指定下标的装备：产出"梦境碎片 + 同槽位装备碎片"，并移除该装备
+## 参数：index - 物品下标（0-based）
+## 返回：产出明细 { dream, slot, fragment }；下标越界 / 玩家缺失 / 数据异常时返回 {}
+func dismantle_at(index: int) -> Dictionary:
+	if _player == null or index < 0 or index >= _items.size():
+		return {}
+	var data: EquipmentData = _items[index] as EquipmentData
+	if data == null:
+		return {}
+	var result: Dictionary = EquipmentRecycler.get_dismantle_result(data)
+	if result.is_empty():
+		return {}
+	## 先移除装备再发放产出（背包腾位与产出发放互不依赖，避免中途失败导致装备凭空消失）
+	_items.remove_at(index)
+	if _player.has_method("add_dream_fragment"):
+		_player.add_dream_fragment(int(result["dream"]))
+	if _player.has_method("add_equipment_fragment"):
+		_player.add_equipment_fragment(int(result["slot"]), int(result["fragment"]))
+	backpack_changed.emit()
+	return result
+
+## ========== 公开接口：批量分解 ==========
+
+## 统计背包中指定稀有度的装备件数（商店批量分解按钮显示用）
+## 参数：rarity - 目标稀有度（EquipmentData.Rarity，精确匹配）
+## 返回：件数
+func count_by_rarity(rarity: int) -> int:
+	var n: int = 0
+	for data in _items:
+		if data != null and int(data.rarity) == rarity:
+			n += 1
+	return n
+
+## 批量分解指定稀有度的全部装备（商店"一键分解"调用）
+## 参数：rarity - 目标稀有度（EquipmentData.Rarity，精确匹配；史诗不参与以免误删高价值装备）
+## 返回：汇总明细 { "count": 分解件数, "dream": 梦境碎片总数, "fragments": { 槽位: 碎片数 } }
+##       无可分解 / 玩家缺失时返回 {"count": 0, "dream": 0, "fragments": {}}
+## 设计意图：与 dismantle_at 完全同口径（逐件走 EquipmentRecycler.get_dismantle_result），
+##          此处只做"批量筛选 + 产出累加"，避免在商店侧重复实现回收规则
+func dismantle_by_rarity(rarity: int) -> Dictionary:
+	var summary: Dictionary = {"count": 0, "dream": 0, "fragments": {}}
+	if _player == null:
+		return summary
+	## 倒序遍历：边遍历边 remove_at 不会导致下标跳项
+	for i in range(_items.size() - 1, -1, -1):
+		var data: EquipmentData = _items[i] as EquipmentData
+		if data == null or int(data.rarity) != rarity:
+			continue
+		var result: Dictionary = EquipmentRecycler.get_dismantle_result(data)
+		if result.is_empty():
+			continue
+		## 先移除装备再发放产出（与 dismantle_at 一致，避免中途失败导致装备凭空消失）
+		_items.remove_at(i)
+		var dream: int = int(result["dream"])
+		var slot: int = int(result["slot"])
+		var fragment: int = int(result["fragment"])
+		if _player.has_method("add_dream_fragment"):
+			_player.add_dream_fragment(dream)
+		if _player.has_method("add_equipment_fragment"):
+			_player.add_equipment_fragment(slot, fragment)
+		summary["count"] = int(summary["count"]) + 1
+		summary["dream"] = int(summary["dream"]) + dream
+		var frags: Dictionary = summary["fragments"]
+		frags[slot] = int(frags.get(slot, 0)) + fragment
+	## 至少分解了 1 件才广播变化（无产出时避免无谓刷新）
+	if int(summary["count"]) > 0:
+		backpack_changed.emit()
+	return summary
 
 ## ========== 公开接口：穿戴 / 卸下 ==========
 

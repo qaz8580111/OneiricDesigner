@@ -1,0 +1,11 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/temple/EnhanceEquipmentTempleOption.gd" id="1"]
+
+[resource type="EnhanceEquipmentTempleOption" script_class="EnhanceEquipmentTempleOption"]
+script = ExtResource("1")
+option_id = "enhance_equipment"
+display_name = "强化装备"
+description = "随机强化一件已装备装备的属性/被动/主动/护盾，并提示具体强化内容。消耗随次数累加。"
+option_color = Color(0.35, 1.0, 0.55, 1)
+is_gamble = true

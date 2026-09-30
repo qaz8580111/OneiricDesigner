@@ -75,6 +75,10 @@ var animator: CharacterAnimatorClass = null
 ## 玩家当前拥有的梦境碎片数量
 var dream_fragment: int = 0
 
+## 玩家当前拥有的"装备碎片"（下标 = EquipmentData.Slot，值为持有数量）
+## 用途：分解装备时按槽位堆叠产出，可在商店合成同槽位装备（保底稀有）
+var equipment_fragments: Array[int] = [0, 0, 0, 0, 0, 0]
+
 ## 是否启用自动射击（默认开启）
 var auto_shoot: bool = true
 
@@ -131,11 +135,14 @@ var _backpack: Node = null
 ## 减伤率（0~0.9）：装备词条 damage_reduction 汇总值，take_damage 最前统一打折
 var _damage_reduction: float = 0.0
 
-## 当前装备提供的主动技能（EquipmentActiveSkill；null=无）
-var _active_skill: Resource = null
+## 装备提供的全部主动技能（EquipmentActiveSkill；可同时持有多件装备的技能，按穿戴顺序排列）
+var _active_skills: Array[Resource] = []
 
-## 主动技能冷却剩余时间（秒；<=0 表示可用）
-var _active_skill_cd: float = 0.0
+## 各主动技能的冷却剩余时间（秒；下标与 _active_skills 对齐，<=0 表示可用）
+var _active_skill_cds: Array[float] = []
+
+## 当前选中的主动技能下标（Q/E 或手柄 LT/RT 前后切换；无技能时无效）
+var _active_skill_index: int = 0
 
 ## ========== 险胜反馈系统（直播增强："差点死"的紧张感） ==========
 ## 红血存活计时器：进入红血后累计存活时间，存活5秒以上触发险胜奖励
@@ -163,6 +170,10 @@ signal shot(position: Vector2, direction: Vector2, bullet_data: BulletDataClass)
 ## 参数：amount - 当前梦境碎片总数
 signal dream_fragment_changed(amount: int)
 
+## 装备碎片数量变化时发出此信号
+## 参数：slot - 槽位（EquipmentData.Slot），amount - 该槽位当前碎片总数
+signal equipment_fragment_changed(slot: int, amount: int)
+
 ## 玩家血量/护盾状态变化时发出此信号
 ## 参数：state - 包含当前生存状态的字典
 signal health_changed(state: Dictionary)
@@ -173,6 +184,8 @@ signal health_changed(state: Dictionary)
 func _ready() -> void:
 	## 初始化梦境碎片为0
 	dream_fragment = 0
+	## 重置装备碎片（按槽位堆叠，全部清零）
+	equipment_fragments = [0, 0, 0, 0, 0, 0]
 
 	## ========== 相机活动边界（竞技场世界坐标） ==========
 	## Godot4的Camera2D.limit_*钳制的是"视野边缘"的世界坐标（不是相机中心），
@@ -516,7 +529,9 @@ func _on_near_death_reward() -> void:
 		border_parent.z_index = 1000  ## 顶层显示
 		cam.add_child(border_parent)
 
-		var border_color: Color = Color(1.0, 0.9, 0.3, 0.0)
+		## 边框颜色：alpha 必须为 1，可见度统一交给 modulate:a 补间控制
+		## （若 color 的 alpha 为 0，则最终透明度 = color.a × modulate.a 恒为 0，金边不可见）
+		var border_color: Color = Color(1.0, 0.9, 0.3, 1.0)
 		var border_thickness: float = 20.0
 
 		## 上边框
@@ -546,12 +561,15 @@ func _on_near_death_reward() -> void:
 		right.offset_left = -border_thickness
 		border_parent.add_child(right)
 
-		## 闪烁动画：淡入→停留→淡出→销毁
+		## 闪烁动画：淡入(0.3s) → 停留(0.8s) → 淡出(1.2s) → 销毁
+		## 注意：不能用 set_parallel(true)——并行模式下 tween_callback 会与属性补间同时起步，
+		##       导致 queue_free 在动画刚开始时就执行，金边刚出现即消失
+		## 初始 modulate 置为全透明，由补间从 0 淡入
+		border_parent.modulate = Color(1.0, 1.0, 1.0, 0.0)
 		var tw: Tween = border_parent.create_tween()
-		tw.set_parallel(true)
 		tw.tween_property(border_parent, "modulate:a", 1.0, 0.3)
-		tw.tween_property(border_parent, "modulate:a", 0.0, 1.2)\
-			.set_delay(0.8)
+		tw.tween_interval(0.8)
+		tw.tween_property(border_parent, "modulate:a", 0.0, 1.2)
 		tw.tween_callback(border_parent.queue_free)
 
 ## 处理玩家移动逻辑
@@ -756,7 +774,8 @@ func equip_shield(shield_data: Resource) -> void:
 		if AudioManager:
 			AudioManager.play_2d("buff_pickup", global_position, 0.8)
 
-## 强化当前装备护盾叠层（神庙"强化护盾"选项由 RandomShieldTempleOption 调用）
+## 强化当前装备护盾叠层（神庙「强化装备」选项随机命中"护盾"类时由
+## UpgradeManager.enhance_random_equipped_equipment 调用）
 ## 参数：amount - 叠加层数（固定1），突破3层上限
 ## 返回：是否强化成功（无装备护盾时返回 false）
 func boost_shield_stack(amount: int) -> bool:
@@ -764,7 +783,7 @@ func boost_shield_stack(amount: int) -> bool:
 		return equipment_shield.add_stack(amount)
 	return false
 
-## 查询当前是否已装备护盾（神庙"强化护盾"选项预检查用）
+## 查询当前是否已装备护盾（神庙「强化装备」命中护盾类前的候选校验用）
 ## 说明：区别于 EquipmentShieldComponent.has_shield()（耐久>0才算有盾），
 ##       此处只判断"是否装备了护盾数据"——护盾破碎(耐久0)时仍可被神庙强化并补满耐久
 ## 返回：true=已装备护盾，false=未装备
@@ -819,53 +838,120 @@ func unequip_equipment_slot(slot: int) -> bool:
 
 ## ========== 装备主动技能系统（第五维度：弹道构型做成带冷却的主动技） ==========
 
-## 设置当前装备提供的主动技能（EquipmentComponent 装备变更时下发）
-## 参数：skill - EquipmentActiveSkill 资源；null=清空（无装备携带主动技能）
-func set_active_skill(skill: Resource) -> void:
-	_active_skill = skill
-	## 重置冷却：换上技能立即可用（避免还需等待旧技能的剩余冷却）
-	_active_skill_cd = 0.0
+## 设置当前装备提供的全部主动技能（EquipmentComponent 装备变更时下发）
+## 参数：skills - EquipmentActiveSkill 资源数组（按穿戴顺序；可空=无技能）
+## 设计意图：主动技能不再"同时只生效一个"——每件携带技能的装备各贡献一个，
+##          玩家用 Q/E 或手柄 LT/RT 在技能间前后切换，每个技能拥有独立冷却
+func set_active_skills(skills: Array) -> void:
+	_active_skills.clear()
+	_active_skill_cds.clear()
+	for skill in skills:
+		if skill == null:
+			continue
+		_active_skills.append(skill)
+		## 新技能初始冷却清零：换上即可用，避免沿用旧技能的剩余冷却
+		_active_skill_cds.append(0.0)
+	## 选中下标复位并夹取到合法范围（技能数变化后旧下标可能越界）
+	_active_skill_index = 0
+	if not _active_skills.is_empty():
+		_active_skill_index = clampi(_active_skill_index, 0, _active_skills.size() - 1)
 
-## 获取当前主动技能（HUD 冷却显示用）
-## 返回：EquipmentActiveSkill 资源；无则 null
+## 获取全部主动技能（HUD 技能栏展示用）
+## 返回：EquipmentActiveSkill 数组（无技能为空数组）
+func get_active_skills() -> Array[Resource]:
+	return _active_skills
+
+## 获取当前选中的主动技能（HUD 高亮/释放用）
+## 返回：EquipmentActiveSkill 资源；无技能或下标越界时 null
 func get_active_skill() -> Resource:
-	return _active_skill
+	if _active_skill_index < 0 or _active_skill_index >= _active_skills.size():
+		return null
+	return _active_skills[_active_skill_index]
 
-## 获取主动技能冷却剩余比例（HUD 冷却环/图标灰度用）
+## 获取当前选中的主动技能下标（HUD 高亮用）
+## 返回：0 起下标；无技能时返回 0
+func get_active_skill_index() -> int:
+	return _active_skill_index
+
+## 获取指定下标主动技能的冷却剩余比例（HUD 冷却遮罩用）
+## 参数：index - 技能下标
+## 返回：0.0=冷却完毕可释放，1.0=刚进入冷却；越界返回 0.0
+func get_active_skill_cooldown_ratio_at(index: int) -> float:
+	if index < 0 or index >= _active_skills.size() or index >= _active_skill_cds.size():
+		return 0.0
+	var cd: float = maxf(float(_active_skills[index].cooldown), 0.1)
+	return clampf(float(_active_skill_cds[index]) / cd, 0.0, 1.0)
+
+## 获取当前选中主动技能的冷却剩余比例（HUD 冷却遮罩用）
 ## 返回：0.0=冷却完毕可释放，1.0=刚进入冷却
 func get_active_skill_cooldown_ratio() -> float:
-	if _active_skill == null:
-		return 0.0
-	var cd: float = maxf(float(_active_skill.cooldown), 0.1)
-	return clampf(_active_skill_cd / cd, 0.0, 1.0)
+	return get_active_skill_cooldown_ratio_at(_active_skill_index)
 
-## 更新主动技能（每物理帧调用：推进冷却 + 检测 game_skill 输入释放）
+## 获取指定下标主动技能的冷却剩余秒数（HUD 倒计时文字用）
+## 参数：index - 技能下标
+## 返回：剩余秒数；越界返回 0.0
+func get_active_skill_cooldown_remaining_at(index: int) -> float:
+	if index < 0 or index >= _active_skill_cds.size():
+		return 0.0
+	return maxf(float(_active_skill_cds[index]), 0.0)
+
+## 获取当前选中主动技能的冷却剩余秒数（HUD 倒计时文字用）
+func get_active_skill_cooldown_remaining() -> float:
+	return get_active_skill_cooldown_remaining_at(_active_skill_index)
+
+## 更新主动技能（每物理帧调用：推进全部冷却 + 切换选中 + 检测 game_skill 释放）
 ## 参数：delta - 帧间隔时间（秒）
 func _update_active_skill(delta: float) -> void:
-	## 冷却推进（<=0 表示可用）
-	if _active_skill_cd > 0.0:
-		_active_skill_cd = maxf(_active_skill_cd - delta, 0.0)
-	## 无技能 / 仍在冷却 / 非游戏进行中 → 不响应输入
-	if _active_skill == null or _active_skill_cd > 0.0:
+	## 冷却推进（逐个推进，<=0 表示可用）
+	for i in _active_skill_cds.size():
+		if _active_skill_cds[i] > 0.0:
+			_active_skill_cds[i] = maxf(_active_skill_cds[i] - delta, 0.0)
+	## 无技能 / 非游戏进行中 → 不响应输入（神庙/商店面板会暂停游戏，天然屏蔽误触发）
+	if _active_skills.is_empty() or not GameManager.is_playing():
 		return
-	if not GameManager.is_playing():
-		return
+	## 多技能时前后切换选中：Q/E 或手柄 LT/RT（game_choice_prev/next，GAMEPLAY 已放行）
 	## 输入经 InputManager 读取（禁止业务层直接读 Input），消费后释放
+	if _active_skills.size() > 1:
+		if InputManager.is_action_just_pressed_safe("game_choice_prev"):
+			_switch_active_skill(-1)
+		elif InputManager.is_action_just_pressed_safe("game_choice_next"):
+			_switch_active_skill(1)
+	## 释放当前选中技能（冷却中按下不产生任何效果）
 	if InputManager.is_action_just_pressed_safe("game_skill"):
 		_cast_active_skill()
 
-## 释放主动技能：以临时子弹数据（携带技能的弹道构型）发射一次
+## 切换当前选中的主动技能（环绕循环）
+## 参数：step - 步进方向（-1=上一个 / +1=下一个）
+func _switch_active_skill(step: int) -> void:
+	var count: int = _active_skills.size()
+	if count <= 1:
+		return
+	## 手动取模保证下标始终落在 [0, count)
+	_active_skill_index = (_active_skill_index + step + count) % count
+
+## 释放当前选中的主动技能：以临时子弹数据（携带技能的弹道构型）发射一次
 ## 设计：复用 shot 信号 + GameWorld.spawn_shot_pattern，无需新增子弹生成通道（解耦核心）
 func _cast_active_skill() -> void:
+	var skill: Resource = get_active_skill()
 	## 技能/构型/子弹副本任一缺失则不释放
-	if _active_skill == null or _active_skill.shot_pattern == null or _private_bullet_data == null:
+	if skill == null or skill.shot_pattern == null or _private_bullet_data == null:
+		return
+	## 下标越界或仍在冷却中 → 不释放
+	if _active_skill_index < 0 or _active_skill_index >= _active_skill_cds.size():
+		return
+	if _active_skill_cds[_active_skill_index] > 0.0:
 		return
 	## 进入冷却（下限保护，避免0冷却导致每帧释放）
-	_active_skill_cd = maxf(float(_active_skill.cooldown), 0.1)
+	_active_skill_cds[_active_skill_index] = maxf(float(skill.cooldown), 0.1)
 	## 构造临时子弹数据：深拷贝私有副本（保留伤害/特效），仅替换弹道构型为技能的构型
 	## 深拷贝使技能弹道拥有独立特效实例，避免与普通射击共享运行时状态
 	var temp_data: BulletDataClass = _private_bullet_data.duplicate(true)
-	temp_data.shot_pattern = _active_skill.shot_pattern
+	temp_data.shot_pattern = skill.shot_pattern
+	## 技能整轮伤害倍率：放大临时子弹的伤害基数，GameWorld 守恒分配时按放大后的基数分摊到各发
+	## （构型形状/发数不变，仅提升整轮强度；倍率为 1.0 时与原行为完全一致）
+	var skill_damage_mult: float = maxf(float(skill.damage_multiplier), 1.0)
+	temp_data.damage = maxi(
+		int(round(float(_private_bullet_data.damage) * skill_damage_mult)), 1)
 	## 释放反馈：音效 + 攻击动画
 	if AudioManager:
 		AudioManager.play_2d("player_shoot", global_position, 0.9)
@@ -903,6 +989,36 @@ func spend_dream_fragment(amount: int) -> bool:
 	dream_fragment -= amount
 	## 发出信号通知UI更新显示
 	dream_fragment_changed.emit(dream_fragment)
+	return true
+
+## ========== 装备碎片系统（分解产出 / 商店合成消耗） ==========
+
+## 添加装备碎片（分解装备时调用）
+## 参数：slot - 槽位（EquipmentData.Slot）；amount - 数量（<=0 或越界时忽略）
+func add_equipment_fragment(slot: int, amount: int) -> void:
+	if amount <= 0 or slot < 0 or slot >= equipment_fragments.size():
+		return
+	equipment_fragments[slot] += amount
+	equipment_fragment_changed.emit(slot, equipment_fragments[slot])
+
+## 获取指定槽位的装备碎片数量
+## 参数：slot - 槽位（EquipmentData.Slot）
+## 返回：该槽位持有数量；越界时返回 0
+func get_equipment_fragment(slot: int) -> int:
+	if slot < 0 or slot >= equipment_fragments.size():
+		return 0
+	return equipment_fragments[slot]
+
+## 扣除指定槽位的装备碎片（商店合成支付专用）
+## 参数：slot - 槽位；amount - 数量
+## 返回：true=扣除成功；false=数量非法或碎片不足
+func spend_equipment_fragment(slot: int, amount: int) -> bool:
+	if amount <= 0 or slot < 0 or slot >= equipment_fragments.size():
+		return false
+	if equipment_fragments[slot] < amount:
+		return false
+	equipment_fragments[slot] -= amount
+	equipment_fragment_changed.emit(slot, equipment_fragments[slot])
 	return true
 
 ## 获取玩家当前生存状态（对外接口）

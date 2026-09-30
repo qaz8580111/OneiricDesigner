@@ -10,5 +10,5 @@ display_name = "震荡冲击"
 description = "子弹命中击退敌人，拉开安全距离；每级击退力度+80"
 rarity = 0
 max_stacks = 5
-equip_slots = Array[int]([0, 4, 5])
+equip_slots = Array[int]([1, 2, 3, 5])
 bullet_effect = ExtResource("2")

@@ -82,18 +82,19 @@ var translations: Dictionary = {
 		"BUTTON_RESUME": "继续游戏",
 		"BUTTON_QUIT_TO_MENU": "返回主菜单",
 		
-		## 暂停菜单 - 查看状态子面板
-		"BUTTON_VIEW_STATUS": "查看状态",
-		"STATUS_TITLE": "当前状态",
+		## 暂停菜单 - 状态与装备合并面板（左栏状态 / 右栏已装备 + 背包）
+		"BUTTON_PLAYER_PANEL": "状态与装备",
+		"PLAYER_PANEL_TITLE": "状态与装备",
+		"STATUS_TITLE": "状态",
 		"STATUS_HEALTH": "核心血",
 		"STATUS_ATTR": "属性",
 		"STATUS_SKILL": "技能",
+		"STATUS_PASSIVE_SKILL": "被动技能",
+		"STATUS_ACTIVE_SKILL": "主动技能",
 		"STATUS_SHIELD": "护盾",
 		"STATUS_NONE": "暂无",
 		
-		## 暂停菜单 - 装备/背包子面板
-		"BUTTON_EQUIPMENT": "装备背包",
-		"EQUIPMENT_TITLE": "装备与背包",
+		## 暂停菜单 - 合并面板右栏（已装备 / 背包）
 		"EQUIPMENT_SLOTS": "已装备",
 		"EQUIPMENT_BACKPACK": "背包",
 		"EQUIPMENT_EMPTY": "空",
@@ -101,7 +102,17 @@ var translations: Dictionary = {
 		"EQUIPMENT_EFFECT": "特效",
 		"EQUIPMENT_ACTIVE": "主动技",
 		"EQUIPMENT_SHIELD_LABEL": "护盾",
+		"EQUIPMENT_DISMANTLE": "分解",
+		"EQUIPMENT_DROP": "丢弃",
+		"EQUIPMENT_FRAGMENTS": "装备碎片",
+		"EQUIPMENT_BULK_COMMON": "分解全部普通",
+		"EQUIPMENT_BULK_RARE": "分解全部稀有",
+		"EQUIPMENT_BULK_CONFIRM": "再按一次确认 (%d)",
 		"EQUIPMENT_HINT": "A 穿戴 / 卸下 · B 返回",
+		## 装备对比弹窗（聚焦背包装备时，与同槽位已装备件对比差异）
+		"EQUIPMENT_COMPARE": "装备对比",
+		"EQUIPMENT_COMPARE_CURRENT": "当前",
+		"EQUIPMENT_COMPARE_CANDIDATE": "待装",
 		
 		## 游戏信息翻译
 		"GAME_SEED": "种子",
@@ -199,18 +210,19 @@ var translations: Dictionary = {
 		"BUTTON_RESUME": "Resume Game",
 		"BUTTON_QUIT_TO_MENU": "Quit to Menu",
 		
-		## 暂停菜单 - 查看状态子面板（英文）
-		"BUTTON_VIEW_STATUS": "View Status",
-		"STATUS_TITLE": "Current Status",
+		## 暂停菜单 - 状态与装备合并面板（英文）
+		"BUTTON_PLAYER_PANEL": "Status & Equipment",
+		"PLAYER_PANEL_TITLE": "Status & Equipment",
+		"STATUS_TITLE": "Status",
 		"STATUS_HEALTH": "Core HP",
 		"STATUS_ATTR": "Attributes",
 		"STATUS_SKILL": "Skills",
+		"STATUS_PASSIVE_SKILL": "Passive",
+		"STATUS_ACTIVE_SKILL": "Active",
 		"STATUS_SHIELD": "Shield",
 		"STATUS_NONE": "None",
 		
-		## 暂停菜单 - 装备/背包子面板（英文）
-		"BUTTON_EQUIPMENT": "Equipment",
-		"EQUIPMENT_TITLE": "Equipment & Backpack",
+		## 暂停菜单 - 合并面板右栏（英文）
 		"EQUIPMENT_SLOTS": "Equipped",
 		"EQUIPMENT_BACKPACK": "Backpack",
 		"EQUIPMENT_EMPTY": "Empty",
@@ -218,7 +230,17 @@ var translations: Dictionary = {
 		"EQUIPMENT_EFFECT": "Effect",
 		"EQUIPMENT_ACTIVE": "Active",
 		"EQUIPMENT_SHIELD_LABEL": "Shield",
+		"EQUIPMENT_DISMANTLE": "Dismantle",
+		"EQUIPMENT_DROP": "Drop",
+		"EQUIPMENT_FRAGMENTS": "Equipment Shards",
+		"EQUIPMENT_BULK_COMMON": "Dismantle All Common",
+		"EQUIPMENT_BULK_RARE": "Dismantle All Rare",
+		"EQUIPMENT_BULK_CONFIRM": "Press Again to Confirm (%d)",
 		"EQUIPMENT_HINT": "A Equip / Unequip · B Back",
+		## 装备对比弹窗（英文）
+		"EQUIPMENT_COMPARE": "Compare",
+		"EQUIPMENT_COMPARE_CURRENT": "Current",
+		"EQUIPMENT_COMPARE_CANDIDATE": "Candidate",
 		
 		## 游戏信息翻译（英文）
 		"GAME_SEED": "Seed",

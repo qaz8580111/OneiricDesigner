@@ -1,13 +1,14 @@
 ## Shop.gd - 主场景中央商店世界物体
-## 职责：商店的视觉呈现、商品随机刷新、玩家交互、购买面板管理
+## 职责：商店的视觉呈现、固定服务构造、玩家交互、购买面板管理
 ## 继承：Area2D（与 Temple/PickUp 同类的世界交互物体）
-## 出现方式：GameWorld 在游戏进行满 5 分钟后于竞技场中心 Vector2.ZERO 生成，之后永久存在不消失
+## 出现方式：GameWorld 在游戏开始时于竞技场中心 Vector2.ZERO 生成，之后永久存在不消失
 ## 交互方式：玩家靠近后按 E（GameWorld 统一处理 E 键，优先级神庙 > 商店 > 拾取物）→ 调用 interact(player)
 ## 进入规则：进入商店后游戏暂停（GameManager.pause_game），关闭面板后恢复
-## 商品规则：每 60 秒随机刷新一次 3 件商品，商品全部落在现有装备体系内
-##          （随机装备 / 血包），价格体系见 docs 商品清单
+## 商品规则：固定三大服务（恢复健康 / 随机装备 / 合成装备），不做随机刷新——
+##          恢复健康 = 100 梦境碎片直接满血；随机装备 = 200 梦境碎片获得随机稀有度随机装备；
+##          合成装备 = 面板子视图，消耗各槽位装备碎片合成保底稀有装备
 ## 视觉方案：_draw() 程序化绘制（柜台 + 顶棚 + 发光宝石，脉冲呼吸），与主题皮肤无关
-## 扩展性：商品生成集中在 _roll_products/_generate_product，新增商品种类只需加一个填充分支
+## 扩展性：服务构造集中在 _build_services，新增服务只需加一个 _make_* 分支
 extends Area2D
 
 ## ========== 预加载资源 ==========
@@ -16,30 +17,23 @@ extends Area2D
 const ShopProductClass = preload("res://scripts/resources/shop/ShopProduct.gd")
 ## 商店面板脚本（纯代码 UI）
 const SHOP_PANEL_SCRIPT = preload("res://scripts/ui/ShopPanel.gd")
+## 装备回收/合成数值口径（合成消耗碎片数、保底稀有度）
+const EquipmentRecyclerLib = preload("res://scripts/resources/equipment/EquipmentRecycler.gd")
 
 ## ========== 常量 ==========
 
 ## 交互半径（玩家与商店距离小于此值时可交互）
 const INTERACT_RANGE: float = 64.0
 
-## 商品刷新间隔（秒）：每 60 秒随机一次商品
-const REFRESH_INTERVAL: float = 60.0
-
-## 每次刷新的商品数量（横向 3 件，面板可完整排开）
-const PRODUCT_COUNT: int = 3
-
-## ---------- 价格体系（梦境碎片，与 docs 商品清单保持一致） ----------
-## 装备类：按稀有度分档
-const PRICE_EQUIPMENT_COMMON: int = 60
-const PRICE_EQUIPMENT_RARE: int = 120
-const PRICE_EQUIPMENT_EPIC: int = 220
-## 血包：固定恢复量 + 固定价格
-const PRICE_HEALTH: int = 20
-const HEALTH_AMOUNT: int = 30
+## ---------- 价格体系（梦境碎片） ----------
+## 恢复健康：消耗后直接把核心血补满
+const PRICE_HEAL_FULL: int = 100
+## 随机装备：消耗后获得一件随机稀有度的随机装备
+const PRICE_RANDOM_EQUIPMENT: int = 200
 
 ## ========== 成员变量 ==========
 
-## 当前货架商品（ShopProduct 数组，购买后不消失，直到下次刷新）
+## 当前固定服务列表（ShopProduct 数组，游戏开始即固定，不刷新）
 var _products: Array = []
 
 ## 面板实例（交互期间存在）
@@ -53,9 +47,6 @@ var _open: bool = false
 
 ## 本商店是否主动暂停了游戏（关闭面板时据此恢复，避免误恢复暂停菜单等其他暂停源）
 var _paused_by_shop: bool = false
-
-## 商品刷新计时器（累计到 REFRESH_INTERVAL 触发刷新）
-var _refresh_timer: float = 0.0
 
 ## 玩家是否在交互范围内（_process 中节流探测缓存，_draw 只读缓存）
 var _player_near: bool = false
@@ -73,13 +64,13 @@ const REDRAW_INTERVAL: float = 1.0 / 30.0
 
 ## ========== 生命周期方法 ==========
 
-## _ready() - 加入场景树：分组、首次上货、入场动画
+## _ready() - 加入场景树：分组、构造固定服务、入场动画
 func _ready() -> void:
 	## 加入 shop 分组（GameWorld/其他系统可按组查找）
 	add_to_group("shop")
 
-	## 首次随机上货（生成即有一批商品）
-	_roll_products()
+	## 构造固定服务（游戏开始即固定，不再随机刷新）
+	_build_services()
 
 	## 入场动画：从透明 + 缩小弹出
 	modulate.a = 0.0
@@ -89,15 +80,8 @@ func _ready() -> void:
 	tween.tween_property(self, "modulate:a", 1.0, 0.3)
 	tween.tween_property(self, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
-## _process() - 商品刷新计时、交互范围探测、视觉脉冲（均节流，降低开销）
+## _process() - 交互范围探测、视觉脉冲（均节流，降低开销）
 func _process(delta: float) -> void:
-	## 打开面板期间游戏已暂停，本节点 PAUSABLE 不会继续 _process；
-	## 因此刷新计时天然只在"非暂停的战斗时间"内推进，符合"每 1 分钟随机一次"
-	_refresh_timer += delta
-	if _refresh_timer >= REFRESH_INTERVAL:
-		_refresh_timer = 0.0
-		_roll_products()
-
 	## 交互范围探测（节流 0.1 秒）
 	if not _open:
 		_near_check_timer -= delta
@@ -179,90 +163,53 @@ func _is_player_near() -> bool:
 		return false
 	return global_position.distance_to(player.global_position) <= INTERACT_RANGE
 
-## 随机刷新货架商品（PRODUCT_COUNT 件）
-func _roll_products() -> void:
+## 构造商店的固定服务列表（游戏开始即固定，不做随机刷新）
+## 说明：合成装备不是 ShopProduct，由 ShopPanel 的合成子视图承载（走 craft_requested）
+func _build_services() -> void:
 	_products.clear()
-	for i in range(PRODUCT_COUNT):
-		_products.append(_generate_product())
+	_products.append(_make_heal_service())
+	_products.append(_make_random_equipment_service())
 
-## 生成一件商品：随机品类 → 从现有体系填充载荷 + 按价格体系定价
-func _generate_product() -> ShopProductClass:
+## 构造「恢复健康」服务：消耗梦境碎片，直接把核心血补满
+func _make_heal_service() -> ShopProductClass:
 	var product: ShopProductClass = ShopProductClass.new()
-	## 品类随机分布：装备 80% / 血包 20%
-	var roll: float = RandomManager.randf()
-	if roll < 0.8:
-		_fill_equipment_product(product)
-	else:
-		_fill_health_product(product)
+	product.product_id = "heal_full"
+	product.display_name = "恢复健康"
+	product.description = "消耗 %d 梦境碎片，立即将核心血回满" % PRICE_HEAL_FULL
+	product.product_color = Color(1.0, 0.45, 0.45, 1.0)
+	product.product_type = ShopProductClass.ProductType.HEAL_FULL
+	product.price = PRICE_HEAL_FULL
 	return product
 
-## 填充装备类商品（随机生成一件装备，放入背包）
-func _fill_equipment_product(product: ShopProductClass) -> void:
-	var eq: Resource = UpgradeManager.generate_equipment()
-	if eq == null:
-		## 装备生成失败时回退为血包，保证商店永远有货
-		_fill_health_product(product)
-		return
-	product.product_type = ShopProductClass.ProductType.EQUIPMENT
-	product.product_id = "eq_" + str(eq.equipment_id)
-	product.display_name = str(eq.display_name)
-	product.description = _equipment_description(eq)
-	product.price = _equipment_price(int(eq.rarity))
-	product.product_color = _rarity_color(int(eq.rarity))
-	product.equipment_data = eq
+## 构造「随机装备」服务：消耗梦境碎片，获得一件随机稀有度的随机装备（附概率分布说明）
+func _make_random_equipment_service() -> ShopProductClass:
+	var product: ShopProductClass = ShopProductClass.new()
+	product.product_id = "random_equipment"
+	product.display_name = "随机装备"
+	product.description = "消耗 %d 梦境碎片，随机获得一件随机稀有度装备\n%s" \
+		% [PRICE_RANDOM_EQUIPMENT, _rarity_distribution_text()]
+	product.product_color = Color(0.7, 0.55, 1.0, 1.0)
+	product.product_type = ShopProductClass.ProductType.RANDOM_EQUIPMENT
+	product.price = PRICE_RANDOM_EQUIPMENT
+	return product
 
-## 组装装备商品描述（词条概览 + 特效数量 + 护盾/主动技能提示）
-## 参数：eq - EquipmentData 资源
-func _equipment_description(eq: Resource) -> String:
+## 拼接装备稀有度概率分布文案
+## 数据源：UpgradeManager.EQUIPMENT_RARITY_WEIGHTS（权重归一化为百分比，避免两处硬编码不同步）
+## 返回：如 "稀有度概率：普通 76% / 稀有 20% / 史诗 4%"；权重缺失时返回空串
+func _rarity_distribution_text() -> String:
+	var weights: Array = UpgradeManager.EQUIPMENT_RARITY_WEIGHTS
+	var total: float = 0.0
+	for w in weights:
+		total += float(w)
+	if total <= 0.0:
+		return ""
+	## 稀有度中文名（下标 = EquipmentData.Rarity：0普通 / 1稀有 / 2史诗）
+	var names: PackedStringArray = ["普通", "稀有", "史诗"]
 	var parts: PackedStringArray = []
-	## 词条概览：最多展示前 2 条，其余以"等N条"概括
-	var affixes: Array = eq.get("affixes") if "affixes" in eq else []
-	if affixes.size() > 0:
-		var affix_texts: PackedStringArray = []
-		for i in range(mini(2, affixes.size())):
-			var affix: Resource = affixes[i]
-			affix_texts.append(str(affix.get_display_text()))
-		var affix_line: String = "词条：" + "、".join(affix_texts)
-		if affixes.size() > 2:
-			affix_line += " 等%d条" % affixes.size()
-		parts.append(affix_line)
-	## 特效数量提示
-	var effects: Array = eq.get("bullet_effects") if "bullet_effects" in eq else []
-	if effects.size() > 0:
-		parts.append("特效 x%d" % effects.size())
-	## 护盾提示
-	if eq.get("shield_data") != null:
-		parts.append("附带护盾")
-	## 主动技能提示
-	if eq.has_method("has_active_skill") and eq.has_active_skill():
-		parts.append("附带主动技能")
-	if parts.is_empty():
-		parts.append("一件普通的梦境装备")
-	return "\n".join(parts)
-
-## 按稀有度返回装备价格（0=普通 / 1=稀有 / 2=史诗）
-func _equipment_price(rarity: int) -> int:
-	match rarity:
-		2: return PRICE_EQUIPMENT_EPIC
-		1: return PRICE_EQUIPMENT_RARE
-		_: return PRICE_EQUIPMENT_COMMON
-
-## 填充血包商品（固定恢复量 + 固定价格）
-func _fill_health_product(product: ShopProductClass) -> void:
-	product.product_type = ShopProductClass.ProductType.HEALTH
-	product.product_id = "health_pack"
-	product.display_name = "梦境血包"
-	product.description = "立即恢复 %d 点核心血量" % HEALTH_AMOUNT
-	product.price = PRICE_HEALTH
-	product.product_color = Color(1.0, 0.45, 0.45, 1.0)
-	product.heal_amount = HEALTH_AMOUNT
-
-## 按稀有度返回展示颜色（0=普通白 / 1=稀有蓝 / 2=史诗紫）
-func _rarity_color(rarity: int) -> Color:
-	match rarity:
-		2: return Color(0.8, 0.4, 1.0)
-		1: return Color(0.4, 0.7, 1.0)
-		_: return Color(0.9, 0.9, 0.9)
+	for i in range(weights.size()):
+		var label: String = names[i] if i < names.size() else str(i)
+		parts.append("%s %d%%" % [label, int(round(float(weights[i]) / total * 100.0))])
+	return "稀有度概率：" + " / ".join(parts)
 
 ## 打开购买面板（专用 CanvasLayer 隔离相机，与神庙/升级面板同方案）
 func _open_panel() -> void:
@@ -278,12 +225,13 @@ func _open_panel() -> void:
 	_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	_overlay_layer.add_child(_panel)
 
-	## 传入玩家引用与当前货架商品（面板需显示碎片余额、处理购买点击）
+	## 传入玩家引用与固定服务列表（面板需显示碎片余额、处理购买点击）
 	var player: Node = _get_player()
 	_panel.setup(_products, player)
 
-	## 玩家选定购买 → 扣款并应用；请求关闭 → 恢复游戏
+	## 玩家选定购买 → 扣款并应用；请求合成 → 消耗装备碎片生成装备；请求关闭 → 恢复游戏
 	_panel.product_selected.connect(_on_product_selected)
+	_panel.craft_requested.connect(_on_craft_requested)
 	_panel.close_requested.connect(_close_panel)
 
 	## 暂停战斗（状态机守卫保证只在 PLAYING 时生效）
@@ -295,7 +243,7 @@ func _open_panel() -> void:
 	## push 自带 0.2s 屏蔽期，防止按 E 交互的同一次按键立刻触发购买/关闭
 	InputManager.push_context("SHOP_CHOICE")
 
-## 玩家选定购买商品（响应 ShopPanel.product_selected）
+## 玩家选定购买（响应 ShopPanel.product_selected）
 ## 参数：product - 被选中的商品
 func _on_product_selected(product: Resource) -> void:
 	var player: Node = _get_player()
@@ -307,8 +255,13 @@ func _on_product_selected(product: Resource) -> void:
 		_notify_failure()
 		return
 
-	## 装备类且背包已满：直接拒绝（避免扣款后装备无处安放而丢失）
-	if int(product.product_type) == ShopProductClass.ProductType.EQUIPMENT and _is_backpack_full(player):
+	## 恢复健康且已满血：无需购买，直接拒绝（避免白扣碎片）
+	if int(product.product_type) == ShopProductClass.ProductType.HEAL_FULL and _is_fully_healed(player):
+		_notify_failure()
+		return
+
+	## 随机装备且背包已满：直接拒绝（避免扣款后装备无处安放而丢失）
+	if int(product.product_type) == ShopProductClass.ProductType.RANDOM_EQUIPMENT and _is_backpack_full(player):
 		_notify_failure()
 		return
 
@@ -329,12 +282,76 @@ func _on_product_selected(product: Resource) -> void:
 	if _panel != null and _panel.has_method("refresh_after_purchase"):
 		_panel.refresh_after_purchase()
 
-## 购买失败提示（余额不足 / 背包已满 / 发货失败）：播放提示音并让面板标题闪红
+## 玩家请求合成装备（响应 ShopPanel.craft_requested）
+## 流程：校验装备碎片/梦境碎片 → 校验背包容量 → 生成保底稀有装备 → 扣两种货币 → 入背包（失败全额回退）→ 结果反馈
+## 参数：slot - 目标槽位（EquipmentData.Slot）
+func _on_craft_requested(slot: int) -> void:
+	var player: Node = _get_player()
+	if player == null:
+		return
+
+	var frag_cost: int = int(EquipmentRecyclerLib.CRAFT_FRAGMENT_COST)
+	var dream_cost: int = int(EquipmentRecyclerLib.CRAFT_DREAM_COST)
+	## 装备碎片不足：只提示，不生成不扣费
+	if not player.has_method("get_equipment_fragment") or int(player.get_equipment_fragment(slot)) < frag_cost:
+		_notify_failure()
+		return
+	## 梦境碎片不足：同上，不生成不扣费
+	if int(player.dream_fragment) < dream_cost:
+		_notify_failure()
+		return
+	## 背包已满：直接拒绝（避免扣费后装备无处安放而丢失）
+	if _is_backpack_full(player):
+		_notify_failure()
+		return
+
+	## 先生成装备（生成失败不扣任何货币）
+	var eq: Resource = UpgradeManager.generate_equipment_with_floor(slot, int(EquipmentRecyclerLib.CRAFT_RARITY_FLOOR))
+	if eq == null:
+		_notify_failure()
+		return
+	## 扣装备碎片
+	if not player.spend_equipment_fragment(slot, frag_cost):
+		_notify_failure()
+		return
+	## 扣梦境碎片：失败则退还已扣的装备碎片
+	if not player.spend_dream_fragment(dream_cost):
+		if player.has_method("add_equipment_fragment"):
+			player.add_equipment_fragment(slot, frag_cost)
+		_notify_failure()
+		return
+	## 入背包失败（如竞态满）→ 退还两种货币兜底，保证玩家不白损失
+	if not player.add_equipment_to_backpack(eq):
+		if player.has_method("add_equipment_fragment"):
+			player.add_equipment_fragment(slot, frag_cost)
+		if player.has_method("add_dream_fragment"):
+			player.add_dream_fragment(dream_cost)
+		_notify_failure()
+		return
+
+	## 合成成功音效（沿用强化/购买的反馈音）
+	if AudioManager:
+		AudioManager.play("upgrade_pick", 0.9)
+	## 刷新面板上的碎片余额与合成按钮可用态
+	if _panel != null and _panel.has_method("refresh_after_craft"):
+		_panel.refresh_after_craft()
+	## 展示合成结果反馈（与神庙融合同款结果视图，让玩家看清合成了什么）
+	if _panel != null and _panel.has_method("show_craft_result"):
+		_panel.show_craft_result("合成成功！\n" + UpgradeManager.build_obtain_message(eq))
+
+## 购买/合成失败提示（余额不足 / 已满血 / 背包已满 / 发货失败）：播放提示音并让面板标题闪红
 func _notify_failure() -> void:
 	if AudioManager:
 		AudioManager.play("ui_click", 0.6)
-	if _panel != null and _panel.has_method("notify_insufficient"):
-		_panel.notify_insufficient()
+	if _panel != null and _panel.has_method("notify_failure"):
+		_panel.notify_failure()
+
+## 玩家是否已满血（无生存状态接口时视为未满，交由 apply 兜底判定）
+func _is_fully_healed(player: Node) -> bool:
+	if player == null or not player.has_method("get_survival_state"):
+		return false
+	var state: Dictionary = player.get_survival_state()
+	return float(state.get("core", 0.0)) >= float(state.get("max_core", 0.0))
 
 ## 玩家背包是否已满（无背包组件时视为未满）
 func _is_backpack_full(player: Node) -> bool:

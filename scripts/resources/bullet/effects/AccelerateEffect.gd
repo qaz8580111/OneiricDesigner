@@ -25,6 +25,10 @@ func _on_stack_grown() -> void:
 	acceleration += 20.0
 	max_speed_mult += 0.4
 
+## 效果描述：把"加速特效"翻译成具体数值（供装备面板展示词条的实际效果）
+func get_effect_description() -> String:
+	return "飞行中持续加速 +%.0f/秒，最高达原速 %.1f 倍" % [acceleration, max_speed_mult]
+
 ## 应用加速特效（重写基类方法）
 ## 触发时机：ON_TRAVEL（飞行中每物理帧触发一次，性能热点路径）
 ## 参数：bullet - 飞行中的子弹实例；target/context 对本特效无意义（始终为null/空）

@@ -80,16 +80,24 @@ func _build_frames_sprite() -> void:
 		_anim_sprite.animation_finished.connect(_on_frames_animation_finished)
 	## 换肤：替换帧资源并显示
 	_anim_sprite.sprite_frames = _skin.frames
-	if _sprite != null:
-		_sprite.visible = false
-	## 序列帧尺寸对齐：按皮肤目标尺寸缩放（美术帧尺寸可能与占位尺寸不同）
-	## 只在 idle 槽位存在时对齐（避免查询不存在的动画报错）
+	## 判定序列帧资源是否可用：必须有 idle 槽、帧数>0、首帧纹理非空且宽>0
+	## 关键防护：资源异常时若隐藏占位精灵，会导致整个角色隐形（线上事故排查清单条目）
+	var idle_ready: bool = false
+	var idle_tex: Texture2D = null
 	if _skin.frames != null and _skin.frames.has_animation("idle") \
 			and _skin.frames.get_frame_count("idle") > 0:
-		var tex: Texture2D = _skin.frames.get_frame_texture("idle", 0)
-		if tex != null and tex.get_width() > 0:
-			var fit_scale: float = _skin.target_size.x / float(tex.get_width())
-			_anim_sprite.scale = Vector2(fit_scale, fit_scale)
+		idle_tex = _skin.frames.get_frame_texture("idle", 0)
+		idle_ready = idle_tex != null and idle_tex.get_width() > 0
+	## 仅当序列帧确实可渲染时，才隐藏占位精灵（否则保持占位可见，避免整角色隐形）
+	if _sprite != null:
+		_sprite.visible = not idle_ready
+	if _anim_sprite != null:
+		_anim_sprite.visible = idle_ready
+	if not idle_ready:
+		return
+	## 序列帧尺寸对齐：按皮肤目标尺寸缩放（美术帧尺寸可能与占位尺寸不同）
+	var fit_scale: float = _skin.target_size.x / float(idle_tex.get_width())
+	_anim_sprite.scale = Vector2(fit_scale, fit_scale)
 	## 关键：创建后立即播放 idle，否则 AnimatedSprite2D 默认 animation 为 "default"（不存在），
 	## 启动时 set_moving(false) 因状态未变直接 return，不会触发 idle 播放 → 角色不可见
 	_play_frames("idle")

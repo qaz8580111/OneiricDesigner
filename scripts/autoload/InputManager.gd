@@ -119,8 +119,9 @@ func _input(event: InputEvent) -> void:
 		_mouse_left_pressed = event.pressed
 		## 仅在 GAMEPLAY 上下文中将鼠标左键按下缓存为 game_shoot 动作
 		## 铁律：鼠标左键在 project.godot 中只绑定 game_shoot，绝不能再绑 game_interact——
-		## 否则战斗中开枪会同时触发拾取，路过掉落物时被"自动捡走"（玩家没按E却拾取）。
-		## 手动拾取的 game_interact 只用 E/空格/Enter/手柄A（见 project.godot 绑定）
+		## 否则战斗中开枪会同时触发拾取，路过掉落物时被"自动捡走"（玩家没按空格却拾取）。
+		## 手动拾取的 game_interact 只用 空格/Enter/手柄A（见 project.godot 绑定）；
+		## 原键盘 E 已解绑，改作 GAMEPLAY 下主动技能切换 game_choice_next
 		if event.pressed and get_current_context() == "GAMEPLAY":
 			_just_pressed_actions["game_shoot"] = true
 		## 注意：不使用 return，让事件继续传递给UI系统
@@ -427,7 +428,9 @@ func _is_action_allowed_in_context(action: String) -> bool:
 	var allowed_actions: Dictionary = {
 		# game_pause：手柄START/键盘Pause呼出暂停；瞄准为网关内轮询轴，game_aim_仅作文档化标注
 		# game_skill：装备主动技能释放（武器/戒指/法宝的弹道构型主动技）
-		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot", "game_skill", "game_pause", "game_aim_"],
+		# game_choice_prev/next：GAMEPLAY 内用于在多个主动技能间前后切换（键盘Q/E、手柄LT/RT）
+		"GAMEPLAY": ["game_move_", "game_interact", "ui_cancel", "game_shoot", "game_skill",
+			"game_pause", "game_aim_", "game_choice_prev", "game_choice_next"],
 		# game_pause：暂停菜单中再按START恢复游戏（ui_cancel=B/ESC由菜单导航器处理恢复）
 		# game_choice_prev/next：手柄LT/RT扳机（设置页切换标签页）；键盘Q/E同动作
 		"PAUSE_MENU": ["ui_", "game_interact", "game_pause", "game_choice_prev", "game_choice_next"],

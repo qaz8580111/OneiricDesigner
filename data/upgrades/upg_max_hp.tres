@@ -9,7 +9,7 @@ display_name = "梦境之心"
 description = "核心血量上限 +25（并立即治疗25点）"
 rarity = 0
 max_stacks = 5
-equip_slots = Array[int]([1, 2, 3, 5])
+equip_slots = Array[int]([0, 1, 2, 3, 5])
 stat_modifiers = {
 "max_hp_bonus": 25
 }

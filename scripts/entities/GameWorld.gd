@@ -29,7 +29,7 @@ const GameThemeClass = preload("res://scripts/resources/skin/GameTheme.gd")
 ## 神庙场景预加载（高级怪死亡后概率生成）
 const TEMPLE_SCENE: PackedScene = preload("res://scenes/gameplay/Temple.tscn")
 
-## 中央商店脚本预加载（5分钟后在竞技场中心生成，永久存在；纯脚本实例化，无.tscn）
+## 中央商店脚本预加载（游戏开始即在竞技场中心生成，永久存在；纯脚本实例化，无.tscn）
 const SHOP_SCRIPT = preload("res://scripts/entities/Shop.gd")
 
 ## 竞技场尺寸/碰撞层/边缘预警常量（墙坐标、刷怪钳制、红光距离的单一数据源）
@@ -89,11 +89,6 @@ var _enemy_pool_total_weight: float = 0.0
 ##          仅在 _spawn_enemy() 咽喉点拦截，切面自建实体（StageDirector 直接 add_child）不受影响
 var spawning_enabled: bool = true
 
-## ========== 中央商店配置 ==========
-
-## 商店出现时间（秒）：游戏进行满 5 分钟后在竞技场中心生成，之后永久存在不消失
-const SHOP_SPAWN_TIME: float = 300.0
-
 ## ========== 节点引用（使用 @onready 延迟初始化） ==========
 
 ## 玩家引用，用于传递给敌人生成时使用
@@ -144,11 +139,8 @@ var _pickups: Array[Area2D] = []
 ## 场景中所有神庙的管理列表（高级怪死亡概率生成，交互后消失）
 var _temples: Array[Area2D] = []
 
-## 中央商店节点（全局唯一，5分钟后生成，永久存在）
+## 中央商店节点（全局唯一，游戏开始即生成，永久存在）
 var _shop: Area2D = null
-
-## 商店是否已生成（防止每帧重复生成）
-var _shop_spawned: bool = false
 
 ## ========== 精英怪成员变量 ==========
 
@@ -209,6 +201,9 @@ func _ready() -> void:
 
 	## 代码生成暗角渐变纹理（常驻黑暗角 + 边界红色预警，无需任何美术资源）
 	_setup_vignette_textures()
+
+	## 生成中央商店（游戏开始即存在，永久保留；位于竞技场正中心）
+	_spawn_shop()
 
 ## ========== 主题背景应用（视差三层：纯色底 + 可选远景平铺图 + 1:1网格层） ==========
 
@@ -371,17 +366,6 @@ func _add_elite_drops() -> void:
 	fragment_drop.auto_adsorb = false
 	elite_enemy_data.drop_items.append(fragment_drop)
 
-	## 创建大型回血道具掉落（30%概率掉落；血包类型默认自动吸附，auto_adsorb=false 不改变类型默认）
-	var health_drop: DropItemClass = DropItemClass.new()
-	health_drop.item_id = "elite_health"
-	health_drop.item_name = "Large Health Pack"
-	health_drop.item_type = DropItemClass.ItemType.HEALTH
-	health_drop.value = 30
-	health_drop.drop_chance = 0.3
-	health_drop.is_rare = false
-	health_drop.auto_adsorb = false
-	elite_enemy_data.drop_items.append(health_drop)
-
 	## 装备掉落（15%概率）：精英怪奖励由旧"攻击增益书"升级为一件随机装备
 	## 装备系统统一承载四大成长维度，稀有度按掉落权重随机（稀有及以上触发稀有表现）
 	var equip_drop: DropItemClass = DropItemClass.new()
@@ -424,9 +408,6 @@ func _process(delta: float) -> void:
 
 	## 处理精英敌人生成
 	_spawn_elite_enemies(delta)
-
-	## 处理中央商店生成（5分钟后在竞技场中心生成一次）
-	_update_shop_spawn()
 
 	## 处理手动拾取输入（按E键拾取道具）
 	_handle_manual_pickup()
@@ -571,17 +552,8 @@ func _spawn_elite_enemies(delta: float) -> void:
 
 ## ========== 中央商店系统 ==========
 
-## 检测并生成中央商店（游戏满5分钟后一次性生成，之后永久存在不消失）
-## 时间源：RunStats.elapsed_time 仅在本局游戏进行中累计，暂停/菜单/结算期间自然冻结，
-##         因此"5分钟"严格等于实际战斗时长，符合需求且无需额外计时器
-func _update_shop_spawn() -> void:
-	if _shop_spawned:
-		return
-	if RunStats and RunStats.elapsed_time >= SHOP_SPAWN_TIME:
-		_shop_spawned = true
-		_spawn_shop()
-
 ## 生成中央商店：实例化纯脚本节点，置于竞技场正中心 Vector2.ZERO
+## 说明：游戏开始即在 _ready 中调用一次，之后永久存在不消失
 func _spawn_shop() -> void:
 	var shop: Area2D = SHOP_SCRIPT.new() as Area2D
 	add_child(shop)
@@ -1039,4 +1011,3 @@ func clear_all() -> void:
 	if _shop != null and is_instance_valid(_shop) and _shop.is_inside_tree():
 		_shop.queue_free()
 	_shop = null
-	_shop_spawned = false

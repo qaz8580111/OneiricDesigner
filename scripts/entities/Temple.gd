@@ -5,7 +5,7 @@
 ## 交互方式：玩家靠近后按E（GameWorld统一处理E键，优先级高于拾取物）→ 调用 interact(player)
 ## 进入规则：玩家进入神庙后游戏暂停（GameManager.pause_game），关闭面板后恢复
 ## 替换规则：新神庙出现时，未进入的旧神庙立即消散（GameWorld.spawn_temple → despawn）
-## 消失规则：玩家完成一次选项交互后，神庙伴随消散特效消失
+## 消失规则：玩家选定选项 → 应用效果 → 展示结果反馈 → 玩家确认后，神庙伴随消散特效消失
 ## 视觉方案：_draw()程序化绘制（石台+双柱+顶盖+发光宝石，脉冲呼吸），
 ##           与主题皮肤系统无关——神庙是场景物体不是角色
 ## 扩展性：选项完全数据驱动（扫描data/temple/*.tres），新增选项不改本文件
@@ -217,23 +217,45 @@ func _open_panel(player: Node = null) -> void:
 	## push自带0.2s屏蔽期，防止按E交互的同一次按键立刻选中选项（A/E/Space存在键位复用）
 	InputManager.push_context("TEMPLE_CHOICE")
 
-## 玩家选定选项后的处理：应用效果 → 消失
+## 玩家选定选项后的处理：应用效果 → 展示结果反馈（等待玩家确认后再收尾）
 ## 参数：option - 被选中的神庙选项
+## 设计意图：强化/融合等选项结果随机，必须让玩家看到"发生了什么"，
+##          故此处不立即关闭面板，而是把 option.get_result_message() 交给面板结果视图展示
 func _on_option_chosen(option: Resource) -> void:
-	## 关闭面板
-	_close_panel()
-
-	## 应用选项效果
+	## 应用选项效果（此时面板仍在，游戏仍暂停；结果文本由 option 写入自身）
 	var players: Array = get_tree().get_nodes_in_group("player")
 	var player: Node = players[0] if not players.is_empty() else null
 	var applied: bool = option.apply(player)
 
-	## 应用成功：播放音效+消散动画+销毁神庙
+	## 应用失败（无目标/碎片异常等）：按旧行为直接关闭面板，神庙保留可重新交互
+	if not applied:
+		_finish_choice(false)
+		return
+
+	## 应用成功：面板切到结果反馈视图，等待玩家确认后再收尾
+	if _panel != null and is_instance_valid(_panel) and _panel.has_method("show_result"):
+		_panel.result_confirmed.connect(_on_result_confirmed.bind(applied))
+		_panel.show_result(option.get_result_message())
+	else:
+		## 面板异常缺失：直接收尾，避免神庙卡在已交互状态
+		_finish_choice(applied)
+
+## 结果反馈确认回调（玩家读完反馈后确认关闭）
+## 参数：applied - 选项是否应用成功（由 _on_option_chosen 经 bind 透传）
+func _on_result_confirmed(applied: bool) -> void:
+	_finish_choice(applied)
+
+## 收尾：关闭面板（恢复战斗/注销上下文），成功则消散神庙、失败则重置交互状态
+## 参数：applied - 选项是否应用成功
+func _finish_choice(applied: bool) -> void:
+	## 关闭面板（内部同时恢复战斗、注销 TEMPLE_CHOICE 上下文）
+	_close_panel()
+	## 应用成功：播放音效 + 消散动画 + 销毁神庙
 	if applied:
 		if AudioManager:
 			AudioManager.play_2d("upgrade_pick", global_position, 0.9)
 		_vanish()
-	## 应用失败（如词条池为空）：神庙保留，可重新交互
+	## 应用失败（如无可强化目标）：神庙保留，可重新交互
 	else:
 		_interacted = false
 
