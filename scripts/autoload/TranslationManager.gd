@@ -108,7 +108,8 @@ var translations: Dictionary = {
 		"EQUIPMENT_BULK_COMMON": "分解全部普通",
 		"EQUIPMENT_BULK_RARE": "分解全部稀有",
 		"EQUIPMENT_BULK_CONFIRM": "再按一次确认 (%d)",
-		"EQUIPMENT_HINT": "A 穿戴 / 卸下 · B 返回",
+		## 底部操作提示：LT/RT（键盘Q/E）切页签；A 穿戴/卸下；按住 X 显示对比弹窗（松开消失）；B 返回
+		"EQUIPMENT_HINT": "LT/RT 切换页签 · A 穿戴 / 卸下 · 按住 X 对比 · B 返回",
 		## 装备对比弹窗（聚焦背包装备时，与同槽位已装备件对比差异）
 		"EQUIPMENT_COMPARE": "装备对比",
 		"EQUIPMENT_COMPARE_CURRENT": "当前",
@@ -236,7 +237,8 @@ var translations: Dictionary = {
 		"EQUIPMENT_BULK_COMMON": "Dismantle All Common",
 		"EQUIPMENT_BULK_RARE": "Dismantle All Rare",
 		"EQUIPMENT_BULK_CONFIRM": "Press Again to Confirm (%d)",
-		"EQUIPMENT_HINT": "A Equip / Unequip · B Back",
+		## Bottom hint: LT/RT (Keyboard Q/E) switch tab; A equip/unequip; hold X to compare; B back
+		"EQUIPMENT_HINT": "LT/RT Switch Tab · A Equip / Unequip · Hold X to Compare · B Back",
 		## 装备对比弹窗（英文）
 		"EQUIPMENT_COMPARE": "Compare",
 		"EQUIPMENT_COMPARE_CURRENT": "Current",

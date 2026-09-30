@@ -24,6 +24,9 @@ enum Direction { UP, DOWN, LEFT, RIGHT }
 ## 就地调值需要快速扫过量程（音量0~100每档5，慢间隔会让玩家等到不耐烦），
 ## 故此处用远小于 initial_delay 的间隔；普通焦点移动仍用 initial_delay，避免选项跳得过快
 @export var repeat_delay: float = 0.15
+## 无焦点可移动时，上下键直接滚动可见滚动容器的步长（像素）
+## 用于"纯文本页"（无可聚焦控件但内容超屏），如暂停菜单的状态页
+@export var scroll_step: int = 120
 
 # 当前管理的可聚焦控件列表（activate时递归收集，按场景树顺序排列）
 var focusable_controls: Array[Control] = []
@@ -150,6 +153,52 @@ func _set_focus(index: int) -> void:
 	current_index = clamp(index, 0, focusable_controls.size() - 1)
 	var control: Control = focusable_controls[current_index]
 	control.grab_focus()
+	## 滚动跟随：让新焦点自动滚入所在滚动容器的可视区（否则列表超屏时"选中项"跑到屏幕外）
+	## 延后一帧执行：切页/列表重建当帧控件尺寸尚未结算，立即滚动会按旧尺寸算错偏移
+	_scroll_control_into_view.call_deferred(control)
+
+## 把控件滚动到其最近 ScrollContainer 祖先的可视范围内（无滚动祖先时静默返回）
+func _scroll_control_into_view(control: Control) -> void:
+	if not is_instance_valid(control):
+		return
+	var scroll: ScrollContainer = _find_scroll_ancestor(control)
+	if scroll != null:
+		scroll.ensure_control_visible(control)
+
+## 从控件向上回溯，查找最近的 ScrollContainer 祖先（没有则返回 null）
+func _find_scroll_ancestor(control: Control) -> ScrollContainer:
+	var node: Node = control.get_parent()
+	while node != null:
+		if node is ScrollContainer:
+			return node as ScrollContainer
+		node = node.get_parent()
+	return null
+
+## 滚动当前可见的滚动容器（用于"有大段内容但没有任何可聚焦控件"的页面）
+## 场景：暂停菜单"状态"页整页为纯文本 Label，导航列表里只有面板外的返回按钮，
+##       上下键无焦点可移动，此时改为直接滚动该页的 ScrollContainer，保证内容可查阅
+## 返回：true=本次输入已被滚动消费
+func _scroll_visible_region(direction: Direction) -> bool:
+	if _parent == null or (direction != Direction.UP and direction != Direction.DOWN):
+		return false
+	var scroll: ScrollContainer = _find_visible_scroll_container(_parent)
+	if scroll == null:
+		return false
+	var step: int = scroll_step if direction == Direction.DOWN else -scroll_step
+	## scroll_vertical 内置钳制，越界赋值会被自动收敛到合法范围
+	scroll.scroll_vertical += step
+	return true
+
+## 深度优先查找父节点下第一个"树内有效可见"的 ScrollContainer
+## 必须用 is_visible_in_tree()：TabContainer 隐藏页内的滚动容器不可见，须跳过
+func _find_visible_scroll_container(node: Node) -> ScrollContainer:
+	for child in node.get_children():
+		if child is ScrollContainer and (child as ScrollContainer).is_visible_in_tree():
+			return child as ScrollContainer
+		var found: ScrollContainer = _find_visible_scroll_container(child)
+		if found != null:
+			return found
+	return null
 
 ## 视口焦点变化回调：把 current_index 同步为实际获得焦点的控件索引
 ## 触发来源：鼠标点击控件、切页、其他界面主动 grab_focus
@@ -162,9 +211,10 @@ func _on_viewport_gui_focus_changed(control: Control) -> void:
 		current_index = idx
 
 ## 移动焦点：按屏幕几何方向寻找最近控件（而非简单索引±1），贴合视觉布局
-func _move_focus(direction: Direction) -> void:
+## 返回：true=焦点确实发生了移动
+func _move_focus(direction: Direction) -> bool:
 	if focusable_controls.is_empty():
-		return
+		return false
 
 	var old_index: int = current_index
 	var current: Control = focusable_controls[current_index]
@@ -181,6 +231,17 @@ func _move_focus(direction: Direction) -> void:
 	
 	if current_index != old_index and current_index >= 0:
 		_set_focus(current_index)
+		return true
+	return false
+
+## 上下方向输入的统一分发：优先移动焦点；无处可移动时退化为滚动当前可见区域
+## 设计意图：状态页等"纯文本内容页"没有可聚焦控件，导航列表里通常只剩面板外的返回按钮，
+##           若只做焦点移动则内容永远滚不动——此处补上直接滚动，保证长文本可翻阅
+## 返回：true=本次输入已被消费
+func _handle_vertical_navigation(direction: Direction) -> bool:
+	if _move_focus(direction):
+		return true
+	return _scroll_visible_region(direction)
 
 ## 在指定方向上查找最近的控件
 ## 参数：from - 当前焦点控件，direction - 单位方向向量
@@ -329,7 +390,7 @@ func _process(delta: float) -> void:
 			if in_place:
 				_adjust_current_value(current_direction)
 			else:
-				_move_focus(current_direction)
+				_handle_vertical_navigation(current_direction)
 		else:
 			## 同方向持续按住：累计时间，超过阈值后进入连发
 			_joystick_hold_time += delta
@@ -337,7 +398,7 @@ func _process(delta: float) -> void:
 				if in_place:
 					_adjust_current_value(current_direction)
 				else:
-					_move_focus(current_direction)
+					_handle_vertical_navigation(current_direction)
 				_joystick_hold_time = 0.0
 	else:
 		## 摇杆回中：清空状态，下次拨动视为全新输入
@@ -352,11 +413,11 @@ func _unhandled_input(_event: InputEvent) -> void:
 
 	# 使用 InputManager 安全检测输入
 	if InputManager.is_action_just_pressed_safe("ui_up"):
-		_move_focus(Direction.UP)
+		_handle_vertical_navigation(Direction.UP)
 		get_viewport().set_input_as_handled()
 		
 	elif InputManager.is_action_just_pressed_safe("ui_down"):
-		_move_focus(Direction.DOWN)
+		_handle_vertical_navigation(Direction.DOWN)
 		get_viewport().set_input_as_handled()
 		
 	elif InputManager.is_action_just_pressed_safe("ui_left"):

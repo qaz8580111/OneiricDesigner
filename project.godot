@@ -97,6 +97,16 @@ ui_confirm={
 , Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":0,"button_index":0,"pressure":0.0,"pressed":false,"script":null)
 ]
 }
+; ui_compare=按住显示"背包装备 vs 同槽位已装备"对比弹窗，松开即消失（暂停菜单状态与装备面板内）。
+; 键盘X(physical_keycode=88)/手柄X键(Godot4 JOY_BUTTON_X=2)。
+; 说明：手柄X虽在 GAMEPLAY 上下文绑定 game_shoot，但 PAUSE_MENU 上下文不放行 game_shoot，
+;       同一物理键在"同一上下文内"仍只映射一个语义动作，符合输入架构规范第2.1节
+ui_compare={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":88,"key_label":0,"unicode":120,"location":0,"echo":false,"script":null)
+, Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":0,"button_index":2,"pressure":0.0,"pressed":false,"script":null)
+]
+}
 game_move_left={
 "deadzone": 0.2,
 "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":0,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":65,"key_label":0,"unicode":97,"location":0,"echo":false,"script":null)

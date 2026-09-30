@@ -63,13 +63,14 @@ var _player_panel: Control = null
 ## 合并面板标题标签
 var _player_panel_title_label: Label = null
 
-## 左栏"状态"栏标题标签（语言切换时需更新）
-var _status_header_label: Label = null
+## 双子页容器（页签0=状态，页签1=背包）
+## 键鼠点击页签切页；手柄 LT/RT 由 _process 轮询 game_choice_prev/next 修改 current_tab
+var _player_tabs: TabContainer = null
 
 ## 状态行容器（核心血/属性/技能/护盾逐行展示）
 var _status_rows: VBoxContainer = null
 
-## 右栏"已装备"栏标题标签（语言切换时需更新）
+## "已装备"栏标题标签（语言切换时需更新）
 var _equipment_slots_header: Label = null
 
 ## 已装备槽位列表容器（6 个槽位各一个按钮；已装备的可点击卸下）
@@ -108,13 +109,19 @@ var _equipment_hint_label: Label = null
 ## 合并面板返回按钮
 var _player_panel_back_button: Button = null
 
-## ========== 装备对比弹窗（聚焦背包装备时，与同槽位已装备件对比差异） ==========
+## ========== 装备对比弹窗（按住对比键时，展示"聚焦的背包装备 vs 同槽位已装备件"） ==========
 
-## 对比弹窗根容器（浮层，默认隐藏；鼠标/手柄聚焦背包装备且同槽位有已装备件时显示）
+## 对比弹窗根容器（浮层，默认隐藏；按住 ui_compare 键且焦点在背包装备上时显示）
 var _compare_panel: PanelContainer = null
 
 ## 对比弹窗内容容器（每次显示时清空重建；仅放 Label，不含 Button，避免抢导航焦点）
 var _compare_rows: VBoxContainer = null
+
+## 当前可作为对比候选的背包装备（焦点/悬停落在背包条目上时记录；落在已装备槽位/按钮上时置空）
+var _focused_compare_candidate: EquipmentData = null
+
+## 当前弹窗正在展示的候选件（用于避免每帧清空重建：候选未变则复用已生成的内容）
+var _compare_shown_candidate: EquipmentData = null
 
 ## ========== 生命周期方法 ==========
 
@@ -153,6 +160,60 @@ func _exit_tree() -> void:
 	if _navigator != null:
 		_navigator.deactivate()
 
+## _process() - 合并面板打开期间轮询"切页"与"按住对比"两类持续输入
+## 设计意图：暂停菜单在暂停状态下仍运行（PROCESS_MODE_ALWAYS），故这两类输入无法走
+##           _unhandled_input 的"事件驱动"路径（扳机轴与"按住不放"都只体现为状态而非单次事件），
+##           统一在 _process 里轮询；面板未打开时首帧即 return，零开销
+func _process(_delta: float) -> void:
+	## 必须判"树内可见"而非仅判面板自身：暂停菜单整体隐藏（游戏中）时本节点仍在 ALWAYS 模式下运行，
+	## 若继续轮询会提前消费 game_choice_prev/next，导致游戏内"主动技能切换"收不到该输入
+	if not is_visible_in_tree():
+		return
+	if _player_panel == null or not _player_panel.visible:
+		return
+	_handle_tab_switch_input()
+	_update_compare_hold()
+
+## 手柄 LT/RT（键盘 Q/E）循环切换"状态 / 背包"页签
+## 说明：LT/RT 由 InputManager 做轴越阈边沿检测后转为 game_choice_prev/next 动作，
+##       与设置界面切页共用同一套映射与手感；切页成功才播点击音
+func _handle_tab_switch_input() -> void:
+	if _player_tabs == null:
+		return
+	var tab_count: int = _player_tabs.get_tab_count()
+	if tab_count <= 0:
+		return
+	if InputManager and InputManager.is_action_just_pressed_safe("game_choice_next"):
+		## RT：下一页（右循环，最后一页 → 回第一页）
+		_player_tabs.current_tab = (_player_tabs.current_tab + 1) % tab_count
+		if AudioManager:
+			AudioManager.play("ui_click", 0.5)
+	elif InputManager and InputManager.is_action_just_pressed_safe("game_choice_prev"):
+		## LT：上一页（左循环，第一页 → 回最后一页）
+		_player_tabs.current_tab = (_player_tabs.current_tab - 1 + tab_count) % tab_count
+		if AudioManager:
+			AudioManager.play("ui_click", 0.5)
+
+## 页签切换回调（tab_changed）：刷新导航器可聚焦控件列表
+## 鼠标点击与 LT/RT 触发两条切页路径都会走到这里，故刷新逻辑只写一处
+## 必要性：隐藏页的控件仍在场景树中但 is_visible_in_tree() 为 false，导航列表必须重建，
+##         否则焦点会落进看不见的页（手柄表现为"导航到空白处、按A没反应"）
+func _on_player_tab_changed(_tab_index: int) -> void:
+	if _navigator != null and _navigator.has_method("refresh_controls"):
+		_navigator.refresh_controls()
+
+## 按住对比键（手柄/键盘 X）时展示装备对比弹窗，松开即收起
+## 说明：需求要求"按住才出现"，故不能再用 focus_entered 的瞬时触发；
+##       此处每帧检查按住状态，仅在候选件发生变化时才重建内容（避免每帧清空重建导致闪烁）
+func _update_compare_hold() -> void:
+	var holding: bool = InputManager != null and InputManager.is_action_pressed_safe("ui_compare")
+	if not holding or _focused_compare_candidate == null:
+		_hide_equip_compare()
+		return
+	if _compare_shown_candidate == _focused_compare_candidate:
+		return
+	_show_equip_compare(_focused_compare_candidate)
+
 ## ========== 界面文本更新方法 ==========
 
 ## 更新界面文本（支持多语言）
@@ -162,11 +223,13 @@ func _update_text() -> void:
 	settings_button.text = TranslationManager.t("BUTTON_SETTINGS")
 	player_panel_button.text = TranslationManager.t("BUTTON_PLAYER_PANEL")
 	quit_button.text = TranslationManager.t("BUTTON_QUIT_TO_MENU")
-	## 合并面板固定文本（左右栏标题/底部提示/返回按钮；列表内文本由数据驱动，在刷新时生成）
+	## 合并面板固定文本（页签标题/列标题/底部提示/返回按钮；列表内文本由数据驱动，在刷新时生成）
 	if _player_panel_title_label != null:
 		_player_panel_title_label.text = TranslationManager.t("PLAYER_PANEL_TITLE")
-	if _status_header_label != null:
-		_status_header_label.text = TranslationManager.t("STATUS_TITLE")
+	## 页签标题：TabContainer 默认取子节点名，此处用翻译 key 覆盖（切语言时同步生效）
+	if _player_tabs != null:
+		_player_tabs.set_tab_title(0, TranslationManager.t("STATUS_TITLE"))
+		_player_tabs.set_tab_title(1, TranslationManager.t("EQUIPMENT_BACKPACK"))
 	if _equipment_slots_header != null:
 		_equipment_slots_header.text = TranslationManager.t("EQUIPMENT_SLOTS")
 	if _fragment_header_label != null:
@@ -222,9 +285,11 @@ func _on_navigator_cancel() -> void:
 	else:
 		_on_resume_button_pressed()
 
-## 构建"状态 + 装备/背包"合并面板（纯代码UI，隐藏在主菜单之后，点击状态与装备按钮时显示）
-## 结构：PlayerPanel(Control) → Title + Body(HBox[状态列, 装备列]) + Hint + BackButton
-##       左栏"状态"=核心血/属性/技能/护盾；右栏"装备"=已装备6槽 + 背包列表（同一滚动区内上下排列）
+## 构建"状态 + 背包"合并面板（纯代码UI，隐藏在主菜单之后，点击状态与装备按钮时显示）
+## 结构：PlayerPanel(Control) → Title + Tabs(TabContainer[页签0=状态, 页签1=背包]) + Hint + BackButton
+##       页签0"状态"=核心血/属性/技能/护盾（纯文本行，整页可滚动）
+##       页签1"背包"= HBox[左列(碎片 + 已装备6槽), 右列(容量 + 一键分解 + 背包列表)]，两列各自独立滚动
+## 切页方式：键鼠点击页签，手柄 LT/RT（或键盘 Q/E，同映射 game_choice_prev/next）
 func _build_player_panel() -> void:
 	_player_panel = Control.new()
 	_player_panel.name = "PlayerPanel"
@@ -247,41 +312,30 @@ func _build_player_panel() -> void:
 	_player_panel_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_player_panel.add_child(_player_panel_title_label)
 
-	## 两栏主体（左栏=状态，右栏=装备/背包；viewport 1920x1280 下取 1240x750 居中）
-	var body := HBoxContainer.new()
-	body.name = "PlayerPanelBody"
-	body.anchor_left = 0.5
-	body.anchor_right = 0.5
-	body.anchor_top = 0.5
-	body.anchor_bottom = 0.5
-	body.offset_left = -620.0
-	body.offset_right = 620.0
-	body.offset_top = -410.0
-	body.offset_bottom = 340.0
-	body.add_theme_constant_override("separation", 28)
-	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_player_panel.add_child(body)
+	## 双子页容器（viewport 1920x1280 下取 1240x740 居中）
+	_player_tabs = TabContainer.new()
+	_player_tabs.name = "PlayerTabs"
+	_player_tabs.anchor_left = 0.5
+	_player_tabs.anchor_right = 0.5
+	_player_tabs.anchor_top = 0.5
+	_player_tabs.anchor_bottom = 0.5
+	_player_tabs.offset_left = -620.0
+	_player_tabs.offset_right = 620.0
+	_player_tabs.offset_top = -400.0
+	_player_tabs.offset_bottom = 340.0
+	## 必须保持可点击：键鼠玩家靠鼠标点击页签切页（设 IGNORE 会让页签点不动）
+	_player_tabs.mouse_filter = Control.MOUSE_FILTER_PASS
+	## 切页后必须重建导航焦点列表：隐藏页控件要移出、新页控件要收进来，
+	## 否则焦点会停在看不见的控件上（手柄表现为"导航到空白处"）
+	_player_tabs.tab_changed.connect(_on_player_tab_changed)
+	_player_panel.add_child(_player_tabs)
 
-	## ---------------------- 左栏：状态 ----------------------
-	var left := VBoxContainer.new()
-	left.name = "StatusColumn"
-	left.custom_minimum_size = Vector2(500.0, 0.0)
-	left.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left.add_theme_constant_override("separation", 8)
-	body.add_child(left)
-
-	_status_header_label = Label.new()
-	_status_header_label.add_theme_font_size_override("font_size", 20)
-	_status_header_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
-	_status_header_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	_status_header_label.add_theme_constant_override("outline_size", 3)
-	left.add_child(_status_header_label)
-
+	## ---------------------- 页签0：状态 ----------------------
+	## 页内为纯文本行、没有任何可聚焦控件；手柄上下键由导航器降级为直接滚动本页
 	var status_scroll := ScrollContainer.new()
 	status_scroll.name = "StatusScroll"
-	status_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	status_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	left.add_child(status_scroll)
+	_player_tabs.add_child(status_scroll)
 
 	_status_rows = VBoxContainer.new()
 	_status_rows.name = "StatusRows"
@@ -289,38 +343,38 @@ func _build_player_panel() -> void:
 	_status_rows.add_theme_constant_override("separation", 8)
 	status_scroll.add_child(_status_rows)
 
-	## ---------------------- 右栏：已装备 + 背包 ----------------------
-	## 说明：两段共用同一个 ScrollContainer（而非嵌套两个滚动容器），避免滚轮事件互相抢占
-	var right := VBoxContainer.new()
-	right.name = "EquipmentColumn"
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_theme_constant_override("separation", 8)
-	body.add_child(right)
+	## ---------------------- 页签1：背包（已装备 | 背包 左右分栏） ----------------------
+	## 设计意图：拆成两个页签后纵向空间全部让给列表，已装备与背包改左右并排，
+	##           两列各自独立滚动，可视行数约为原上下堆叠时的两倍
+	var bag_page := VBoxContainer.new()
+	bag_page.name = "BackpackPage"
+	bag_page.add_theme_constant_override("separation", 8)
+	_player_tabs.add_child(bag_page)
 
-	var right_scroll := ScrollContainer.new()
-	right_scroll.name = "EquipmentScroll"
-	right_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	right.add_child(right_scroll)
+	var split := HBoxContainer.new()
+	split.name = "BackpackSplit"
+	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	split.add_theme_constant_override("separation", 28)
+	bag_page.add_child(split)
 
-	var right_box := VBoxContainer.new()
-	right_box.name = "EquipmentStack"
-	right_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_box.add_theme_constant_override("separation", 8)
-	right_scroll.add_child(right_box)
+	## ---------- 左列：装备碎片 + 已装备 6 槽位 ----------
+	var left_col := VBoxContainer.new()
+	left_col.name = "EquippedColumn"
+	left_col.custom_minimum_size = Vector2(430.0, 0.0)
+	left_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left_col.add_theme_constant_override("separation", 8)
+	split.add_child(left_col)
 
-	## 右栏最上段：装备碎片（按 6 槽位展示分解累计的碎片数）
-	## 设计意图：碎片是「分解装备」的产物、也是「合成装备」的消耗，放在装备栏顶部可与下方背包
-	##           形成"分解 → 碎片增长"的即时反馈闭环，玩家无需再切到商店页签查看存量
-	var fragment_header := Label.new()  # 分组标题（样式与其它分组标题一致）
-	fragment_header.text = TranslationManager.t("EQUIPMENT_FRAGMENTS")
-	fragment_header.add_theme_font_size_override("font_size", 20)
-	fragment_header.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
-	fragment_header.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	fragment_header.add_theme_constant_override("outline_size", 3)
-	right_box.add_child(fragment_header)
-	_fragment_header_label = fragment_header
+	## 左列最上段：装备碎片（按 6 槽位展示分解累计的碎片数）
+	## 设计意图：碎片是「分解装备」的产物、也是「合成装备」的消耗，与左列槽位同屏可与
+	##           下方背包形成"分解 → 碎片增长"的即时反馈闭环，玩家无需再切到商店页签查看存量
+	_fragment_header_label = Label.new()
+	_fragment_header_label.text = TranslationManager.t("EQUIPMENT_FRAGMENTS")
+	_fragment_header_label.add_theme_font_size_override("font_size", 20)
+	_fragment_header_label.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
+	_fragment_header_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	_fragment_header_label.add_theme_constant_override("outline_size", 3)
+	left_col.add_child(_fragment_header_label)
 
 	## 碎片数值网格：3 列 × 2 行，恰好放下 6 个槽位（顺序与 EquipmentData.Slot / SLOT_TEXTS 对齐）
 	var fragment_grid := GridContainer.new()
@@ -328,7 +382,7 @@ func _build_player_panel() -> void:
 	fragment_grid.columns = 3
 	fragment_grid.add_theme_constant_override("h_separation", 16)
 	fragment_grid.add_theme_constant_override("v_separation", 6)
-	right_box.add_child(fragment_grid)
+	left_col.add_child(fragment_grid)
 
 	_fragment_value_labels.clear()
 	for slot in range(SLOT_TEXTS.size()):
@@ -338,27 +392,41 @@ func _build_player_panel() -> void:
 		fragment_grid.add_child(frag_label)
 		_fragment_value_labels.append(frag_label)
 
-	## 右栏上段：已装备 6 槽位
+	## 左列下段：已装备 6 槽位（独立滚动区；手柄焦点移出可视区时自动滚动跟随）
 	_equipment_slots_header = Label.new()
 	_equipment_slots_header.add_theme_font_size_override("font_size", 20)
 	_equipment_slots_header.add_theme_color_override("font_color", Color(0.9, 0.85, 0.4))
 	_equipment_slots_header.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
 	_equipment_slots_header.add_theme_constant_override("outline_size", 3)
-	right_box.add_child(_equipment_slots_header)
+	left_col.add_child(_equipment_slots_header)
+
+	var slots_scroll := ScrollContainer.new()
+	slots_scroll.name = "EquipmentScroll"
+	slots_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slots_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	slots_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left_col.add_child(slots_scroll)
 
 	_equipment_slots_box = VBoxContainer.new()
 	_equipment_slots_box.name = "EquipmentSlotsBox"
 	_equipment_slots_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_equipment_slots_box.add_theme_constant_override("separation", 8)
-	right_box.add_child(_equipment_slots_box)
+	slots_scroll.add_child(_equipment_slots_box)
 
-	## 右栏下段：背包头部行（容量提示 + 一键分解按钮）+ 背包列表
+	## ---------- 右列：背包（容量提示 + 一键分解 + 列表） ----------
 	## 设计说明：一键分解原在商店面板，操作对象却是背包内容，语义与场景都不匹配；
-	##           移到背包头部行后「看背包 → 一键清理」在同一屏完成，无需再进商店
+	##           移到背包列头部后「看背包 → 一键清理」在同一屏完成，无需再进商店
+	var right_col := VBoxContainer.new()
+	right_col.name = "BackpackColumn"
+	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_col.add_theme_constant_override("separation", 8)
+	split.add_child(right_col)
+
 	var backpack_header := HBoxContainer.new()
 	backpack_header.name = "EquipmentBackpackHeader"
 	backpack_header.add_theme_constant_override("separation", 8)
-	right_box.add_child(backpack_header)
+	right_col.add_child(backpack_header)
 
 	_equipment_capacity_label = Label.new()
 	_equipment_capacity_label.add_theme_font_size_override("font_size", 20)
@@ -391,11 +459,19 @@ func _build_player_panel() -> void:
 	_bulk_confirm_timer.timeout.connect(_on_bulk_confirm_tick)
 	add_child(_bulk_confirm_timer)
 
+	## 背包列表独立滚动区（手柄焦点移出可视区时自动滚动跟随）
+	var bag_scroll := ScrollContainer.new()
+	bag_scroll.name = "BackpackScroll"
+	bag_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bag_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	bag_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	right_col.add_child(bag_scroll)
+
 	_equipment_backpack_box = VBoxContainer.new()
 	_equipment_backpack_box.name = "EquipmentBackpackBox"
 	_equipment_backpack_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_equipment_backpack_box.add_theme_constant_override("separation", 8)
-	right_box.add_child(_equipment_backpack_box)
+	bag_scroll.add_child(_equipment_backpack_box)
 
 	## 底部操作提示（返回按钮上方，居中）
 	_equipment_hint_label = Label.new()
@@ -425,8 +501,8 @@ func _build_player_panel() -> void:
 	_player_panel_back_button.pressed.connect(_on_player_panel_back_pressed)
 	_player_panel.add_child(_player_panel_back_button)
 
-	## 装备对比弹窗（浮层）：默认隐藏，聚焦背包装备且同槽位已有已装备件时显示
-	## 位置：屏幕左侧竖向居中（覆盖状态栏区域，属于临时浮层；不聚焦装备时自动隐藏）
+	## 装备对比弹窗（浮层）：默认隐藏，按住对比键且聚焦背包装备、同槽位已有已装备件时显示
+	## 位置：屏幕左侧竖向居中（属于临时浮层，不占用主体布局；松开对比键或焦点离开背包装备即隐藏）
 	_compare_panel = PanelContainer.new()
 	_compare_panel.name = "EquipmentComparePanel"
 	_compare_panel.anchor_left = 0.0
@@ -462,13 +538,17 @@ func _build_player_panel() -> void:
 	_compare_rows.add_theme_constant_override("separation", 6)
 	compare_scroll.add_child(_compare_rows)
 
-## 打开合并面板：隐藏主菜单按钮、刷新状态与装备两侧内容、重建导航焦点
+## 打开合并面板：隐藏主菜单按钮、刷新状态与背包两侧内容、重建导航焦点
+## 每次打开都回到"状态"页签并清空对比候选，保证每次进入的起始状态一致（不残留上次的页签/浮层）
 func _open_player_panel() -> void:
 	if _player_panel == null:
 		return
 	$VBoxContainer.visible = false
 	_player_panel.visible = true
+	_focused_compare_candidate = null
 	_hide_equip_compare()
+	if _player_tabs != null:
+		_player_tabs.current_tab = 0
 	_refresh_status_list()
 	_refresh_equipment_panel()
 	## 焦点列表刷新：隐藏的主菜单按钮不再可聚焦，仅面板内可交互控件参与导航
@@ -479,6 +559,7 @@ func _open_player_panel() -> void:
 func _close_player_panel() -> void:
 	if _player_panel == null:
 		return
+	_focused_compare_candidate = null
 	_hide_equip_compare()
 	## 关闭面板即撤销未完成的二次确认，避免下次打开时残留"再按一次确认"状态
 	_clear_bulk_confirm()
@@ -946,7 +1027,8 @@ func _get_player() -> Node:
 func _refresh_equipment_panel() -> void:
 	if _equipment_slots_box == null or _equipment_backpack_box == null:
 		return
-	## 列表即将重建，原聚焦的按钮会被销毁 → 先收起对比弹窗，避免残留旧数据的浮层
+	## 列表即将重建，原聚焦的按钮会被销毁 → 先清空对比候选并收起弹窗，避免残留旧（已释放）装备引用
+	_focused_compare_candidate = null
 	_hide_equip_compare()
 	## 清空旧内容：先 remove_child 立即脱离容器（本帧即消失，避免新旧重叠），再 queue_free() 帧末释放。
 	## 关键：穿戴/卸下是由被点击的那个按钮自己 emit 的 pressed 触发的，此时该按钮被 Godot 锁定，
@@ -1137,16 +1219,25 @@ func _build_backpack_button_text(data: EquipmentData) -> String:
 
 ## ========== 装备对比弹窗：展示"背包装备 vs 同槽位已装备件"的差异 ==========
 
-## 装备条目获得焦点/鼠标悬停回调：仅背包装备需要对比，已装备槽位只收起弹窗
+## 装备条目获得焦点/鼠标悬停回调：只记录"对比候选"，不直接弹窗
 ## 参数：data - 该条目对应的装备（可能为 null，如空槽）；from_backpack - true=背包条目
+## 设计意图：需求要求"按住对比键才显示"，故此处仅登记候选件；
+##           弹窗的显隐由 _update_compare_hold() 按按住状态统一驱动
+##           聚焦已装备槽位（from_backpack=false）或空槽 → 无对比意义，清空候选并收起弹窗
 func _on_equipment_button_focused(data: EquipmentData, from_backpack: bool) -> void:
 	if not from_backpack or data == null:
+		_focused_compare_candidate = null
 		_hide_equip_compare()
 		return
-	_show_equip_compare(data)
+	_focused_compare_candidate = data
+	## 候选已变：若此刻正按住对比键，立即重建内容（否则等松开再按才刷新，手感滞后）
+	if _compare_panel != null and _compare_panel.visible:
+		_hide_equip_compare()
 
 ## 收起对比弹窗（不清内容，下次显示时整体重建；弹窗隐藏后不占用视觉）
 func _hide_equip_compare() -> void:
+	## 同步复位"已展示候选"，否则下次按住对比键时会因候选相同而误判为"内容没变"、不重建
+	_compare_shown_candidate = null
 	if _compare_panel != null:
 		_compare_panel.visible = false
 
@@ -1211,6 +1302,8 @@ func _show_equip_compare(candidate: EquipmentData) -> void:
 		_add_compare_text(TranslationManager.t("STATUS_NONE"), 14, Color(0.7, 0.7, 0.7))
 
 	_compare_panel.visible = true
+	## 记录"本帧展示的候选件"：_update_compare_hold() 借此判断内容是否已同步，避免每帧清空重建
+	_compare_shown_candidate = candidate
 
 ## 取指定槽位当前已装备件
 ## 参数：slot - 槽位（EquipmentData.Slot）

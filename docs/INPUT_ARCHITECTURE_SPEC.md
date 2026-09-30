@@ -126,6 +126,9 @@ AI 在本项目中还需额外遵守：
 -   **装备主动技能键（`game_skill`）**: 装备化后弹道构型成为武器/戒指/法宝槽的**主动技能**，新增输入动作 `game_skill`（键盘 + 手柄各一套绑定，已登记 `InputManager` 白名单与 `GAMEPLAY` 上下文）。释放入口**只允许**在 `Player._update_active_skill()` 内经 `InputManager.is_action_just_pressed_safe("game_skill")` 读取；冷却由 `Player` 内部计时，冷却中按下不产生任何效果。
 -   **手动拾取单一入口**: 非自动吸附掉落物（`EQUIPMENT` 装备、`WEAPON` 武器、`ITEM` 物品）的交互键轮询**只允许**在 `GameWorld._handle_manual_pickup()`（神庙优先级 > 拾取，就近拾取不按类型过滤，每物理帧一次）。`PickUp._physics_process` 只负责自动吸附位移，禁止再自行轮询 `game_interact`——双入口竞争同一个"读取即消费"的按下缓存，执行顺序不确定还会吞掉神庙交互。
 -   **自动吸附判定唯一来源**: 是否自动吸附以 `DropItem.get_auto_adsorb()` 为准（`DREAM_FRAGMENT`/`HEALTH`=true；`WEAPON`/`ITEM`/`EQUIPMENT`=false）。注意导出字段 `auto_adsorb=true` 会**强制覆盖**类型默认值，配置 `.tres` 时手动拾取物切勿误置。
+-   **暂停菜单页签切换（LT/RT）**: 暂停菜单「状态 / 背包」为 `TabContainer` 两页签。手柄 LT/RT 与键盘 Q/E 复用 `game_choice_prev` / `game_choice_next`（`PAUSE_MENU` 上下文已放行），由 `PauseMenu._process` 轮询 `is_action_just_pressed_safe()` 循环切页；键鼠点击页签走同一 `tab_changed` 回调。页签子节点须为 `Control`，且容器 `mouse_filter` **不得**设为 `IGNORE`（否则页签点不动）。
+-   **装备对比弹窗（`ui_compare`，按住生效）**: 暂停菜单内新增 UI 动作 `ui_compare`（键盘 X + 手柄 X）。语义为**按住显示、松开消失**，故读取入口**只允许**在 `PauseMenu._update_compare_hold()` 内经 `InputManager.is_action_pressed_safe("ui_compare")`；**禁止**用 `focus_entered` 即时弹窗（会"一聚焦就遮挡列表"）。手柄 X 在 `GAMEPLAY` 绑定 `game_shoot`，但 `PAUSE_MENU` 不放行 `game_shoot`，同一物理键在同一上下文内仍只映射一个语义动作，符合 2.1 节键位语义独占。
+-   **手柄导航滚动跟随**: `ScrollContainer` 不会自动跟随焦点，`MenuNavigator._set_focus()` 必须用 `call_deferred` 调 `ScrollContainer.ensure_control_visible()` 把新焦点滚入可视区（延后一帧避开布局尚未结算）；页内没有任何可聚焦控件时（如暂停菜单「状态」页），`_handle_vertical_navigation()` 应降级为直接滚动当前可见的滚动容器，否则长内容永远翻不动。
 
 ## 6. AI 响应模板
 
